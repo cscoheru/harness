@@ -132,21 +132,30 @@ CREATE INDEX idx_audit_actor ON audit_log(actor, recorded_at);
 -- ==================== APPROVALS ====================
 -- Approval supersede chain (Q111): a new approval can replace old one ONLY when
 -- old.status = 'unknown'; new approval MUST reference new attempt + new policy decision.
+-- Approvals: each approval may be superseded by AT MOST ONE child approval
+-- (single-consumption). Combined with the atomic UPDATE on old status below,
+-- this makes supersede single-consumer (P0-M2 fix).
 CREATE TABLE approvals (
     approval_id              TEXT PRIMARY KEY,
     task_id                  TEXT NOT NULL,
     attempt_id               TEXT NOT NULL,
     policy_decision_id       TEXT NOT NULL,
     status                   TEXT NOT NULL CHECK (status IN (
-                                'pending', 'approved', 'rejected', 'unknown', 'expired'
+                                'pending', 'approved', 'rejected', 'unknown', 'expired', 'consumed'
                               )),
     requested_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     decided_at               TEXT,
     decided_by               TEXT,
     decision_reason          TEXT,
     supersedes_approval_id   TEXT,             -- non-null when superseding
-    FOREIGN KEY (task_id, attempt_id) REFERENCES task_attempts(task_id, attempt_id)
+    FOREIGN KEY (task_id, attempt_id) REFERENCES task_attempts(task_id, attempt_id),
+    FOREIGN KEY (supersedes_approval_id) REFERENCES approvals(approval_id)
 );
+
+-- Each old approval can be superseded by at most one child.
+CREATE UNIQUE INDEX idx_approvals_one_child
+    ON approvals(supersedes_approval_id)
+    WHERE supersedes_approval_id IS NOT NULL;
 
 CREATE INDEX idx_approvals_task ON approvals(task_id, status);
 CREATE INDEX idx_approvals_supersedes ON approvals(supersedes_approval_id) WHERE supersedes_approval_id IS NOT NULL;
@@ -175,7 +184,12 @@ CREATE TABLE blobs (
     storage_class    TEXT NOT NULL DEFAULT 'local_fs' CHECK (storage_class IN ('local_fs', 's3', 'memory')),
     storage_uri      TEXT NOT NULL,             -- path or s3 URI
     content_type     TEXT,                      -- MIME; null for opaque
-    trust_label      TEXT NOT NULL,             -- trust classification at ingest time
+    trust_label      TEXT NOT NULL CHECK (trust_label IN (
+                        'trusted_user_input',
+                        'untrusted_external',
+                        'model_generated',
+                        'internal_secret'
+                      )),
     created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     redacted_at      TEXT,                      -- when blob was redacted
     redaction_version INTEGER
@@ -207,24 +221,26 @@ CREATE INDEX idx_links_artifact ON task_links(artifact_id);
 CREATE INDEX idx_links_task_role ON task_links(task_id, role);
 
 -- ==================== KERNEL INVARIANTS (enforced at SQL layer where possible) ====================
--- Invariant I1: attempt.fence_version >= task.fence_version at insert.
--- attempt holds the task fence at the moment of insert. After that, task fence
--- can be bumped independently (each state transition bumps), but attempts keep
--- their snapshot. This makes optimistic-concurrency predicates on attempts stable.
+-- Invariant I1: attempt.fence_version MUST equal task.fence_version at insert
+-- (strict equality, not >=). Any mismatch is rejected.
+-- This closes the P0-2 oversized-fence regression Codex reproduced in v0.7.
 
 CREATE TRIGGER trg_attempt_fence_insert
 BEFORE INSERT ON task_attempts
 FOR EACH ROW
-WHEN NEW.fence_version < (
+WHEN NEW.fence_version != (
     SELECT fence_version FROM tasks WHERE task_id = NEW.task_id
 )
 BEGIN
-    SELECT RAISE(ABORT, 'attempt.fence_version must be >= task.fence_version at insert');
+    SELECT RAISE(ABORT, 'attempt.fence_version must EQUAL task.fence_version at insert (got attempt=' || NEW.fence_version || ' task=' || (SELECT fence_version FROM tasks WHERE task_id = NEW.task_id) || ')');
 END;
 
 -- Invariant I3: terminal task cannot transition back to non-terminal.
 -- 'failed' is NOT terminal here: failed tasks may be retried (claim() permits it).
 -- Truly terminal statuses: succeeded, canceled, abandoned.
+-- This trigger also blocks attempt INSERT against a terminal task via the
+-- claim flow (which sets task status='claimed'); however claim() additionally
+-- asserts the UPDATE rowcount so a terminal task is rejected before trigger.
 CREATE TRIGGER trg_task_terminal_lock
 BEFORE UPDATE ON tasks
 FOR EACH ROW
@@ -232,6 +248,20 @@ WHEN OLD.status IN ('succeeded', 'canceled', 'abandoned')
      AND NEW.status NOT IN ('succeeded', 'canceled', 'abandoned')
 BEGIN
     SELECT RAISE(ABORT, 'terminal task cannot transition to non-terminal');
+END;
+
+-- Invariant I3b: NO attempt INSERT against a terminal task. The claim flow
+-- first UPDATEs the task to 'claimed' (caught by trg_task_terminal_lock if
+-- terminal), but a buggy caller could attempt to insert an attempt without
+-- updating task status. This trigger is a belt-and-suspenders backstop.
+CREATE TRIGGER trg_attempt_terminal_task_insert
+BEFORE INSERT ON task_attempts
+FOR EACH ROW
+WHEN (
+    SELECT status FROM tasks WHERE task_id = NEW.task_id
+) IN ('succeeded', 'canceled', 'abandoned')
+BEGIN
+    SELECT RAISE(ABORT, 'cannot insert attempt for terminal task');
 END;
 
 -- ==================== DONE ====================
