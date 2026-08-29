@@ -1,0 +1,4 @@
+ADR directory marker.
+
+ADR files in this directory are validated by the CI workflow
+.github/workflows/m0-contract-tests.yml (adr-marker-check job).

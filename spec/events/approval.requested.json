@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fish-harness.local/spec/events/approval.requested.json",
+  "title": "approval.requested",
+  "description": "Emitted when PolicyDecisionPoint returns 'needs_approval'. The kernel creates a pending approval row.",
+  "type": "object",
+  "required": ["task_id", "attempt_id", "policy_decision_id", "capability_id", "requested_at"],
+  "additionalProperties": false,
+  "properties": {
+    "task_id": {"type": "string", "pattern": "^[a-z0-9-]{8,64}$"},
+    "attempt_id": {"type": "string", "pattern": "^[a-z0-9-]{8,64}$"},
+    "policy_decision_id": {"type": "string", "pattern": "^[a-z0-9-]{8,64}$"},
+    "capability_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "trust_label_in": {"enum": ["trusted_user_input", "untrusted_external", "model_generated", "internal_secret"]},
+    "reason": {"type": "string"},
+    "requested_at": {"type": "string", "format": "date-time"},
+    "causation_id": {"type": ["string", "null"]}
+  }
+}

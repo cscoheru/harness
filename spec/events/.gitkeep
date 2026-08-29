@@ -1,0 +1,8 @@
+"""Events spec directory.
+
+File: spec/events/.gitkeep
+Version: v0.7
+
+JSON Schema files in this directory are validated by the CI workflow
+.github/workflows/m0-contract-tests.yml using jsonschema CLI.
+"""

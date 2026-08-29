@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fish-harness.local/spec/events/attempt.failed.json",
+  "title": "attempt.failed",
+  "description": "Emitted on attempt transition to 'failed' or 'expired'. Includes failure code for triage.",
+  "type": "object",
+  "required": ["task_id", "attempt_id", "failure_code", "recorded_at"],
+  "additionalProperties": false,
+  "properties": {
+    "task_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "failure_code": {
+      "enum": [
+        "policy_denied",
+        "lease_lost",
+        "budget_exceeded",
+        "driver_crashed",
+        "tool_error",
+        "user_canceled",
+        "approval_rejected",
+        "approval_expired",
+        "internal_error"
+      ]
+    },
+    "failure_message": {"type": "string"},
+    "policy_decision_id": {"type": ["string", "null"]},
+    "recorded_at": {"type": "string", "format": "date-time"}
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fish-harness.local/spec/events/approval.superseded.json",
+  "title": "approval.superseded",
+  "description": "Emitted when a new approval replaces an old one. Old MUST have status='unknown'.",
+  "type": "object",
+  "required": ["task_id", "old_approval_id", "new_approval_id", "new_attempt_id", "new_policy_decision_id", "recorded_at"],
+  "additionalProperties": false,
+  "properties": {
+    "task_id": {"type": "string"},
+    "old_approval_id": {"type": "string"},
+    "new_approval_id": {"type": "string"},
+    "new_attempt_id": {"type": "string"},
+    "new_policy_decision_id": {"type": "string"},
+    "old_status_was": {"const": "unknown"},
+    "recorded_at": {"type": "string", "format": "date-time"}
+  }
+}

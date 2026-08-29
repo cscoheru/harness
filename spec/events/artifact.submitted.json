@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fish-harness.local/spec/events/artifact.submitted.json",
+  "title": "artifact.submitted",
+  "description": "Emitted when an artifact is recorded against a task. Carries trust label for downstream policy.",
+  "type": "object",
+  "required": ["task_id", "attempt_id", "artifact_id", "blob_id", "kind", "role", "recorded_at"],
+  "additionalProperties": false,
+  "properties": {
+    "task_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "artifact_id": {"type": "string"},
+    "blob_id": {"type": "string"},
+    "kind": {"type": "string"},
+    "role": {"enum": ["input", "output", "intermediate", "evidence"]},
+    "trust_label": {"enum": ["trusted_user_input", "untrusted_external", "model_generated", "internal_secret"]},
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "recorded_at": {"type": "string", "format": "date-time"}
+  }
+}

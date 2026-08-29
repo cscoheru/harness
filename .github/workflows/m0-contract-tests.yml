@@ -1,0 +1,159 @@
+name: M0 contract tests
+
+on:
+  push:
+    branches: [main, "codex/**"]
+    paths:
+      - "spec/**"
+      - "spikes/**"
+      - "adr/**"
+      - ".github/workflows/m0-contract-tests.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "spec/**"
+      - "spikes/**"
+      - "adr/**"
+
+jobs:
+  schema-applies:
+    name: spec/kernel-schema.sql applies to fresh SQLite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install sqlite3
+        run: sudo apt-get install -y sqlite3
+      - name: Apply schema
+        run: |
+          set -e
+          rm -f /tmp/harness-test.sqlite
+          sqlite3 /tmp/harness-test.sqlite < spec/kernel-schema.sql
+          sqlite3 /tmp/harness-test.sqlite "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;" | tee /tmp/tables.txt
+          test "$(wc -l < /tmp/tables.txt)" -ge 10
+      - name: Verify invariants at DB level
+        run: |
+          set -e
+          # Invariant I2: only one active attempt per task
+          sqlite3 /tmp/harness-test.sqlite <<'SQL'
+          INSERT INTO tasks (task_id, tenant_id, workflow_pack, workflow_version, status)
+            VALUES ('t-fence', 'tn', 'web_research', '1.0.0', 'pending');
+          INSERT INTO task_attempts (task_id, attempt_id, fence_version, status, driver_kind)
+            VALUES ('t-fence', 'a1', 1, 'claimed', 'codex_exec');
+          SQL
+          # Second active attempt must fail (unique partial index)
+          if sqlite3 /tmp/harness-test.sqlite \
+              "INSERT INTO task_attempts (task_id, attempt_id, fence_version, status, driver_kind) VALUES ('t-fence','a2',1,'claimed','codex_exec');" 2>/dev/null; then
+            echo "FAIL: invariant I2 violated"
+            exit 1
+          fi
+          echo "OK: invariant I2 enforced at DB level"
+
+  spike-py-claim-fence:
+    name: spikes/m0/claim-fence-test.py
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run spike
+        run: python spikes/m0/claim-fence-test.py
+
+  spike-py-cancel-race:
+    name: spikes/m0/cancel-race-test.py
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run spike
+        run: python spikes/m0/cancel-race-test.py
+
+  spike-py-policy-direction:
+    name: spikes/m0/policy-direction-test.py
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run spike
+        run: python spikes/m0/policy-direction-test.py
+
+  spike-py-approval-supersede:
+    name: spikes/m0/approval-supersede-test.py
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run spike
+        run: python spikes/m0/approval-supersede-test.py
+
+  spike-py-egress:
+    name: spikes/m0/egress-httpx-actual.py
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install httpx at pinned version
+        run: pip install 'httpx==0.28.1'
+      - name: Run spike
+        run: python spikes/m0/egress-httpx-actual.py
+
+  spike-py-conformance:
+    name: spikes/m0/conformance-second-impl.py
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install httpx for type imports
+        run: pip install 'httpx==0.28.1'
+      - name: Run spike
+        run: python spikes/m0/conformance-second-impl.py
+
+  json-schema-validate:
+    name: spec/events/*.json validate as JSON Schema
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install jsonschema + check-jsonschema
+        run: pip install jsonschema check-jsonschema
+      - name: Validate every event schema is itself valid
+        run: |
+          set -e
+          for f in spec/events/*.json; do
+            [ "$(basename "$f")" = ".gitkeep" ] && continue
+            check-jsonschema --schemafile "$f" || { echo "invalid schema: $f"; exit 1; }
+          done
+          echo "OK: all event schemas are valid"
+
+  adr-marker-check:
+    name: adr/0001-0005.md exist with status: Accepted
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify ADRs
+        run: |
+          set -e
+          for n in 0001 0002 0003 0004 0005; do
+            test -f "adr/${n}-"*.md || { echo "missing ADR $n"; exit 1; }
+            grep -q "Status: Accepted" "adr/${n}-"*.md || { echo "ADR $n not Accepted"; exit 1; }
+          done
+          echo "OK: 5 ADRs present and Accepted"

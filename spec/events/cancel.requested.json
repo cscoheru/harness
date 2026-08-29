@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fish-harness.local/spec/events/cancel.requested.json",
+  "title": "cancel.requested",
+  "description": "Emitted when a user/system actor requests cancellation. Anchors the state transition.",
+  "type": "object",
+  "required": ["task_id", "actor", "reason", "requested_at"],
+  "additionalProperties": false,
+  "properties": {
+    "task_id": {"type": "string"},
+    "actor": {"type": "string"},
+    "reason": {"type": "string"},
+    "previous_status": {"type": "string"},
+    "requested_at": {"type": "string", "format": "date-time"}
+  }
+}

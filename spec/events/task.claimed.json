@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fish-harness.local/spec/events/task.claimed.json",
+  "title": "task.claimed",
+  "description": "Emitted exactly once per task_attempts row insert. Confirms fence_version consistency.",
+  "type": "object",
+  "required": ["task_id", "attempt_id", "worker_id", "fence_version", "lease_expires_at", "driver_kind"],
+  "additionalProperties": false,
+  "properties": {
+    "task_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "worker_id": {"type": "string"},
+    "fence_version": {"type": "integer", "minimum": 1},
+    "lease_token": {"type": "string"},
+    "lease_expires_at": {"type": "string", "format": "date-time"},
+    "driver_kind": {"enum": ["codex_sdk", "codex_app_server", "codex_exec"]},
+    "claimed_at": {"type": "string", "format": "date-time"}
+  }
+}

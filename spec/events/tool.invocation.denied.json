@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fish-harness.local/spec/events/tool.invocation.denied.json",
+  "title": "tool.invocation.denied",
+  "description": "Emitted when ToolInvocationGateway denies a request. Audit anchor.",
+  "type": "object",
+  "required": ["task_id", "attempt_id", "capability_id", "policy_decision_id", "reason", "recorded_at"],
+  "additionalProperties": false,
+  "properties": {
+    "task_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "capability_id": {"type": "string"},
+    "policy_decision_id": {"type": "string"},
+    "reason": {"type": "string"},
+    "rule_path": {"type": ["string", "null"]},
+    "trust_label_in": {"type": "string"},
+    "recorded_at": {"type": "string", "format": "date-time"}
+  }
+}
