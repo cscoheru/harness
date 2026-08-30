@@ -1,7 +1,9 @@
 # PRD v0.9.3 架构审验报告
 
-> 审验对象：`notes/codex-review-prompt-v0.9.3.md` 指定的 v0.9.3 可执行证据  
-> 审验日期：2026-08-30  
+> **Status**: ⚠️ **SUPERSEDED** — v0.9.3 review → Codex 返回 CHANGES REQUIRED / 14/20 PASS / 6 FAIL；v0.9.4 修复后复审 PASS。正式报告见 `notes/codex-review-v0.9.4-report.md`。
+>
+> 审验对象：`notes/codex-review-prompt-v0.9.3.md` 指定的 v0.9.3 可执行证据
+> 审验日期：2026-08-30
 > 证据边界：仅检查 `spec/` 与 `spikes/m0/`；未读取 PRD、ADR、response、旧 review 与 contemplation 文件  
 > 方法：反例优先；不以文档中的“已实现”作为证据
 

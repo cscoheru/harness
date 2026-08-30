@@ -2,9 +2,9 @@
 
 > **File**: `notes/codex-review-prompt-v0.9.4.md`
 > **Date**: 2026-08-30
+> **Status**: ⚠️ **SUPERSEDED** — v0.9.4 复审返回 **PASS / 28/28**（Codex v0.9.3 → v0.9.4 CHANGES REQUIRED 修复闭环完成）
+>   新指令见 `notes/codex-review-prompt-v0.9.5.md`（预计无代码变更，v0.9.5 为收尾文档版）
 > **Source**: `notes/codex-review-prompt-v0.9.3.md` (SUPERSEDED — returned CHANGES REQUIRED / 14/20 PASS / 6 FAIL)
-> **Target**: Codex 对 v0.9.4 (attempt-side ownership 双向 + 事件语义拆分 + 真并发 dispatch 原子性 + 反例/突变全闭环) 做合并复审
-> **Supersedes**: `notes/codex-review-prompt-v0.9.3.md` (v0.9.3 合并复审 CHANGES REQUIRED)
 >
 > **背景**: Codex v0.9.3 合并复审返回 CHANGES REQUIRED（6 FAIL: P0-M2-2 attempt-side / P1-2 事件语义混淆 / P1-3 真并发 dispatch 丢更新 / Case 27d 缺 INSERT 路径 / Case 33 注释矛盾 / I15 三值逻辑）。v0.9.4 修复：
 > - 新增 `trg_attempt_owner_consistent_update`（bidirectional ownership，closes P0-M2-2 完整闭环）
@@ -142,21 +142,29 @@ v0.9.4 新增（4 项补充覆盖）:
 6. 跑 mutation-test.py 验证因果链:
    python3 spikes/m0/mutation-test.py
    # 期望：17 mutations all baseline PASS / DROP FAIL (M12 已废弃，被 M17 取代)
-7. 跑 attempt-side ownership NULL bypass 实际验证（Codex v0.9.3 §7 必看）:
+7. 跑 attempt-side ownership NULL bypass 实际验证（Codex v0.9.3 §7 必看）：
+   ⚠️ 注意：直接 `UPDATE ... WHERE attempt_id='att-nonexistent'` 是 0-row UPDATE，
+   FOR EACH ROW trigger 不会触发（假阴）。正确做法是建立真实 attempt + worker 指针，
+   然后尝试 reassign（与 M16 同构）。使用以下命令：
    python3 -c "
-import sqlite3, tempfile, os
+import sqlite3, tempfile, os, sys
+sys.path.insert(0, 'spikes/m0')
+from _helpers import connect_with_fk, register_worker, seed_task, claim
 fd, path = tempfile.mkstemp(suffix='.sqlite'); os.close(fd)
-conn = sqlite3.connect(path); conn.execute('PRAGMA foreign_keys=ON')
-with open('spec/kernel-schema.sql') as f: conn.executescript(f.read())
-conn.execute(\"INSERT INTO workers (worker_id, host, capabilities_json, status, last_heartbeat_at) VALUES ('w-test', 'h1', '[]', 'active', '2026-08-30T12:00:00.000Z')\"); conn.commit()
-# attempt-side ownership: UPDATE task_attempts.worker_id 必须拒（attempt 都不存在）
-try:
-    conn.execute(\"UPDATE task_attempts SET worker_id='w-test' WHERE attempt_id='att-nonexistent'\")
-    print('FAIL: attempt-side UPDATE succeeded (no attempt exists)')
-except sqlite3.IntegrityError as e:
-    print(f'OK: attempt-side UPDATE rejected: {e}')
-os.unlink(path)
+conn = connect_with_fk(path=path, apply_schema=True)
+wid = register_worker(conn, host='h1', worker_id='w-test')
+task_id = seed_task(conn)
+attempt_id, _ = claim(conn, task_id, wid)
+# 镜像 dispatch_worker: 设置 workers.current_attempt_id
+conn.execute('UPDATE workers SET current_attempt_id=? WHERE worker_id=?', (attempt_id, wid))
+conn.commit()
+# 现在尝试 reassign attempt 到另一个 worker（应被 attempt-side ownership trigger 拒）
+conn.execute('UPDATE task_attempts SET worker_id=? WHERE attempt_id=?', ('w-other', attempt_id))
+print('FAIL: attempt-side UPDATE succeeded (should be rejected)')
 "
+# 期望：IntegrityError: attempt ownership ... dangling pointer
+# （或者若 w-other 不存在，FK 也应拒绝）
+os.unlink(path)
 8. 验证 worker.dispatched 与 worker.registered 拆分:
    python3 -c "
 import sys; sys.path.insert(0, 'spikes/m0')
