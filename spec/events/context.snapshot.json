@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fish-harness.local/spec/events/context.snapshot.json",
+  "title": "context.snapshot",
+  "description": "Emitted on every INSERT into context_snapshots. Carries the layer (L0/L1/L2/L3), token_count, trust_label, and parent linkage. Closes P0-9 by making context state observable in the event stream.",
+  "type": "object",
+  "required": ["snapshot_id", "task_id", "attempt_id", "level", "token_count", "trust_label"],
+  "additionalProperties": false,
+  "properties": {
+    "snapshot_id": {"type": "string"},
+    "task_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "level": {"enum": ["L0", "L1", "L2", "L3"]},
+    "raw_blob_id": {"type": ["string", "null"]},
+    "distilled_blob_id": {"type": ["string", "null"]},
+    "token_count": {"type": "integer", "minimum": 0},
+    "trust_label": {"enum": ["trusted_user_input", "untrusted_external", "model_generated", "internal_secret"]},
+    "distiller_version": {"type": ["string", "null"]},
+    "parent_snapshot_id": {"type": ["string", "null"]},
+    "created_at": {"type": "string", "format": "date-time"}
+  }
+}

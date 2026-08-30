@@ -124,6 +124,44 @@ jobs:
       - name: Run spike
         run: python spikes/m0/conformance-second-impl.py
 
+  spike-py-context-budget:
+    name: spikes/m0/context-budget-test.py (v0.9.1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run spike
+        run: python spikes/m0/context-budget-test.py
+
+  spike-py-context-event-schema:
+    name: spikes/m0/context-event-schema-test.py (v0.9.1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install jsonschema
+        run: pip install jsonschema
+      - name: Run spike
+        run: python spikes/m0/context-event-schema-test.py
+
+  spike-py-worker-dispatch:
+    name: spikes/m0/worker-dispatch-test.py (v0.9-B)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run spike
+        run: python spikes/m0/worker-dispatch-test.py
+
   json-schema-validate:
     name: spec/events/*.json validate as JSON Schema
     runs-on: ubuntu-latest
@@ -145,15 +183,15 @@ jobs:
           echo "OK: all event schemas are valid"
 
   adr-marker-check:
-    name: adr/0001-0005.md exist with status: Accepted
+    name: adr/0001-0007.md exist with status: Accepted
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Verify ADRs
         run: |
           set -e
-          for n in 0001 0002 0003 0004 0005; do
+          for n in 0001 0002 0003 0004 0005 0006 0007; do
             test -f "adr/${n}-"*.md || { echo "missing ADR $n"; exit 1; }
             grep -q "Status: Accepted" "adr/${n}-"*.md || { echo "ADR $n not Accepted"; exit 1; }
           done
-          echo "OK: 5 ADRs present and Accepted"
+          echo "OK: 7 ADRs present and Accepted"

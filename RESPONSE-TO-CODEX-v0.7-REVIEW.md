@@ -118,9 +118,23 @@
 | P0-5 | ✅ fixed | ✅ **fixed-with-executable-evidence**（6 行为测试） |
 | P0-M2 | ✅ fixed | ✅ **fixed-with-executable-evidence**（case B/C 反例） |
 | P1-10 | ✅ fixed | ✅ **fixed-with-executable-evidence**（test 3 internal_secret vs trusted_user_input 决策不同） |
-| indexes 数量 | 16 | **17**（新增 `idx_approvals_one_child` UNIQUE partial） |
-| CI jobs 数量 | 8 | **9**（CI workflow 内已含 schema apply + 6 spike + JSON Schema + ADR check；本地加 type-check 工作列入 v0.8.1） |
+| indexes 数量 | 17 | **18**（v0.8 新增 `idx_approvals_one_child` UNIQUE partial） |
+| CI jobs 数量 | 8 | **9**（v0.8: schema apply + 6 spike + JSON Schema + ADR check；type-check 列入 v0.8.1） |
 | "GitHub-hosted runner 已跑通" | 错说 | **已移除**（v0.8 不再写 "已跑通"；CI 真跑绿前仅说 "本地 Python 3.14 实测"） |
+
+---
+
+## v0.9-A 校准项（增量指标）
+
+| 项 | v0.8 终态 | v0.9-A 终态 | 增量 |
+|----|----------|------------|------|
+| indexes 数量 | 18 | **22** | +4 context_snapshots: task_level / attempt / distilled / parent |
+| triggers 数量 | 3 | **5** | +2: trg_snapshot_budget_check（I11）+ trg_handoff_trust_label（I14） |
+| Protocols 数量 | 6 | **8** | +2: ContextDistiller + ContextBudget |
+| spike 数量 | 6（29 OK） | **7**（10 cases / 16 行 OK） | +1 context-budget-test.py |
+| ADR 数量 | 5 | **6** | +1: 0006-context-layering.md |
+| 事件 schema 数量 | 7 | **8** | +1: context.snapshot.json |
+| CI jobs 数量 | 9 | **11** | +2: spike-py-context-budget + ADR 0006 check |
 
 ---
 
@@ -176,3 +190,124 @@ spikes/m0/conformance-second-impl.py  + RealGateway 6 行为测试 + ObservableP
 | Trust label 闭环 | `python3 spikes/m0/policy-direction-test.py` |
 | Schema 仍可应用 | `sqlite3 /tmp/test.sqlite < spec/kernel-schema.sql` |
 | 一行跑完全部 | `for f in spikes/m0/*.py; do [ "$(basename "$f")" = "__init__.py" ] && continue; [ "$(basename "$f")" = "_helpers.py" ] && continue; python3 "$f" || echo FAIL; done` |
+
+---
+
+# v0.9-A 增量记录（Context Layering）
+
+> **File**: `RESPONSE-TO-CODEX-v0.7-REVIEW.md` 末尾
+> **Version**: v0.9-A
+> **Date**: 2026-08-30
+> **Purpose**: v0.9-A 把上下文从"blob 流"升级为"4 层模型"，提交 Codex 复审时引用。
+
+## §v0.9-A 范围
+
+| 项 | 交付位置 | 状态 |
+|----|---------|------|
+| 4 层上下文定义（L0/L1/L2/L3） | `spec/context-layers.md` | ✅ |
+| `tasks.context_budget_tokens INTEGER` | `spec/kernel-schema.sql` | ✅ |
+| 新表 `context_snapshots` | `spec/kernel-schema.sql` | ✅ |
+| 新 Protocol `ContextDistiller` + `ContextBudget` | `spec/interfaces/context_distiller.py` | ✅ |
+| 新事件 `context.snapshot` | `spec/events/context.snapshot.json` | ✅ |
+| 新 spike `context-budget-test.py`（10 cases） | `spikes/m0/context-budget-test.py` | ✅ |
+| ADR 0006（4 层决策依据） | `adr/0006-context-layering.md` | ✅ |
+| 第二实现 `TrivialContextDistiller` | `spikes/m0/conformance-second-impl.py` | ✅ |
+| CI 新增 `spike-py-context-budget` job | `.github/workflows/m0-contract-tests.yml` | ✅ |
+| ADR check 0001-0006 | `.github/workflows/m0-contract-tests.yml` | ✅ |
+| `spec/interfaces/__init__.py` 导出 8 Protocols | `spec/interfaces/__init__.py` | ✅ |
+| v0.8 spike 全部不退化 | 6 v0.8 spike + 1 v0.9-A spike = 7 spike 全绿 | ✅ |
+
+## §v0.9-A 反例 → spike 关闭证据
+
+| 反例 | spike case | 关闭方式 |
+|------|-----------|---------|
+| **P0-9A** charge 超 budget | `context-budget-test.py` Case 2 | `trg_snapshot_budget_check` 触发，row 被拒；working_set 不变 |
+| **P0-9B** L3 handoff trust=untrusted_external | Case 3 | `trg_handoff_trust_label` 触发，row 被拒 |
+| **P0-9C** L1 raw_blob_id 不存在 | Case 4 | `context_snapshots.raw_blob_id` FK 触发 |
+| **P0-9D** snapshot task_id NULL | Case 5 | `context_snapshots.task_id` NOT NULL 约束 |
+| **P0-9E** snapshot token_count<0 | Case 6 | `token_count >= 0` CHECK |
+| **P0-9F** snapshot level ∉ {L0..L3} | Case 7 | `level IN ('L0','L1','L2','L3')` CHECK |
+| **bonus** budget=NULL 不触发 I11 | Case 8 | trigger 的 WHEN 子句显式排除 NULL |
+| **bonus** internal_secret L2 允许 | Case 9 | I14 只限制 L3 handoff；L2 working_set 自由 |
+| **bonus** 并发 charge race | Case 10 | WAL + BEGIN IMMEDIATE + trigger 串行化，1 ok + 1 reject |
+
+## §v0.9-A spike 总览（10 cases / 16 OK 含双重断言）
+
+```text
+=== context-budget-test.py (10 cases / 16 OK) ===
+  Case 1: 3 L2 snapshots fit under budget (total=90/100)
+  Case 2 (P0-9A): I11 budget exceeded
+  Case 3 (P0-9B): I14 untrusted_external handoff
+  Case 4 (P0-9C): missing raw_blob_id FK rejected
+  Case 5 (P0-9D): NULL task_id NOT NULL rejected
+  Case 6 (P0-9E): negative token_count CHECK rejected
+  Case 7 (P0-9F): invalid level CHECK rejected
+  Case 8 (bonus): NULL budget = unlimited (no I11)
+  Case 9 (bonus): internal_secret L2 working_set allowed
+  Case 10 (bonus): concurrent charge race → 1 ok + 1 reject
+
+=== conformance-second-impl.py (7 tests) ===
+  Test 1-5: 不变（v0.8 gateway 行为）
+  Test 6:   6 Protocols satisfy runtime_checkable → 升级为 8 Protocols
+  Test 7 (v0.9-A 新增): ContextDistiller + ContextBudget Protocol shape + I14 at Protocol level
+```
+
+## §v0.9-A 维持 v0.8 M1 硬门槛
+
+| # | 硬门槛 | v0.8 状态 | v0.9-A 状态 | 说明 |
+|---:|--------|---------|------------|------|
+| 1 | kernel schema 完整唯一可执行 | ✅ | ✅ | 加 1 列 + 1 表 + 2 trigger；不破坏已有 schema |
+| 2 | fence/cancel/retry 不变量 | ✅ | ✅ | 6 v0.8 spike 全绿（claim-fence/cancel-race/supersede/conformance/egress/policy） |
+| 3 | Gateway + 数据分类强制 | ✅ | ✅ | TrivialContextDistiller 满足 Protocol shape；I11/I14 走 trigger |
+| 4 | Egress 通过真实网络安全测试 | ✅ | ✅ | egress-httpx-actual 8 测试不变 |
+| 5 | Codex capability profile 由 runtime evidence | 🟡 部分 | 🟡 部分 | 不变（列入 M0 后续） |
+| 6 | CI image digest/signature/attestation | 🟡 部分 | 🟡 部分 | 不变（列入 M1） |
+| 7 | Backup E2E 隔离恢复 | 🟡 部分 | 🟡 部分 | 不变（列入 M0 后续） |
+| 8 | Research vertical slice | 🟡 部分 | 🟡 部分 | 不变（v0.9-A 仍未实装 pack） |
+
+## §v0.9-A 新增硬门槛
+
+| # | 硬门槛 | v0.9-A 状态 | 证据 |
+|---:|--------|------------|------|
+| M0-9 | 4 层上下文在 schema 中可识别 | ✅ | `tasks.context_budget_tokens` + `context_snapshots` 表 + 2 trigger |
+| M0-10 | ContextDistiller Protocol + 第二实现 | ✅ | `spec/interfaces/context_distiller.py` + `TrivialContextDistiller` |
+| M0-11 | context.snapshot 事件 schema 合法 | ✅ | `spec/events/context.snapshot.json` 通过 check-jsonschema |
+| M0-12 | I11-I14 反例 spike | ✅ | `spikes/m0/context-budget-test.py` 10 cases 全绿 |
+
+## §v0.9-A 与 v0.8 spike 兼容性
+
+```text
+v0.8 spike 总数: 6 (29 OK)
+v0.9-A 新增: 1 (16 OK with double assertions)
+总计: 7 spike / 45 OK（v0.9-A spike 输出 16 行 OK 因双重 print）
+
+本地一次跑完全部：
+$ for f in spikes/m0/*.py; do [ "$(basename "$f")" = "__init__.py" ] && continue; [ "$(basename "$f")" = "_helpers.py" ] && continue; python3 "$f" || echo FAIL; done
+
+结果：7 spike 全部 exit 0，v0.8 ✅ 状态不退化
+```
+
+## §给 Codex v0.9 复审的入口
+
+| 想验证 | 跑这个 |
+|--------|--------|
+| I11 budget 强制 | `python3 spikes/m0/context-budget-test.py` Case 2 |
+| I14 handoff trust 强制 | Case 3 |
+| FK / NOT NULL / CHECK 完整 | Case 4-7 |
+| ContextDistiller Protocol shape | `python3 spikes/m0/conformance-second-impl.py` Test 7 |
+| 8 Protocols runtime_checkable | Test 6 输出 `8 Protocols satisfy runtime_checkable` |
+| Schema 应用 | `sqlite3 :memory: < spec/kernel-schema.sql`（无 v0.9-A 改动报错） |
+| ADR 0006 存在 | `test -f adr/0006-context-layering.md && grep "Status: Accepted" adr/0006-context-layering.md` |
+
+## §v0.9-A 一行跑完全部（CI 等价）
+
+```bash
+$ for f in spikes/m0/*.py; do [ "$(basename "$f")" = "__init__.py" ] && continue; [ "$(basename "$f")" = "_helpers.py" ] && continue; python3 "$f" || echo FAIL; done
+=== approval-supersede-test.py ===        (4 OK)
+=== cancel-race-test.py ===               (8 OK)
+=== claim-fence-test.py ===               (5 OK)
+=== conformance-second-impl.py ===        (7 OK; 8 Protocols)
+=== context-budget-test.py ===            (10 cases / 16 OK)
+=== egress-httpx-actual.py ===            (8 OK)
+=== policy-direction-test.py ===          (4 OK)
+```

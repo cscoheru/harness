@@ -1,9 +1,9 @@
 """Protocol package marker.
 
 File: spec/interfaces/__init__.py
-Version: v0.7
+Version: v0.9-B (v0.9-A base + WorkerPool)
 
-CI imports spec.interfaces.* to verify all six Protocols exist and have
+CI imports spec.interfaces.* to verify all Protocols exist and have
 type-checked signatures. The conformance test spikes/m0/conformance-second-impl.py
 imports each Protocol and asserts a second implementation satisfies it.
 """
@@ -33,6 +33,24 @@ from .tool_provider import (
 from .policy_decision import PolicyBundle, PolicyDecisionPoint, PolicyRule, assert_satisfies_pdp
 from .artifact_store import ArtifactStore, BlobRef, PutRequest, PutResult
 from .event_sink import EventEnvelope, EventSink, SinkKind, SinkResult
+from .context_distiller import (
+    ContextBudget,
+    ContextDistiller,
+    DistilledUnit,
+    HandoffBlob,
+    assert_satisfies_budget,
+    assert_satisfies_distiller,
+)
+from .worker_pool import (
+    DispatchResult,
+    DrainRejected,
+    HeartbeatRejected,
+    NoWorkerAvailable,
+    WorkerInfo,
+    WorkerPool,
+    WorkerPoolError,
+    assert_satisfies_pool,
+)
 
 __all__ = [
     # execution_driver
@@ -74,4 +92,20 @@ __all__ = [
     "EventSink",
     "SinkKind",
     "SinkResult",
+    # context_distiller (v0.9-A)
+    "ContextBudget",
+    "ContextDistiller",
+    "DistilledUnit",
+    "HandoffBlob",
+    "assert_satisfies_budget",
+    "assert_satisfies_distiller",
+    # worker_pool (v0.9-B)
+    "DispatchResult",
+    "DrainRejected",
+    "HeartbeatRejected",
+    "NoWorkerAvailable",
+    "WorkerInfo",
+    "WorkerPool",
+    "WorkerPoolError",
+    "assert_satisfies_pool",
 ]
