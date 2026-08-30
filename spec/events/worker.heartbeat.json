@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fish-harness.local/events/worker.heartbeat.json",
+  "title": "worker.heartbeat",
+  "description": "Emitted when a worker advances its last_heartbeat_at via WorkerPool.heartbeat(). I16 enforcement.",
+  "type": "object",
+  "required": ["worker_id", "last_heartbeat_at"],
+  "properties": {
+    "worker_id": {
+      "type": "string",
+      "description": "Worker that sent the heartbeat."
+    },
+    "last_heartbeat_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "New heartbeat timestamp (must be strictly greater than the prior value)."
+    },
+    "current_attempt_id": {
+      "type": ["string", "null"],
+      "description": "The worker's active attempt, if any. Null when worker is idle."
+    }
+  },
+  "additionalProperties": false
+}

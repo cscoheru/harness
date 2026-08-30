@@ -217,27 +217,36 @@ def _shared_db_with_seed(
                           "..", "..", "spec", "kernel-schema.sql")
     with open(schema, "r") as f:
         c.executescript(f.read())
+    c.execute("PRAGMA foreign_keys = ON")
     # Seed identical state
     c.execute(
         "INSERT INTO tasks (task_id, tenant_id, workflow_pack, workflow_version, status, fence_version) "
         "VALUES (?, 't1', 'web_research', '1.0.0', 'pending', 2)",
         (task_id,),
     )
+    # v0.9-B I15: register workers for each attempt (one per attempt id)
+    for aid in (att1, att3, att4):
+        c.execute(
+            "INSERT INTO workers (worker_id, host, capabilities_json, status, "
+            "  last_heartbeat_at) VALUES (?, 't-sup', '[]', 'active', "
+            "  '2026-08-30T12:00:00.000Z')",
+            (f"w-{aid}",),
+        )
     # Insert two attempts (att1 expired, att3 claimed, att4 running) — only need att3+att4 present
     c.execute(
-        "INSERT INTO task_attempts (task_id, attempt_id, fence_version, status, driver_kind) "
-        "VALUES (?, ?, 2, 'expired', 'codex_sdk')",
-        (task_id, att1),
+        "INSERT INTO task_attempts (task_id, attempt_id, fence_version, worker_id, status, driver_kind) "
+        "VALUES (?, ?, 2, ?, 'expired', 'codex_sdk')",
+        (task_id, att1, f"w-{att1}"),
     )
     c.execute(
-        "INSERT INTO task_attempts (task_id, attempt_id, fence_version, status, driver_kind) "
-        "VALUES (?, ?, 2, 'claimed', 'codex_sdk')",
-        (task_id, att3),
+        "INSERT INTO task_attempts (task_id, attempt_id, fence_version, worker_id, status, driver_kind) "
+        "VALUES (?, ?, 2, ?, 'claimed', 'codex_sdk')",
+        (task_id, att3, f"w-{att3}"),
     )
     c.execute(
-        "INSERT INTO task_attempts (task_id, attempt_id, fence_version, status, driver_kind) "
-        "VALUES (?, ?, 2, 'expired', 'codex_sdk')",
-        (task_id, att4),
+        "INSERT INTO task_attempts (task_id, attempt_id, fence_version, worker_id, status, driver_kind) "
+        "VALUES (?, ?, 2, ?, 'expired', 'codex_sdk')",
+        (task_id, att4, f"w-{att4}"),
     )
     c.execute(
         "INSERT INTO approvals (approval_id, task_id, attempt_id, policy_decision_id, status) "

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fish-harness.local/events/worker.dispatched.json",
+  "title": "worker.dispatched",
+  "description": "Emitted when WorkerPool.dispatch() picks a worker for a task. Closes Codex v0.9-B P0-9G observability.",
+  "type": "object",
+  "required": ["task_id", "worker_id"],
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "The task being dispatched."
+    },
+    "worker_id": {
+      "type": "string",
+      "description": "Worker chosen by dispatch (TEXT PK in workers table)."
+    },
+    "attempt_id": {
+      "type": ["string", "null"],
+      "description": "Set after claim_via_pool() succeeds; null for dispatch-only events."
+    },
+    "strategy": {
+      "enum": ["capability_match", "round_robin"],
+      "description": "Which dispatch strategy selected the worker."
+    },
+    "dispatched_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

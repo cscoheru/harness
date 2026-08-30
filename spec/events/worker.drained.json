@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fish-harness.local/events/worker.drained.json",
+  "title": "worker.drained",
+  "description": "Emitted when a worker transitions to draining / drained / stale. I17 enforcement.",
+  "type": "object",
+  "required": ["worker_id", "status"],
+  "properties": {
+    "worker_id": {
+      "type": "string",
+      "description": "Worker that changed status."
+    },
+    "status": {
+      "enum": ["draining", "drained", "stale"],
+      "description": "New worker status. 'draining' = SIGTERM received; 'drained' = active attempts all terminal; 'stale' = reaped by reap_stale()."
+    },
+    "current_attempt_id": {
+      "type": ["string", "null"],
+      "description": "The worker's current attempt at the moment of transition. Null if idle."
+    },
+    "drained_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Set when status='drained'. Null while 'draining'."
+    }
+  },
+  "additionalProperties": false
+}
