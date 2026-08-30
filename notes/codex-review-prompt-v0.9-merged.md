@@ -5,6 +5,8 @@
 > **Source template**: `notes/codex-review-prompt-template.md`（v0.8 复用版）
 > **Target**: Codex 对 PRD-v0.9（A + B 两段，Context Layering + Load Balancing）做合并复审
 > **Supersedes**: `notes/codex-review-prompt-v0.9.md`（仅 v0.9-A；本文件覆盖 A+B 合并复审）
+>
+> ⚠️ **SUPERSEDED by v0.9.2**（2026-08-30）：本文档已被 `notes/codex-review-prompt-v0.9.2.md` 取代。Codex v0.9 合并复审结论 = CHANGES REQUIRED；v0.9.2 已修复全部 6 项 P0-M2 + 9 项 P0-9 失败 + 5 项 P1。请使用 v0.9.2 prompt 重新提交。
 
 ---
 
