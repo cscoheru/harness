@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fish-harness.local/events/worker.registered.json",
+  "title": "worker.registered",
+  "description": "Emitted when a worker row is INSERTed into the workers table. v0.9.4: emitted by trg_worker_registered_event_emit (renamed from v0.9.3 trg_worker_dispatched_event_emit). Closes Codex v0.9.3 P1-2 finding: the v0.9.3 trigger conflated registration with dispatch; v0.9.4 splits the two events. The actual 'worker.dispatched' event (task->worker assignment) is emitted separately by trg_attempt_dispatched_event_emit_insert on task_attempts INSERT.",
+  "type": "object",
+  "required": ["worker_id", "host", "capabilities_json", "status", "registered_at"],
+  "properties": {
+    "worker_id": {
+      "type": "string",
+      "description": "Worker that was registered (TEXT PK in workers table)."
+    },
+    "host": {
+      "type": "string",
+      "description": "Host identifier where the worker process is running."
+    },
+    "capabilities_json": {
+      "type": "string",
+      "description": "JSON-encoded array of capability ids."
+    },
+    "status": {
+      "enum": ["active", "draining", "drained", "stale"],
+      "description": "Worker status at registration time. Note: 'draining' is rejected by trg_worker_no_draining_insert (use register then drain lifecycle)."
+    },
+    "registered_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "registered_at timestamp at moment of INSERT."
+    }
+  },
+  "additionalProperties": false
+}

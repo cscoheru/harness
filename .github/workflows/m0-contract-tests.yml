@@ -30,7 +30,7 @@ jobs:
           sqlite3 /tmp/harness-test.sqlite < spec/kernel-schema.sql
           sqlite3 /tmp/harness-test.sqlite "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;" | tee /tmp/tables.txt
           test "$(wc -l < /tmp/tables.txt)" -ge 10
-      - name: Verify v0.9.2 schema counts (13/14/24/27/39)
+      - name: Verify v0.9.4 schema counts (13/14/27/27/39)
         run: |
           set -e
           PROJECT_TABLES=$(sqlite3 /tmp/harness-test.sqlite "SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
@@ -41,10 +41,10 @@ jobs:
           echo "tables(project)=$PROJECT_TABLES tables(total)=$ALL_TABLES triggers=$TRIGGERS indexes(named)=$NAMED_INDEXES indexes(total)=$ALL_INDEXES"
           test "$PROJECT_TABLES" = "13" || { echo "FAIL: expected 13 project tables; got $PROJECT_TABLES"; exit 1; }
           test "$ALL_TABLES" = "14" || { echo "FAIL: expected 14 total tables (incl sqlite_sequence); got $ALL_TABLES"; exit 1; }
-          test "$TRIGGERS" = "24" || { echo "FAIL: expected 24 triggers; got $TRIGGERS"; exit 1; }
+          test "$TRIGGERS" = "27" || { echo "FAIL: expected 27 triggers (v0.9.4 +3: owner_consistent + registered_emit rename + dispatched_emit_insert); got $TRIGGERS"; exit 1; }
           test "$NAMED_INDEXES" = "27" || { echo "FAIL: expected 27 named indexes; got $NAMED_INDEXES"; exit 1; }
           test "$ALL_INDEXES" = "39" || { echo "FAIL: expected 39 total indexes; got $ALL_INDEXES"; exit 1; }
-          echo "OK: schema counts match v0.9.2 (13 project / 14 incl sqlite_sequence / 24 triggers / 27 named / 39 total)"
+          echo "OK: schema counts match v0.9.4 (13 project / 14 incl sqlite_sequence / 27 triggers / 27 named / 39 total)"
       - name: Verify invariants at DB level
         run: |
           set -e
@@ -74,6 +74,18 @@ jobs:
           python-version: "3.12"
       - name: Run spike
         run: python spikes/m0/claim-fence-test.py
+
+  spike-py-fence-missing-task:
+    name: spikes/m0/fence-missing-task-test.py (v0.9.4 — fence trigger NULL-safe)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run spike
+        run: python spikes/m0/fence-missing-task-test.py
 
   spike-py-cancel-race:
     name: spikes/m0/cancel-race-test.py
@@ -229,11 +241,14 @@ jobs:
       - name: Validate every event schema is itself valid
         run: |
           set -e
+          count=0
           for f in spec/events/*.json; do
             [ "$(basename "$f")" = ".gitkeep" ] && continue
+            count=$((count + 1))
             check-jsonschema --check-metaschema "$f" || { echo "invalid schema: $f"; exit 1; }
           done
-          echo "OK: all event schemas are valid"
+          test "$count" = "12" || { echo "FAIL: expected 12 event schemas (v0.9.4 added worker.registered); got $count"; exit 1; }
+          echo "OK: all $count event schemas are valid"
 
   adr-marker-check:
     name: adr/0001-0007.md exist with status: Accepted

@@ -1,10 +1,10 @@
 # Worker Pool — 4 层负载均衡规范
 
 > **File**: `spec/worker-pool.md`
-> **Version**: v0.9-B
+> **Version**: v0.9.4
 > **Date**: 2026-08-30
 > **Status**: Accepted (M0 scope)
-> **Supersedes**: v0.7-v0.8 的 `claim(task_id, worker_id)` 单层接口（v0.9-B 在上层叠加 dispatch）
+> **Supersedes**: v0.9-B 的 dispatch / heartbeat / drain 触发器；v0.9.4 修复 Codex v0.9.3 提出的 attempt-side ownership 漏洞 + worker.registered vs worker.dispatched 事件语义混淆 + 真并发 dispatch_worker lost update
 > **Inherits**: `spec/state-transitions.md §1.1`（`claim()` 行为不变；v0.9-B 在上层加 dispatch）
 
 ---
@@ -126,6 +126,41 @@ CREATE UNIQUE INDEX idx_worker_one_active_attempt
 > 新索引 `idx_worker_one_active_attempt`（v0.9-B）：每 worker 最多 1 active attempt。
 > 两条索引配合 → task × worker 二维唯一。
 
+### 2.4 v0.9.4 attempt-side ownership trigger（bidirectional backstop）
+
+```sql
+-- Attempt-side backstop (closes Codex v0.9.3 P0-M2-2): UPDATE OF worker_id on
+-- task_attempts must not leave a dangling pointer in another worker's
+-- current_attempt_id. Together with the worker-side trg_worker_ownership_update,
+-- this enforces bidirectional ownership consistency across the two tables.
+--
+-- NULL-safe via NEW.worker_id IS NOT OLD.worker_id (the only NULL-safe
+-- inequality in SQLite; != returns UNKNOWN when either operand is NULL and
+-- silently bypasses RAISE).
+CREATE TRIGGER trg_attempt_owner_consistent_update
+BEFORE UPDATE OF worker_id ON task_attempts
+FOR EACH ROW
+WHEN NEW.worker_id IS NOT OLD.worker_id
+     AND EXISTS (
+         SELECT 1 FROM workers
+         WHERE current_attempt_id = NEW.attempt_id
+           AND (NEW.worker_id IS NULL OR worker_id != NEW.worker_id)
+     )
+BEGIN
+    SELECT RAISE(ABORT,
+        'attempt ownership: task_attempts.worker_id UPDATE from ' ||
+        COALESCE(OLD.worker_id, '<NULL>') || ' to ' || COALESCE(NEW.worker_id, '<NULL>') ||
+        ' for attempt_id=' || NEW.attempt_id ||
+        ' would leave a dangling pointer in workers.current_attempt_id'
+    );
+END;
+```
+
+**Why NULL-safe matters**: SQLite 三值逻辑: `NEW.worker_id != OLD.worker_id`
+返回 UNKNOWN 当 OLD 为 NULL 时（旧 attempt 还没 worker，触发器会被 RAISE
+silently skip）。`IS NOT` 是 SQLite 唯一对 NULL 安全的 inequality（除了
+`NOT EXISTS`），必须用 `IS NOT` 显式表达。
+
 ---
 
 ## §3 Protocol 形状
@@ -181,24 +216,61 @@ class WorkerPool(Protocol):
 
 ## §5 事件 schema
 
-### 5.1 `spec/events/worker.dispatched.json`
+### 5.1 `spec/events/worker.registered.json` (v0.9.4 new — replaces v0.9.3 conflated dispatched)
 
 ```json
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "worker.registered",
   "type": "object",
-  "required": ["task_id", "worker_id"],
+  "required": ["worker_id", "host", "capabilities_json", "status", "registered_at"],
   "properties": {
-    "task_id": {"type": "string"},
-    "worker_id": {"type": "string"},
-    "attempt_id": {"type": ["string", "null"]},
-    "strategy": {"enum": ["capability_match", "round_robin"]},
+    "worker_id":         {"type": "string"},
+    "host":              {"type": "string"},
+    "capabilities_json": {"type": "string"},
+    "status":            {"enum": ["active", "draining", "drained", "stale"]},
+    "registered_at":     {"type": "string", "format": "date-time"}
+  },
+  "additionalProperties": false
+}
+```
+
+**Trigger source**: `trg_worker_registered_event_emit`（v0.9.4 重命名自
+v0.9.3 `trg_worker_dispatched_event_emit`，event_type 由 `worker.dispatched`
+改为 `worker.registered`，payload `dispatched_at` 改为 `registered_at`）。
+
+### 5.2 `spec/events/worker.dispatched.json` (v0.9.4 — 真正的派单事件)
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "worker.dispatched",
+  "type": "object",
+  "required": ["task_id", "worker_id", "attempt_id", "strategy", "dispatched_at"],
+  "properties": {
+    "task_id":       {"type": "string"},
+    "worker_id":     {"type": "string"},
+    "attempt_id":    {"type": "string"},
+    "strategy":      {"enum": ["capability_match", "worker_takeover"]},
     "dispatched_at": {"type": "string", "format": "date-time"}
   },
   "additionalProperties": false
 }
 ```
 
-### 5.2 `spec/events/worker.heartbeat.json`
+**Trigger source**:
+- `trg_attempt_dispatched_event_emit_insert` — INSERT task_attempts with
+  non-NULL worker_id + active status → emit `worker.dispatched` with
+  strategy='capability_match'
+- `trg_attempt_dispatched_event_emit_update` — UPDATE OF worker_id with
+  worker_id change → emit `worker.dispatched` with strategy='worker_takeover'
+
+**v0.9.3 vs v0.9.4 区别**: v0.9.3 的 `worker.dispatched` 事件实际是注册事件
+（payload 只有 worker_id + host + capabilities_json），是 schema-vs-runtime
+语义混淆的产物。v0.9.4 拆成两个独立事件：worker.registered（注册）
+vs worker.dispatched（真正的 task→worker 派单）。
+
+### 5.3 `spec/events/worker.heartbeat.json`
 
 ```json
 {
@@ -213,7 +285,7 @@ class WorkerPool(Protocol):
 }
 ```
 
-### 5.3 `spec/events/worker.drained.json`
+### 5.4 `spec/events/worker.drained.json`
 
 ```json
 {

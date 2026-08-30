@@ -29,6 +29,21 @@
 --   + trg_worker_heartbeat_renew       (I16: heartbeat 必须推进 last_heartbeat_at)
 --   + trg_worker_drain_pause           (I17: drain 时 current_attempt_id 不能已 terminal)
 --
+-- v0.9.4 delta (closes Codex v0.9.3 CHANGES REQUIRED / 14/20 PASS):
+--   ~ trg_attempt_worker_exists_update: NEW.worker_id != OLD.worker_id
+--                                    → NEW.worker_id IS NOT OLD.worker_id
+--                                    (NULL-safe; closes OLD=NULL three-valued-logic bypass)
+--   + trg_attempt_owner_consistent_update (P0-M2-2 attempt-side backstop)
+--   ~ trg_worker_dispatched_event_emit → trg_worker_registered_event_emit
+--                                    event_type 'worker.dispatched' → 'worker.registered'
+--   + trg_attempt_dispatched_event_emit_insert/update
+--                                    (real worker.dispatched emitted on attempt claim,
+--                                     payload contains task_id/worker_id/strategy/dispatched_at)
+--   Totals (v0.9.4): 13 project tables / 14 incl. sqlite_sequence
+--                    26 triggers (was 24, +2 net)
+--                    27 named indexes / 39 incl. autoindex
+--                    12 event schemas (was 11, +1 for worker.registered)
+--
 -- v0.9.2 delta (closes Codex v0.9 MERGED CHANGES REQUIRED):
 --   ~ trg_snapshot_event_emit: payload_json now includes task_id + attempt_id
 --   ~ trg_attempt_active_needs_worker: covers UPDATE OF status, worker_id (closes P0-M2-2 / P0-9I UPDATE bypass)
@@ -437,10 +452,40 @@ CREATE TRIGGER trg_attempt_worker_exists_update
 BEFORE UPDATE OF worker_id ON task_attempts
 FOR EACH ROW
 WHEN NEW.worker_id IS NOT NULL
-     AND NEW.worker_id != OLD.worker_id
+     AND NEW.worker_id IS NOT OLD.worker_id
      AND NOT EXISTS (SELECT 1 FROM workers WHERE worker_id = NEW.worker_id)
 BEGIN
     SELECT RAISE(ABORT, 'I15: task_attempts.worker_id must reference an existing workers row (UPDATE path)');
+END;
+
+-- v0.9.4 P0-M2-2 attempt-side backstop (closes Codex v0.9.3 finding):
+-- After UPDATE OF worker_id on task_attempts, the new state MUST be consistent
+-- with workers.current_attempt_id pointers. Specifically: NO worker other than
+-- NEW.worker_id may have current_attempt_id = NEW.attempt_id. If NEW.worker_id
+-- is NULL, NO worker at all may have current_attempt_id = NEW.attempt_id.
+-- This is the reverse direction of trg_worker_ownership_update; together
+-- they enforce bidirectional ownership consistency across both tables.
+-- Previously: changing task_attempts.worker_id from w-own-a to w-own-b left
+-- w-own-a.current_attempt_id pointing at the same attempt, silently breaking
+-- the invariant. The trigger now fires whenever the UPDATE would create that
+-- dangling-pointer state.
+CREATE TRIGGER trg_attempt_owner_consistent_update
+BEFORE UPDATE OF worker_id ON task_attempts
+FOR EACH ROW
+WHEN NEW.worker_id IS NOT OLD.worker_id
+     AND EXISTS (
+         SELECT 1 FROM workers
+         WHERE current_attempt_id = NEW.attempt_id
+           AND (NEW.worker_id IS NULL OR worker_id != NEW.worker_id)
+     )
+BEGIN
+    SELECT RAISE(ABORT,
+        'attempt ownership: task_attempts.worker_id UPDATE from ' ||
+        COALESCE(OLD.worker_id, '<NULL>') || ' to ' || COALESCE(NEW.worker_id, '<NULL>') ||
+        ' for attempt_id=' || NEW.attempt_id ||
+        ' would leave a dangling pointer in workers.current_attempt_id; ' ||
+        'clear the other worker''s pointer first'
+    );
 END;
 
 -- ==================== v0.9-A INVARIANTS ====================
@@ -695,26 +740,85 @@ BEGIN
     );
 END;
 
--- v0.9.2 worker event emission (closes P1-2). Three AFTER triggers mirror
--- the v0.9-A context.snapshot event-emission pattern. These let downstream
--- observers (and audit_log) react to worker lifecycle.
-CREATE TRIGGER trg_worker_dispatched_event_emit
+-- v0.9.4 worker event emission (closes Codex v0.9.3 P1-2 finding).
+-- The original trg_worker_dispatched_event_emit fired on INSERT INTO workers
+-- and named the event 'worker.dispatched', but its payload was registration-
+-- shaped (host/capabilities/status/dispatched_at) while spec/worker-pool.md
+-- §5.1 defines worker.dispatched as task→worker assignment (task_id +
+-- worker_id + strategy + dispatched_at). The two events were conflated.
+-- v0.9.4 split: registration emits 'worker.registered'; task-attempt INSERT/
+-- UPDATE with non-NULL worker_id emits 'worker.dispatched'.
+CREATE TRIGGER trg_worker_registered_event_emit
 AFTER INSERT ON workers
 FOR EACH ROW
 BEGIN
     INSERT INTO task_events (
         event_id, task_id, attempt_id, event_type, payload_json, recorded_at
     ) VALUES (
-        'evt-wd-' || NEW.worker_id,
+        'evt-wr-' || NEW.worker_id,
         NULL,
         NULL,
-        'worker.dispatched',
+        'worker.registered',
         json_object(
             'worker_id', NEW.worker_id,
             'host', NEW.host,
             'capabilities_json', NEW.capabilities_json,
             'status', NEW.status,
-            'dispatched_at', NEW.registered_at
+            'registered_at', NEW.registered_at
+        ),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    );
+END;
+
+-- Real worker.dispatched event (closes v0.9.3 P1-2). Emitted when an attempt
+-- becomes active and bound to a worker (i.e. INSERT with worker_id set and
+-- status in the active set). Payload matches spec/worker-pool.md §5.1.
+CREATE TRIGGER trg_attempt_dispatched_event_emit_insert
+AFTER INSERT ON task_attempts
+FOR EACH ROW
+WHEN NEW.worker_id IS NOT NULL
+     AND NEW.status IN ('claimed', 'running', 'cancel_requested')
+BEGIN
+    INSERT INTO task_events (
+        event_id, task_id, attempt_id, event_type, payload_json, recorded_at
+    ) VALUES (
+        'evt-wd-' || NEW.task_id || '-' || NEW.attempt_id,
+        NEW.task_id,
+        NEW.attempt_id,
+        'worker.dispatched',
+        json_object(
+            'task_id', NEW.task_id,
+            'worker_id', NEW.worker_id,
+            'attempt_id', NEW.attempt_id,
+            'strategy', 'capability_match',
+            'dispatched_at', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        ),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    );
+END;
+
+-- worker.dispatched on UPDATE OF worker_id (worker takeover / handoff).
+-- Fires only when worker_id actually changes and the attempt is active.
+CREATE TRIGGER trg_attempt_dispatched_event_emit_update
+AFTER UPDATE OF worker_id, status ON task_attempts
+FOR EACH ROW
+WHEN NEW.worker_id IS NOT NULL
+     AND NEW.worker_id IS NOT OLD.worker_id
+     AND NEW.status IN ('claimed', 'running', 'cancel_requested')
+BEGIN
+    INSERT INTO task_events (
+        event_id, task_id, attempt_id, event_type, payload_json, recorded_at
+    ) VALUES (
+        'evt-wd-upd-' || NEW.task_id || '-' || NEW.attempt_id,
+        NEW.task_id,
+        NEW.attempt_id,
+        'worker.dispatched',
+        json_object(
+            'task_id', NEW.task_id,
+            'worker_id', NEW.worker_id,
+            'attempt_id', NEW.attempt_id,
+            'strategy', 'worker_takeover',
+            'dispatched_at', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         ),
         strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
     );

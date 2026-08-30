@@ -419,21 +419,37 @@ def reap_stale_workers(conn: sqlite3.Connection, now_offset_seconds: float,
 
 def dispatch_worker(conn: sqlite3.Connection, task_id: str,
                     required_capability: str | None = None) -> str:
-    """Pick an 'active' worker for the task.
+    """Pick an 'active' worker for the task. Atomic across concurrent writers.
 
-    Strategy (v0.9.2 Q210 decision): capability-match first, then round-robin
-    among eligible workers via per-worker dispatch counts stored in
-    harness_meta. Closes P1-3: v0.9.1 fixed-pick by last_heartbeat_at DESC
-    funneled all dispatches to one worker (output was `1 unique`).
+    Strategy (v0.9.2 Q210 + v0.9.4 P1-3 fix): capability-match first, then
+    round-robin among eligible workers via per-worker dispatch counts stored
+    in harness_meta.
+
+    v0.9.4 (closes Codex v0.9.3 P1-3 finding): the v0.9.2 helper did
+    SELECT counts then UPSERT — two concurrent calls would both read
+    count=0, both pick the same winner (or both increment to 1), resulting
+    in lost update. Now uses BEGIN IMMEDIATE to serialize concurrent
+    dispatch_worker() calls across connections, so the SELECT+UPSERT is
+    atomic per winner. Combined with partial unique index
+    idx_worker_one_active_attempt on the actual claim INSERT, this prevents
+    double-dispatch and lost-update in 真并发.
 
     Returns the worker_id of the eligible worker with the lowest dispatch
     count (ties broken by last_heartbeat_at DESC, then worker_id ASC).
     Raises LookupError if no eligible worker exists.
+    Raises RuntimeError if called inside an existing transaction (BEGIN
+    IMMEDIATE inside a txn would silently no-op or raise).
     """
+    if conn.in_transaction:
+        raise RuntimeError(
+            "dispatch_worker() must not be called inside an existing transaction; "
+            "BEGIN IMMEDIATE inside a transaction would fail or silently no-op"
+        )
+
+    # Pre-flight: collect eligible workers (read-only, no lock needed).
     rows = conn.execute(
         "SELECT worker_id, capabilities_json FROM workers WHERE status='active'"
     ).fetchall()
-
     eligible: list[str] = []
     if required_capability:
         for r in rows:
@@ -445,62 +461,50 @@ def dispatch_worker(conn: sqlite3.Connection, task_id: str,
                 eligible.append(r["worker_id"])
     else:
         eligible = [r["worker_id"] for r in rows]
-
     if not eligible:
         raise LookupError(f"NoWorkerAvailable: no active worker for task {task_id}")
 
-    # Fetch dispatch counts for each eligible worker. Default 0 if absent.
-    counts: dict[str, int] = {}
-    for wid in eligible:
-        row = conn.execute(
-            "SELECT v FROM harness_meta WHERE k=?", (f"dispatch:worker:{wid}",)
+    # BEGIN IMMEDIATE acquires the SQLite write lock — concurrent
+    # dispatch_worker() calls on other connections BLOCK until this
+    # transaction commits. This makes the SELECT counts + UPSERT atomic,
+    # eliminating the v0.9.2 lost-update under 真并发.
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        # Re-fetch with current counts under the write lock. The ORDER BY
+        # uses SQL's native DESC on heartbeat (correctly negated by SQLite's
+        # DESC modifier; the previous _neg_ts_key Python helper was misnamed
+        # — it actually sorted ASC).
+        placeholders = ",".join("?" * len(eligible))
+        winner_row = conn.execute(
+            f"SELECT w.worker_id FROM workers w "
+            f"LEFT JOIN harness_meta m "
+            f"  ON m.k = 'dispatch:worker:' || w.worker_id "
+            f"WHERE w.worker_id IN ({placeholders}) AND w.status = 'active' "
+            f"ORDER BY COALESCE(CAST(m.v AS INTEGER), 0) ASC, "
+            f"         w.last_heartbeat_at DESC, w.worker_id ASC "
+            f"LIMIT 1",
+            eligible,
         ).fetchone()
-        counts[wid] = int(row["v"]) if row else 0
+        if winner_row is None:
+            conn.rollback()
+            raise LookupError(f"NoWorkerAvailable: no eligible worker for task {task_id}")
+        winner = winner_row["worker_id"]
 
-    # Sort: lowest count first (round-robin primary key), then heartbeat DESC
-    # as a recency tiebreak, then worker_id ASC as final stable order.
-    rows_meta = conn.execute(
-        "SELECT worker_id, last_heartbeat_at FROM workers "
-        "WHERE worker_id IN ({})".format(",".join("?" * len(eligible))),
-        eligible,
-    ).fetchall()
-    hb = {r["worker_id"]: r["last_heartbeat_at"] for r in rows_meta}
-
-    # heartbeat DESC means larger ts sorts first → use negative key
-    eligible_sorted = sorted(
-        eligible,
-        key=lambda w: (counts[w], _neg_ts_key(hb.get(w, "")), w),
-    )
-    winner = eligible_sorted[0]
-
-    # Atomically increment dispatch count for the chosen worker
-    new_count = counts[winner] + 1
-    conn.execute(
-        "INSERT INTO harness_meta (k, v) VALUES (?, ?) "
-        "ON CONFLICT(k) DO UPDATE SET v=excluded.v",
-        (f"dispatch:worker:{winner}", str(new_count)),
-    )
-    conn.commit()
+        # Atomic increment (UPSERT): first dispatch inserts '1', subsequent
+        # dispatches DO UPDATE SET v = CAST(v AS INTEGER) + 1.
+        conn.execute(
+            "INSERT INTO harness_meta (k, v) VALUES (?, '1') "
+            "ON CONFLICT(k) DO UPDATE SET v = CAST(v AS INTEGER) + 1",
+            (f"dispatch:worker:{winner}",),
+        )
+        conn.commit()
+    except sqlite3.Error:
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
+        raise
     return winner
-
-
-def _ts_key(ts: str) -> int:
-    """Lexicographic timestamp key (ISO 8601 with fixed widths is monotonic)."""
-    # Empty/None sorts lowest; valid timestamps compare lexicographically.
-    return 0 if not ts else 1
-
-
-def _neg_ts_key(ts: str) -> int:
-    """Sort key that puts LATER timestamps FIRST (for round-robin tiebreak).
-
-    ISO 8601 with fixed widths (YYYY-MM-DDTHH:MM:SS.mmmZ) is lexicographically
-    monotonic. We negate by computing its length-aware complement so that
-    `sorted(..., key=_neg_ts_key)` returns most-recent first.
-    """
-    if not ts:
-        return 0  # missing heartbeat sorts last among present timestamps
-    # Use a tuple (present=1, ~timestamp-as-bytes) so empty falls below any value.
-    return (1, ts)
 
 
 def claim_via_pool(conn: sqlite3.Connection, task_id: str,

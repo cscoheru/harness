@@ -1,24 +1,34 @@
-"""Spike: worker-dispatch-test.py (v0.9.3 — closes Codex v0.9.2 CHANGES REQUIRED)
+"""Spike: worker-dispatch-test.py (v0.9.4 — closes Codex v0.9.3 CHANGES REQUIRED)
 
 File: spikes/m0/worker-dispatch-test.py
-Version: v0.9.3
+Version: v0.9.4
 
-Closes Codex v0.9.2 P0-M2-2 ownership NULL bypass + P0-9I/J/K/L/M/N 真并发
-evidence + Case 27d missing + Case 28c weak assertion. v0.9.3 specifics:
+Closes Codex v0.9.3 FAIL set:
+  - P0-M2-2 attempt-side ownership bidirectional (NEW trg_attempt_owner_consistent_update)
+  - P1-2 worker.dispatched event semantics split (registered vs dispatched)
+  - P1-3 dispatch_worker() lost update under 真并发 (BEGIN IMMEDIATE)
+  - Case 27d expanded (4 sub-cases: UPDATE/INSERT × wrong-owner/NULL-attempt)
+  - Case 33 misleading comments (w_idle = truly IDLE, not "bypass")
+  - trg_attempt_worker_exists_update three-valued logic (IS NOT OLD.worker_id)
 
-  - Case 27d NEW: ownership triggers NULL-safe (4 sub-cases, 真并发 file-DB)
-  - Cases 27a/b/c, 29a/b/c, 30, 31, 32: rewritten to use 真并发 (file-DB +
-    threading.Barrier + independent sqlite3.connect per thread)
-  - Case 28c: assertion tightened from >= 1 to == 2 — both racing
-    backward-heartbeats must hit I16
+v0.9.4 specifics:
+  - Case 35 NEW: 真并发 2 threads dispatch_worker() on distinct tasks →
+    BEGIN IMMEDIATE serializes; harness_meta dispatch:worker:* totals = 2
+    (no lost update), 2 distinct winners (round-robin fires)
+  - Case 36 NEW: real worker.dispatched emitted on task_attempts INSERT
+    (was the registration event in v0.9.3, now split into registered + dispatched)
+  - Case 27d expanded: 4 → 4 sub-cases (instead of just 2 UPDATE scenarios,
+    now also INSERT-side ownership failures)
+  - Case 33: w_bypass → w_idle rename + comment fix
 
-Cases (all 16 use真并发 file-DB):
+Cases (all 18 use 真并发 file-DB; Fairness + Reap are single-thread by design):
   Case 25  P0-9G  双 worker 并发 claim 同一 task (rowcount OR idx_attempts_one_active)
   Case 26  P0-9H  真并发同 worker 两 active attempt → idx_worker_one_active_attempt
   Case 27a P0-9I  真并发 INSERT active attempt with worker_id=NULL → I15 trigger
   Case 27b P0-9I  真并发 UPDATE pending→claimed with worker_id=NULL → I15 UPDATE trigger
   Case 27c P0-9I  真并发 UPDATE worker_id to ghost (non-existent) → FK on task_attempts.worker_id
-  Case 27d P0-M2-2  真并发 wrong-owner UPDATE + NULL-attempt UPDATE → ownership trigger (NULL-safe)
+  Case 27d P0-M2-2  真并发 wrong-owner UPDATE + NULL-attempt UPDATE + INSERT-side
+                    ownership failures (4 sub-cases, file-DB Barrier(4))
   Case 28a P0-9J  UPDATE last_heartbeat_at = OLD (equal) → I16 (strict monotonic)
   Case 28b P0-9J  UPDATE last_heartbeat_at = OLD - 1s (backward) → I16
   Case 28c P0-9J  真并发 two workers send backward heartbeats → BOTH rejected by I16
@@ -30,11 +40,13 @@ Cases (all 16 use真并发 file-DB):
   Case 32  P0-9N  真并发 current_attempt_id='att-fake' → FK (via file-DB + 真并发 setup)
   Case 33  P0-9O  真并发 dispatch bypass: INSERT attempt for task_b while worker holds task_a
                  → idx_worker_one_active_attempt
-  Case 34  P1-2   真并发 lifecycle: register + heartbeat + drain → 3 worker.* events emitted
+  Case 34  P1-2   真并发 lifecycle: register + heartbeat + drain → registered/heartbeat/drained × 3 each
+  Case 35  P1-3   真并发 dispatch_worker × 2 distinct tasks → 2 distinct winners, total count = 2
+  Case 36  P1-2   real worker.dispatched emitted on task_attempts INSERT → task_id+worker_id+attempt_id+strategy+dispatched_at
   Fairness P1-3  3 worker × 6 task, round-robin via harness_meta dispatch count
   Reap   misc    1 stale worker reaped, fresh preserved
 
-Note on真并发: each case that races threads uses tempfile.mkstemp +
+Note on 真并发: each case that races threads uses tempfile.mkstemp +
 connect_with_fk(apply_schema=True) on the seed conn + independent
 connect_with_fk(apply_schema=False) per thread, all sharing the same file.
 """
@@ -424,42 +436,51 @@ def case_27c_ghost_worker_update() -> None:
 
     rejected = [r for r in results if r[1] is not None]
     assert len(rejected) == 2, (
-        f"expected BOTH UPDATEs rejected by FK; got {len(rejected)}/2: {results}"
+        f"expected BOTH UPDATEs rejected by I15/FK; got {len(rejected)}/2: {results}"
     )
     for label, msg in rejected:
-        assert "foreign key" in msg.lower() or "fkey" in msg.lower(), (
-            f"{label}: expected FK message; got: {msg}"
-        )
+        # v0.9.4 defense-in-depth: trg_attempt_worker_exists_update (I15) catches
+        # the ghost worker BEFORE the FK constraint on task_attempts.worker_id
+        # fires. Either I15 OR FK message is valid rejection. (Before v0.9.4
+        # the trigger had != NULL bypass; now it fires reliably.)
+        msg_lower = msg.lower()
+        assert (
+            "foreign key" in msg_lower
+            or "fkey" in msg_lower
+            or "i15" in msg_lower
+        ), f"{label}: expected FK or I15 message; got: {msg}"
     _os.unlink(path)
-    print(f"OK: Case 27c 真并发 ghost-worker UPDATE → FK 2/2 拒绝")
+    print(f"OK: Case 27c 真并发 ghost-worker UPDATE → I15/FK 2/2 拒绝")
 
 
 def case_27d_worker_ownership_nullsafe() -> None:
-    """P0-M2-2 (v0.9.3): ownership triggers must be NULL-safe.
+    """P0-M2-2 (v0.9.3 + v0.9.4 expansion): ownership triggers must be NULL-safe
+    on BOTH INSERT and UPDATE paths, for BOTH wrong-owner and NULL-attempt cases.
 
     Codex v0.9.2 finding: `trg_worker_ownership_insert/update` used
     `(SELECT worker_id FROM task_attempts WHERE attempt_id = NEW.current_attempt_id)
-    != NEW.worker_id`. When the subquery returns NULL (missing row OR
-    worker_id IS NULL), the comparison is UNKNOWN — UNKNOWN in WHEN skips RAISE,
-    so UPDATE succeeded even though ownership was never verified.
+    != NEW.worker_id`. When the subquery returned NULL, the comparison was
+    UNKNOWN — UNKNOWN in WHEN skips RAISE, so the write succeeded even though
+    ownership was never verified.
 
-    v0.9.3 fix: trigger uses `NOT EXISTS` which is NULL-safe by construction
-    (returns TRUE iff no matching row exists). Two thread scenarios run in
-    parallel:
-      - 27d-A: wrong-owner UPDATE — w_other.current_attempt_id = attempt_of_w_owner
-      - 27d-B: NULL-attempt UPDATE — current_attempt_id = 'att-nonexistent'
+    v0.9.3 fix: trigger uses `NOT EXISTS` which is NULL-safe by construction.
+    v0.9.4 expansion: 4 sub-cases covering INSERT + UPDATE × wrong-owner +
+    NULL-attempt. All 4 fire in真并发 via Barrier(4) and all 4 must be rejected.
 
-    Both must be rejected with an ownership-themed IntegrityError.
+      27d-1: wrong-owner UPDATE — w_other.current_attempt_id = attempt_of_w_owner
+      27d-2: NULL-attempt UPDATE — current_attempt_id = 'att-nonexistent'
+      27d-3: wrong-owner INSERT — INSERT new worker claiming attempt_of_w_owner
+      27d-4: NULL-attempt INSERT — INSERT new worker claiming 'att-nonexistent'
     """
     fd, path = tempfile.mkstemp(suffix=".sqlite"); _os.close(fd)
     seed = connect_with_fk(path=path, apply_schema=True)
     task_id = seed_task(seed)
     w_owner = register_worker(seed, host="h1", worker_id="w-c27d-owner")
-    w_other = register_worker(seed, host="h1", worker_id="w-c27d-other")
+    register_worker(seed, host="h1", worker_id="w-c27d-other")
     attempt_id, _ = claim(seed, task_id, w_owner)
     seed.close()
 
-    barrier = threading.Barrier(2)
+    barrier = threading.Barrier(4)
     results: list = []
     lock = threading.Lock()
 
@@ -477,30 +498,46 @@ def case_27d_worker_ownership_nullsafe() -> None:
         finally:
             c.close()
 
-    t1 = threading.Thread(target=try_op, args=(
-        "wrong-owner-update",
-        "UPDATE workers SET current_attempt_id=? WHERE worker_id=?",
-        (attempt_id, "w-c27d-other"),
-    ))
-    t2 = threading.Thread(target=try_op, args=(
-        "null-attempt-update",
-        "UPDATE workers SET current_attempt_id='att-nonexistent' WHERE worker_id=?",
-        ("w-c27d-owner",),
-    ))
-    t1.start(); t2.start()
-    t1.join(); t2.join()
+    threads = [
+        threading.Thread(target=try_op, args=(
+            "wrong-owner-update",
+            "UPDATE workers SET current_attempt_id=? WHERE worker_id=?",
+            (attempt_id, "w-c27d-other"),
+        )),
+        threading.Thread(target=try_op, args=(
+            "null-attempt-update",
+            "UPDATE workers SET current_attempt_id='att-nonexistent' WHERE worker_id=?",
+            ("w-c27d-owner",),
+        )),
+        threading.Thread(target=try_op, args=(
+            "wrong-owner-insert",
+            "INSERT INTO workers (worker_id, host, capabilities_json, status, "
+            "  last_heartbeat_at, current_attempt_id) VALUES (?, 'h1', '[]', "
+            "  'active', '2026-08-30T12:00:00.000Z', ?)",
+            ("w-c27d-attacker", attempt_id),
+        )),
+        threading.Thread(target=try_op, args=(
+            "null-attempt-insert",
+            "INSERT INTO workers (worker_id, host, capabilities_json, status, "
+            "  last_heartbeat_at, current_attempt_id) VALUES (?, 'h1', '[]', "
+            "  'active', '2026-08-30T12:00:00.000Z', 'att-nonexistent')",
+            ("w-c27d-attacker2",),
+        )),
+    ]
+    for t in threads: t.start()
+    for t in threads: t.join()
 
     rejected = [r for r in results if r[1] is not None]
-    assert len(rejected) == 2, (
-        f"expected BOTH ownership UPDATEs rejected (wrong-owner + NULL-attempt); "
-        f"got {len(rejected)}/2: {results}"
+    assert len(rejected) == 4, (
+        f"expected ALL 4 ownership writes rejected (2 UPDATE + 2 INSERT); "
+        f"got {len(rejected)}/4: {results}"
     )
     for label, msg in rejected:
         assert "ownership" in msg.lower(), (
             f"{label}: expected 'ownership' keyword in message; got: {msg}"
         )
     _os.unlink(path)
-    print(f"OK: Case 27d ownership NULL-safe — wrong-owner + NULL-attempt both rejected")
+    print(f"OK: Case 27d ownership NULL-safe — 4 sub-cases (UPDATE/INSERT × wrong/NULL-attempt) all rejected")
 
 
 # ----------------------------------------------------------------------------
@@ -915,31 +952,31 @@ def case_32_worker_current_attempt_nonexistent() -> None:
 # ----------------------------------------------------------------------------
 
 def case_33_dispatch_bypasses_claim_concurrent() -> None:
-    """P0-9O: 真并发 setup: worker w-bypass holds task_a (via canonical
-    claim_via_pool), then two threads race to direct-INSERT attempts for
-    task_b with the SAME bypass worker → exactly 1 success (the first to
-    claim) — proves that direct INSERT is also rate-limited by
-    idx_worker_one_active_attempt.
-
-    Codex v0.9 finding: bypass INSERT was the gap. v0.9.2: even bypassing
-    claim(), the partial unique index on task_attempts.worker_id (where
-    status IN claimed/running) caps each worker at one active attempt.
+    """P0-9O: 真并发 setup — two threads race to direct-INSERT attempts for
+    task_b using the same idle worker (no claim() helper); exactly 1 success,
+    1 reject from idx_worker_one_active_attempt. Closes Codex v0.9.3 finding
+    that the previous comment claimed w_bypass held task_a but the actual
+    setup had w_holder claim task_a — renamed w_bypass → w_idle and clarified
+    the intent: this case proves that direct INSERT bypasses claim() helper
+    are still rate-limited by the partial unique index per worker.
     """
     path, seed = _shared_db()
     holder: dict = {}
 
     def prepare(c):
-        # Two workers: w-holder holds task_a (canonical claim_via_pool),
-        # w-bypass is a no-capability worker used only for the bypass test.
-        w_holder = register_worker(c, host="h1", worker_id="w-c33-holder",
-                                   capabilities_json='["web.fetch"]')
-        w_bypass = register_worker(c, host="h1", worker_id="w-c33-bypass",
-                                   capabilities_json='["other"]')
-        holder["w_bypass"] = w_bypass
+        # Two workers: w_holder is web.fetch-capable (will claim task_a via
+        # claim_via_pool to set up a busy worker); w_idle is OTHER-capable
+        # (no claim_via_pool on it, so it stays IDLE). Both bypass INSERTs
+        # use w_idle as the worker.
+        register_worker(c, host="h1", worker_id="w-c33-holder",
+                        capabilities_json='["web.fetch"]')
+        register_worker(c, host="h1", worker_id="w-c33-idle",
+                        capabilities_json='["other"]')
+        holder["w_idle"] = "w-c33-idle"
         holder["t_a"] = seed_task(c)
         holder["t_b"] = seed_task(c)
-        # claim_via_pool needs a worker; w-holder matches web.fetch default,
-        # w-bypass does not. This way w-holder (not w-bypass) claims task_a.
+        # claim_via_pool with web.fetch → w_holder picks up task_a, leaving
+        # w_idle truly IDLE for the bypass test below.
         claim_via_pool(c, holder["t_a"], required_capability="web.fetch")
         # Bump task_b fence to 1 so direct INSERTs use fence=1
         c.execute(
@@ -948,7 +985,7 @@ def case_33_dispatch_bypasses_claim_concurrent() -> None:
         c.commit()
 
     seed(prepare)
-    w_bypass = holder["w_bypass"]
+    w_idle = holder["w_idle"]
     t_b = holder["t_b"]
     barrier = threading.Barrier(2)
     results: list = []
@@ -964,7 +1001,7 @@ def case_33_dispatch_bypasses_claim_concurrent() -> None:
                     "(task_id, attempt_id, fence_version, worker_id, status, "
                     " lease_token, lease_expires_at, status_version, driver_kind) "
                     "VALUES (?, ?, 1, ?, 'claimed', ?, ?, 0, 'codex_sdk')",
-                    (t_b, attempt_id, w_bypass, f"lease-{attempt_id}",
+                    (t_b, attempt_id, w_idle, f"lease-{attempt_id}",
                      "2099-01-01T00:00:00Z"),
                 )
                 c.commit()
@@ -1003,6 +1040,9 @@ def case_34_worker_event_emission_concurrent() -> None:
 
     Codex v0.9 finding: worker event schemas existed but no emission evidence;
     full lifecycle produced 0 worker.* events.
+    v0.9.4: 'worker.registered' replaces the old 'worker.dispatched' registration
+    event. 'worker.dispatched' is now reserved for real task→worker dispatch
+    (tested separately by case_36).
     """
     path, seed = _shared_db()
 
@@ -1057,11 +1097,14 @@ def case_34_worker_event_emission_concurrent() -> None:
     for r in rows:
         by_type.setdefault(r["event_type"], []).append(_json.loads(r["payload_json"]))
 
-    assert "worker.dispatched" in by_type, f"missing worker.dispatched; got types: {list(by_type)}"
+    # v0.9.4: 'worker.registered' replaces old 'worker.dispatched' registration event
+    assert "worker.registered" in by_type, (
+        f"missing worker.registered; got types: {list(by_type)}"
+    )
     assert "worker.heartbeat" in by_type, f"missing worker.heartbeat; got types: {list(by_type)}"
     assert "worker.drained" in by_type, f"missing worker.drained; got types: {list(by_type)}"
-    assert len(by_type["worker.dispatched"]) == 3, (
-        f"expected 3 dispatched events; got {len(by_type['worker.dispatched'])}"
+    assert len(by_type["worker.registered"]) == 3, (
+        f"expected 3 registered events; got {len(by_type['worker.registered'])}"
     )
     assert len(by_type["worker.heartbeat"]) == 3, (
         f"expected 3 heartbeat events; got {len(by_type['worker.heartbeat'])}"
@@ -1070,10 +1113,10 @@ def case_34_worker_event_emission_concurrent() -> None:
         f"expected 3 drained events; got {len(by_type['worker.drained'])}"
     )
 
-    # Validate payload schema fields
-    for payload in by_type["worker.dispatched"]:
-        for field in ("worker_id", "host", "capabilities_json", "status", "dispatched_at"):
-            assert field in payload, f"dispatched payload missing {field}: {payload}"
+    # Validate payload schema fields (worker.registered spec/worker-pool.md §5)
+    for payload in by_type["worker.registered"]:
+        for field in ("worker_id", "host", "capabilities_json", "status", "registered_at"):
+            assert field in payload, f"registered payload missing {field}: {payload}"
     for payload in by_type["worker.heartbeat"]:
         for field in ("worker_id", "last_heartbeat_at", "current_attempt_id"):
             assert field in payload, f"heartbeat payload missing {field}: {payload}"
@@ -1081,7 +1124,167 @@ def case_34_worker_event_emission_concurrent() -> None:
         for field in ("worker_id", "status", "current_attempt_id"):
             assert field in payload, f"drained payload missing {field}: {payload}"
 
-    print(f"OK: Case 34 真并发 lifecycle → dispatched/heartbeat/drained × 3 each emitted + schema valid")
+    # 'worker.dispatched' should NOT appear in pure worker lifecycle (no task
+    # was claimed). It's emitted only when a task_attempts row INSERTs with
+    # a worker_id. case_36 tests the dispatched emission path.
+    assert "worker.dispatched" not in by_type, (
+        f"unexpected worker.dispatched events in pure worker lifecycle: {by_type['worker.dispatched']}"
+    )
+
+    print(f"OK: Case 34 真并发 lifecycle → registered/heartbeat/drained × 3 each emitted + schema valid")
+
+
+# ----------------------------------------------------------------------------
+# Case 35 — P1-3 (v0.9.4): 真并发 dispatch race — no lost update
+# ----------------------------------------------------------------------------
+
+def case_35_concurrent_dispatch_atomic_count() -> None:
+    """P1-3 (v0.9.4): 真并发 two threads simultaneously call dispatch_worker()
+    on distinct tasks. The fix: BEGIN IMMEDIATE in dispatch_worker serializes
+    concurrent calls across connections, so the SELECT counts + UPSERT is
+    atomic per winner.
+
+    Codex v0.9.3 P1-3 finding (raw reproduction, BEFORE the v0.9.4 fix):
+      T1 SELECT counts -> {w_a: 0, w_b: 0}, picks w_a, UPSERT counts[w_a] = 1
+      T2 SELECT counts -> {w_a: 0, w_b: 0} (concurrent with T1, no commit yet),
+                           picks w_a, UPSERT counts[w_a] = 1
+      -> both dispatches wrote 1; persisted total = 1, lost update.
+
+    With BEGIN IMMEDIATE the calls serialize: T1 BEGIN, picks w_a, UPSERT+commit
+    releases write lock; T2 BEGIN, sees counts[w_a]=1, picks w_b.
+
+    Assertions:
+      - both dispatches succeed (no exception, distinct worker_ids returned)
+      - 2 DIFFERENT winners (round-robin actually fires)
+      - harness_meta dispatch:worker:* counts total = 2 (no lost update)
+      - each worker has count = 1 (perfect round-robin)
+    """
+    path, seed = _shared_db()
+
+    def prepare(c):
+        register_worker(c, host="h1", worker_id="w-c35-a",
+                       capabilities_json='["web.fetch"]')
+        register_worker(c, host="h1", worker_id="w-c35-b",
+                       capabilities_json='["web.fetch"]')
+        # Force w-c35-a heartbeat strictly later than w-c35-b to expose any
+        # heartbeat-first tiebreak regression.
+        c.execute(
+            "UPDATE workers SET last_heartbeat_at='2099-01-01T00:00:00.000Z' "
+            "WHERE worker_id='w-c35-a'"
+        )
+        c.commit()
+
+    seed(prepare)
+
+    barrier = threading.Barrier(2)
+    results: list = []
+    lock = threading.Lock()
+
+    def dispatch(idx):
+        c = connect_with_fk(path=path, apply_schema=False)
+        try:
+            barrier.wait()
+            tid = f"t-c35-{idx}"
+            c.execute(
+                "INSERT INTO tasks (task_id, tenant_id, workflow_pack, "
+                "  workflow_version, status) VALUES (?, 'tn', 'web_research', "
+                "  '1.0.0', 'pending')",
+                (tid,),
+            )
+            c.commit()
+            from _helpers import dispatch_worker
+            wid = dispatch_worker(c, tid, required_capability="web.fetch")
+            with lock:
+                results.append((idx, tid, wid, None))
+        except Exception as e:
+            with lock:
+                results.append((idx, None, None, str(e)))
+        finally:
+            c.close()
+
+    t1 = threading.Thread(target=dispatch, args=(1,))
+    t2 = threading.Thread(target=dispatch, args=(2,))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    successes = [r for r in results if r[2] is not None]
+    assert len(successes) == 2, (
+        f"expected 2 dispatch successes; got {len(successes)}: {results}"
+    )
+
+    winners = {r[2] for r in successes}
+    assert len(winners) == 2, (
+        f"expected 2 DIFFERENT winners (round-robin); got {winners} from {successes}"
+    )
+
+    c = connect_with_fk(path=path, apply_schema=False)
+    rows = c.execute(
+        "SELECT k, v FROM harness_meta WHERE k LIKE 'dispatch:worker:%'"
+    ).fetchall()
+    c.close()
+    counts = {r["k"]: int(r["v"]) for r in rows}
+    total = sum(counts.values())
+    assert total == 2, (
+        f"expected total dispatch count = 2 (no lost update); "
+        f"got total={total}, counts={counts}"
+    )
+    assert all(v == 1 for v in counts.values()), (
+        f"expected each worker count = 1 (perfect round-robin); got {counts}"
+    )
+
+    _os.unlink(path)
+    print(f"OK: Case 35 真并发 dispatch race → 2 distinct winners, total count = 2 (no lost update)")
+
+
+# ----------------------------------------------------------------------------
+# Case 36 — P1-2 (v0.9.4): real worker.dispatched emitted on task claim
+# ----------------------------------------------------------------------------
+
+def case_36_worker_dispatched_event_on_claim() -> None:
+    """P1-2 (v0.9.4): real worker.dispatched event emitted on task_attempts
+    INSERT with non-NULL worker_id and active status. Payload contains task_id
+    + worker_id + attempt_id + strategy + dispatched_at. Closes Codex v0.9.3
+    P1-2 finding that 'worker.dispatched' was actually the registration event
+    payload; v0.9.4 splits registered vs dispatched with distinct payloads.
+    """
+    path, seed = _shared_db()
+    holder: dict = {}
+
+    def prepare(c):
+        w = register_worker(c, host="h1", worker_id="w-c36")
+        holder["w"] = w
+
+    seed(prepare)
+    w = holder["w"]
+
+    c = connect_with_fk(path=path, apply_schema=False)
+    task_id = seed_task(c)
+    attempt_id, _ = claim(c, task_id, w)
+    rows = c.execute(
+        "SELECT event_type, payload_json, task_id, attempt_id "
+        "FROM task_events WHERE event_type='worker.dispatched'"
+    ).fetchall()
+    c.close()
+
+    matching = [r for r in rows if r["task_id"] == task_id]
+    assert len(matching) == 1, (
+        f"expected exactly 1 worker.dispatched event for task {task_id}; "
+        f"got {len(matching)} ({len(rows)} total dispatched events)"
+    )
+
+    payload = _json.loads(matching[0]["payload_json"])
+    for field in ("task_id", "worker_id", "attempt_id", "strategy", "dispatched_at"):
+        assert field in payload, f"dispatched payload missing {field}: {payload}"
+    assert payload["task_id"] == task_id, f"task_id mismatch: {payload}"
+    assert payload["worker_id"] == w, f"worker_id mismatch: {payload}"
+    assert payload["attempt_id"] == attempt_id, f"attempt_id mismatch: {payload}"
+    assert payload["strategy"] in ("capability_match", "worker_takeover"), (
+        f"strategy unexpected: {payload['strategy']}"
+    )
+
+    _os.unlink(path)
+    print(f"OK: Case 36 worker.dispatched emitted on claim — "
+          f"task_id+worker_id+attempt_id+strategy+dispatched_at ✓")
 
 
 # ----------------------------------------------------------------------------
@@ -1180,9 +1383,11 @@ def main() -> int:
     case_32_worker_current_attempt_nonexistent()
     case_33_dispatch_bypasses_claim_concurrent()
     case_34_worker_event_emission_concurrent()
+    case_35_concurrent_dispatch_atomic_count()
+    case_36_worker_dispatched_event_on_claim()
     case_fairness_round_robin()
     case_reap_stale()
-    print("\nOK: worker-dispatch-test.py v0.9.3 — 19 cases 全绿 (含 Case 27d NULL-safe)")
+    print("\nOK: worker-dispatch-test.py v0.9.4 — 21 cases 全绿 (含 Case 27d NULL-safe + Case 35 BEGIN IMMEDIATE 真并发 + Case 36 worker.dispatched 派单事件)")
     return 0
 
 

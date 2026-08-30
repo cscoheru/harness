@@ -2,6 +2,9 @@
 
 > **File**: `notes/codex-review-prompt-v0.9.3.md`
 > **Date**: 2026-08-30
+> **Status**: ⚠️ **SUPERSEDED** — v0.9.3 复审返回 CHANGES REQUIRED / 14/20 PASS / 6 FAIL
+>   （P0-M2-2 attempt-side ownership / P1-2 事件语义混淆 / P1-3 真并发 dispatch 丢更新 / Case 27d 不全 / Case 33 注释 / I15 触发器三值逻辑）。
+>   新指令见 `notes/codex-review-prompt-v0.9.4.md`。
 > **Source**: `notes/codex-review-prompt-v0.9.2.md` (SUPERSEDED — returned CHANGES REQUIRED)
 > **Target**: Codex 对 v0.9.3 (修复 ownership NULL bypass + fence NULL bypass + Case 27d + 真并发 + M0-19 扩展 + CI flag) 做合并复审
 > **Supersedes**: `notes/codex-review-prompt-v0.9.2.md` (v0.9.2 合并复审 CHANGES REQUIRED / 17/19 PASS)

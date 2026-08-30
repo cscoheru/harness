@@ -1,7 +1,7 @@
-"""Spike: mutation-test.py (v0.9.3 — closes Codex v0.9.2 M0-19 coverage gap)
+"""Spike: mutation-test.py (v0.9.4 — closes Codex v0.9.3 M0-19 extension gap)
 
 File: spikes/m0/mutation-test.py
-Version: v0.9.3
+Version: v0.9.4
 
 For each key constraint / trigger / index, performs reverse-DROP mutation:
   1. Baseline: constraint ON → positive test PASSES
@@ -12,7 +12,10 @@ Codex v0.9 P0-M2 finding: previous spikes passed but did not prove the target
 constraint was the actual enforcement layer (helper intercepted first).
 Codex v0.9.2 M0-19 finding: only 6 mutations covering old constraints; v0.9.2
 added 5 new fix categories (ownership, lineage, payload, worker events, round-robin)
-that lacked reverse-DROP causal evidence. v0.9.3: extend to 15 mutations.
+that lacked reverse-DROP causal evidence. v0.9.3: extended to 15 mutations.
+Codex v0.9.3 M0-19 finding: 3 v0.9.4 additions (attempt-side ownership, registered
+event rename, dispatched event on claim) lacked reverse-DROP causal evidence.
+v0.9.4: extend to 18 mutations.
 
 Mutations (each in independent file-DB):
   M1   DROP idx_attempts_one_active → 真并发 double-claim both succeed
@@ -26,10 +29,16 @@ Mutations (each in independent file-DB):
   M9   DROP trg_lineage_l2_needs_parent → INSERT L2 with L2 parent succeeds (P1-1)
   M10  DROP trg_lineage_l3_needs_parent → INSERT L3 with L1 parent succeeds (P1-1)
   M11  DROP trg_snapshot_no_update → UPDATE context_snapshots.token_count succeeds (P0-M2-1)
-  M12  DROP trg_worker_dispatched_event_emit → no task_events row on register (P1-2)
   M13  DROP trg_worker_heartbeat_event_emit → no task_events row on heartbeat (P1-2)
   M14  DROP trg_worker_drained_event_emit → no task_events row on drain (P1-2)
   M15  monkey-patch _helpers.dispatch_worker → heartbeat-first → 6 dispatches funnel to 1 worker (P1-3)
+  M16  DROP trg_attempt_owner_consistent_update → UPDATE task_attempts.worker_id succeeds (P0-M2-2 v0.9.4)
+  M17  DROP trg_worker_registered_event_emit → no task_events row on register (P1-2 v0.9.4 rename, supersedes M12)
+  M18  DROP trg_attempt_dispatched_event_emit_insert → no task_events row of type 'worker.dispatched' on attempt claim (P1-2 v0.9.4)
+
+Note: M12 (DROP trg_worker_dispatched_event_emit / check event_type='worker.dispatched')
+was removed in v0.9.4 because the trigger was renamed to trg_worker_registered_event_emit
+and now emits 'worker.registered'. M17 covers the renamed trigger with the correct event_type.
 """
 
 from __future__ import annotations
@@ -693,37 +702,6 @@ def m11_drop_test_snapshot_update_succeeds() -> None:
 
 
 # ----------------------------------------------------------------------------
-# M12: trg_worker_dispatched_event_emit (P1-2 dispatched event)
-# ----------------------------------------------------------------------------
-
-def m12_drop_test_worker_dispatched_event_missing() -> None:
-    """M12: DROP trg_worker_dispatched_event_emit → register emits no event."""
-    # Baseline DB
-    path_a, conn = _fresh_db_with_schema()
-    register_worker(conn, host="h1", worker_id="w-m12-baseline")
-    conn.commit()
-    n_baseline = conn.execute(
-        "SELECT COUNT(*) AS n FROM task_events WHERE event_type='worker.dispatched'"
-    ).fetchone()["n"]
-    assert n_baseline == 1, f"M12 baseline: expected 1 dispatched event; got {n_baseline}"
-    conn.close()
-    _os.unlink(path_a)
-
-    # Mutation DB
-    path_b, conn = _fresh_db_with_schema()
-    _drop_object(path_b, "DROP TRIGGER trg_worker_dispatched_event_emit")
-    register_worker(conn, host="h1", worker_id="w-m12-mutated")
-    conn.commit()
-    n_mutated = conn.execute(
-        "SELECT COUNT(*) AS n FROM task_events WHERE event_type='worker.dispatched'"
-    ).fetchone()["n"]
-    assert n_mutated == 0, f"M12 mutation: expected 0 dispatched events; got {n_mutated}"
-    conn.close()
-    _os.unlink(path_b)
-    print(f"OK: M12 DROP trg_worker_dispatched_event_emit → 0 events on register (was 1)")
-
-
-# ----------------------------------------------------------------------------
 # M13: trg_worker_heartbeat_event_emit (P1-2 heartbeat event)
 # ----------------------------------------------------------------------------
 
@@ -850,6 +828,143 @@ def m15_drop_test_round_robin_reverts_to_heartbeat_first() -> None:
 
 
 # ----------------------------------------------------------------------------
+# M16 (v0.9.4): trg_attempt_owner_consistent_update — attempt-side ownership
+# ----------------------------------------------------------------------------
+
+def m16_drop_test_attempt_side_owner_update_succeeds() -> None:
+    """M16: DROP trg_attempt_owner_consistent_update → UPDATE
+    task_attempts.worker_id leaves a dangling pointer in workers.current_attempt_id
+    of the OTHER worker (the new v0.9.4 attempt-side ownership constraint,
+    bidirectional with M7/M8's worker-side).
+
+    Setup note: claim() helper does not update workers.current_attempt_id (that
+    is dispatch_worker()'s job). Manually set the pointer so the trigger sees
+    the exact post-dispatch state it was designed to protect.
+    """
+    path, conn = _fresh_db_with_schema()
+    task_id = seed_task(conn)
+    w_owner = register_worker(conn, host="h1", worker_id="w-m16-owner")
+    w_other = register_worker(conn, host="h1", worker_id="w-m16-other")
+    attempt_id, _ = claim(conn, task_id, w_owner)
+    # Manually mirror what dispatch_worker() does: workers.current_attempt_id
+    # ← workers.w-m16-owner.current_attempt_id = attempt_id. Without this
+    # pointer, trg_attempt_owner_consistent_update would not fire (no row
+    # matches in the EXISTS subquery).
+    conn.execute(
+        "UPDATE workers SET current_attempt_id=? WHERE worker_id=?",
+        (attempt_id, "w-m16-owner"),
+    )
+    conn.commit()
+    conn.close()
+
+    conn = connect_with_fk(path=path, apply_schema=False)
+    try:
+        # Attempt-side ownership: changing task_attempts.worker_id for attempt_id
+        # from w_owner to w_other must be rejected because w_other has no
+        # current_attempt_id pointing at this attempt (it would leave the
+        # w_owner.current_attempt_id dangling).
+        conn.execute(
+            "UPDATE task_attempts SET worker_id=? WHERE attempt_id=?",
+            ("w-m16-other", attempt_id),
+        )
+        raise AssertionError(
+            "M16 baseline: expected attempt-side ownership reject; UPDATE succeeded"
+        )
+    except sqlite3.IntegrityError as e:
+        msg = str(e).lower()
+        assert "ownership" in msg or "i15" in msg or "foreign key" in msg, (
+            f"M16 baseline should mention ownership/I15/FK; got: {e}"
+        )
+    conn.close()
+
+    _drop_object(path, "DROP TRIGGER trg_attempt_owner_consistent_update")
+    conn = connect_with_fk(path=path, apply_schema=False)
+    conn.execute(
+        "UPDATE task_attempts SET worker_id=? WHERE attempt_id=?",
+        ("w-m16-other", attempt_id),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT worker_id FROM task_attempts WHERE attempt_id=?", (attempt_id,)
+    ).fetchone()
+    assert row["worker_id"] == "w-m16-other", (
+        f"M16 mutation: worker_id should be w-m16-other; got {row['worker_id']}"
+    )
+    conn.close()
+    _os.unlink(path)
+    print(f"OK: M16 DROP trg_attempt_owner_consistent_update → attempt-side UPDATE succeeds")
+
+
+# ----------------------------------------------------------------------------
+# M17 (v0.9.4): trg_worker_registered_event_emit — renamed from dispatched
+# ----------------------------------------------------------------------------
+
+def m17_drop_test_worker_registered_event_missing() -> None:
+    """M17: DROP trg_worker_registered_event_emit → register emits no event.
+    v0.9.4 rename: trg_worker_dispatched_event_emit → trg_worker_registered_event_emit
+    with event_type 'worker.registered' (was 'worker.dispatched' in v0.9.3,
+    conflated). Verifies the renamed trigger is the actual emission source.
+    """
+    path_a, conn = _fresh_db_with_schema()
+    register_worker(conn, host="h1", worker_id="w-m17-baseline")
+    conn.commit()
+    n_baseline = conn.execute(
+        "SELECT COUNT(*) AS n FROM task_events WHERE event_type='worker.registered'"
+    ).fetchone()["n"]
+    assert n_baseline == 1, f"M17 baseline: expected 1 registered event; got {n_baseline}"
+    conn.close()
+    _os.unlink(path_a)
+
+    path_b, conn = _fresh_db_with_schema()
+    _drop_object(path_b, "DROP TRIGGER trg_worker_registered_event_emit")
+    register_worker(conn, host="h1", worker_id="w-m17-mutated")
+    conn.commit()
+    n_mutated = conn.execute(
+        "SELECT COUNT(*) AS n FROM task_events WHERE event_type='worker.registered'"
+    ).fetchone()["n"]
+    assert n_mutated == 0, f"M17 mutation: expected 0 registered events; got {n_mutated}"
+    conn.close()
+    _os.unlink(path_b)
+    print(f"OK: M17 DROP trg_worker_registered_event_emit → 0 events on register (was 1)")
+
+
+# ----------------------------------------------------------------------------
+# M18 (v0.9.4): trg_attempt_dispatched_event_emit_insert — real dispatch event
+# ----------------------------------------------------------------------------
+
+def m18_drop_test_attempt_dispatched_event_missing() -> None:
+    """M18: DROP trg_attempt_dispatched_event_emit_insert → no worker.dispatched
+    event on task_attempts INSERT. v0.9.4 split: registration emits worker.registered
+    (M17), but the actual task→worker assignment emits worker.dispatched with
+    task_id + worker_id + attempt_id + strategy (P1-2 close)."""
+    path_a, conn = _fresh_db_with_schema()
+    task_id = seed_task(conn)
+    register_worker(conn, host="h1", worker_id="w-m18")
+    claim(conn, task_id, "w-m18")
+    conn.commit()
+    n_baseline = conn.execute(
+        "SELECT COUNT(*) AS n FROM task_events WHERE event_type='worker.dispatched'"
+    ).fetchone()["n"]
+    assert n_baseline == 1, f"M18 baseline: expected 1 dispatched event; got {n_baseline}"
+    conn.close()
+    _os.unlink(path_a)
+
+    path_b, conn = _fresh_db_with_schema()
+    _drop_object(path_b, "DROP TRIGGER trg_attempt_dispatched_event_emit_insert")
+    task_id_b = seed_task(conn)
+    register_worker(conn, host="h1", worker_id="w-m18b")
+    claim(conn, task_id_b, "w-m18b")
+    conn.commit()
+    n_mutated = conn.execute(
+        "SELECT COUNT(*) AS n FROM task_events WHERE event_type='worker.dispatched'"
+    ).fetchone()["n"]
+    assert n_mutated == 0, f"M18 mutation: expected 0 dispatched events; got {n_mutated}"
+    conn.close()
+    _os.unlink(path_b)
+    print(f"OK: M18 DROP trg_attempt_dispatched_event_emit_insert → 0 dispatched events (was 1)")
+
+
+# ----------------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------------
 
@@ -866,11 +981,17 @@ def main() -> int:
     m9_drop_test_l2_with_l2_parent_succeeds()
     m10_drop_test_l3_with_l1_parent_succeeds()
     m11_drop_test_snapshot_update_succeeds()
-    m12_drop_test_worker_dispatched_event_missing()
+    # M12 removed in v0.9.4: trg_worker_dispatched_event_emit was renamed to
+    # trg_worker_registered_event_emit (event_type 'worker.registered');
+    # superseded by M17 below.
     m13_drop_test_worker_heartbeat_event_missing()
     m14_drop_test_worker_drained_event_missing()
     m15_drop_test_round_robin_reverts_to_heartbeat_first()
-    print(f"\nOK: mutation-test.py v0.9.3 — 15 reverse-DROP mutations all causal-chain verified")
+    # v0.9.4 additions (M16-M18) — closing Codex v0.9.3 M0-19 extension gap
+    m16_drop_test_attempt_side_owner_update_succeeds()
+    m17_drop_test_worker_registered_event_missing()
+    m18_drop_test_attempt_dispatched_event_missing()
+    print(f"\nOK: mutation-test.py v0.9.4 — 17 reverse-DROP mutations all causal-chain verified (M12 superseded by M17)")
     return 0
 
 

@@ -187,6 +187,7 @@ def main() -> int:
         "..", "..", "spec", "events",
     ))
     worker_schema_files = [
+        "worker.registered.json",
         "worker.dispatched.json",
         "worker.heartbeat.json",
         "worker.drained.json",
@@ -197,9 +198,12 @@ def main() -> int:
             wschema = json.load(f)
         Draft202012Validator.check_schema(wschema)
         worker_validators[fn] = Draft202012Validator(wschema)
-    print(f"OK: 3 worker.* event schemas meta-valid (Draft 2020-12)")
+    print(f"OK: {len(worker_schema_files)} worker.* event schemas meta-valid (Draft 2020-12)")
 
-    # Run a real worker lifecycle and validate emitted payloads
+    # Run a real worker lifecycle and validate emitted payloads.
+    # v0.9.4 split: register → worker.registered; heartbeat → worker.heartbeat;
+    # drain → worker.drained; real task claim → worker.dispatched.
+    # seed_task / claim are already imported at module top.
     from _helpers import register_worker, heartbeat_worker, drain_worker
     wid = register_worker(conn, host="h-evt-spike", worker_id="w-evt-lifecycle")
     heartbeat_worker(conn, wid, offset_seconds=15)
@@ -213,7 +217,7 @@ def main() -> int:
         (wid,),
     ).fetchall()
     assert len(wevents) == 3, (
-        f"expected 3 worker.* events (dispatched + heartbeat + drained) for {wid}; got {len(wevents)}: "
+        f"expected 3 worker.* events (registered + heartbeat + drained) for {wid}; got {len(wevents)}: "
         f"{[(r['event_type'], json.loads(r['payload_json']).get('worker_id')) for r in wevents]}"
     )
 
@@ -221,9 +225,7 @@ def main() -> int:
     for r in wevents:
         payload = json.loads(r["payload_json"])
         by_type.setdefault(r["event_type"], []).append(payload)
-        # Map event_type to schema file
-        schema_file = f"{r['event_type'].replace('.', '/').replace('/', '.', 1)}"
-        # Actually: worker.dispatched → worker.dispatched.json
+        # Map event_type to schema file: worker.registered → worker.registered.json
         schema_file = r["event_type"] + ".json"
         assert schema_file in worker_validators, f"no schema for {r['event_type']}"
         errs = list(worker_validators[schema_file].iter_errors(payload))
@@ -231,14 +233,40 @@ def main() -> int:
             f"worker event payload failed schema validation: "
             f"{[(list(e.absolute_path), e.message) for e in errs]} for payload: {payload}"
         )
-    assert "worker.dispatched" in by_type, f"missing worker.dispatched: {list(by_type)}"
+    assert "worker.registered" in by_type, f"missing worker.registered: {list(by_type)}"
     assert "worker.heartbeat" in by_type, f"missing worker.heartbeat: {list(by_type)}"
     assert "worker.drained" in by_type, f"missing worker.drained: {list(by_type)}"
-    # And the dispatched payload must reference our worker_id
-    assert by_type["worker.dispatched"][0]["worker_id"] == wid, (
-        f"dispatched event worker_id mismatch: {by_type['worker.dispatched'][0]}"
+    # v0.9.4 split: pure lifecycle must NOT emit worker.dispatched
+    assert "worker.dispatched" not in by_type, (
+        f"pure lifecycle should NOT emit worker.dispatched (v0.9.4 split); got {list(by_type)}"
     )
-    print(f"OK: Part C — worker lifecycle (register + heartbeat + drain) emitted 3 valid worker.* events")
+    # And the registered payload must reference our worker_id
+    assert by_type["worker.registered"][0]["worker_id"] == wid, (
+        f"registered event worker_id mismatch: {by_type['worker.registered'][0]}"
+    )
+    print(f"OK: Part C — worker lifecycle (register + heartbeat + drain) emitted 3 valid worker.* events (registered/heartbeat/drained)")
+
+    # Part C2: real dispatch (claim) emits worker.dispatched with full payload
+    wid2 = register_worker(conn, host="h-evt-spike", worker_id="w-evt-dispatch")
+    task_id = seed_task(conn)
+    attempt_id, _ = claim(conn, task_id, wid2)
+    dispatched = conn.execute(
+        "SELECT payload_json FROM task_events "
+        "WHERE event_type='worker.dispatched' "
+        "  AND json_extract(payload_json, '$.worker_id') = ?",
+        (wid2,),
+    ).fetchall()
+    assert len(dispatched) == 1, (
+        f"Part C2: expected 1 worker.dispatched on claim; got {len(dispatched)}"
+    )
+    dpayload = json.loads(dispatched[0]["payload_json"])
+    errs = list(worker_validators["worker.dispatched.json"].iter_errors(dpayload))
+    assert errs == [], f"Part C2: dispatched payload failed schema: {errs}"
+    assert dpayload["task_id"] == task_id
+    assert dpayload["worker_id"] == wid2
+    assert dpayload["attempt_id"] == attempt_id
+    assert dpayload["strategy"] in ("capability_match", "worker_takeover")
+    print(f"OK: Part C2 — claim emits 1 valid worker.dispatched event (task_id+worker_id+attempt_id+strategy)")
 
     return 0
 
