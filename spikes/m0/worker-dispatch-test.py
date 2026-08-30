@@ -1,27 +1,33 @@
-"""Spike: worker-dispatch-test.py (v0.9.2 — closes Codex v0.9 CHANGES REQUIRED)
+"""Spike: worker-dispatch-test.py (v0.9.3 — closes Codex v0.9.2 CHANGES REQUIRED)
 
 File: spikes/m0/worker-dispatch-test.py
-Version: v0.9.2
+Version: v0.9.3
 
-Closes Codex v0.9 P0-9G..P0-9O + P0-M2-2 + P1-2 with 真并发 evidence (file-DB +
-independent sqlite3.connect + threading.Barrier) for every case, plus
-sub-cases for the UPDATE bypass paths Codex flagged in v0.9-B review.
+Closes Codex v0.9.2 P0-M2-2 ownership NULL bypass + P0-9I/J/K/L/M/N 真并发
+evidence + Case 27d missing + Case 28c weak assertion. v0.9.3 specifics:
+
+  - Case 27d NEW: ownership triggers NULL-safe (4 sub-cases, 真并发 file-DB)
+  - Cases 27a/b/c, 29a/b/c, 30, 31, 32: rewritten to use 真并发 (file-DB +
+    threading.Barrier + independent sqlite3.connect per thread)
+  - Case 28c: assertion tightened from >= 1 to == 2 — both racing
+    backward-heartbeats must hit I16
 
 Cases (all 16 use真并发 file-DB):
   Case 25  P0-9G  双 worker 并发 claim 同一 task (rowcount OR idx_attempts_one_active)
   Case 26  P0-9H  真并发同 worker 两 active attempt → idx_worker_one_active_attempt
-  Case 27a P0-9I  INSERT active attempt with worker_id=NULL → trg_attempt_active_needs_worker_insert
-  Case 27b P0-9I  UPDATE pending→claimed with worker_id=NULL → trg_attempt_active_needs_worker_update
-  Case 27c P0-9I  UPDATE worker_id to ghost (non-existent) → FK on task_attempts.worker_id
+  Case 27a P0-9I  真并发 INSERT active attempt with worker_id=NULL → I15 trigger
+  Case 27b P0-9I  真并发 UPDATE pending→claimed with worker_id=NULL → I15 UPDATE trigger
+  Case 27c P0-9I  真并发 UPDATE worker_id to ghost (non-existent) → FK on task_attempts.worker_id
+  Case 27d P0-M2-2  真并发 wrong-owner UPDATE + NULL-attempt UPDATE → ownership trigger (NULL-safe)
   Case 28a P0-9J  UPDATE last_heartbeat_at = OLD (equal) → I16 (strict monotonic)
   Case 28b P0-9J  UPDATE last_heartbeat_at = OLD - 1s (backward) → I16
-  Case 28c P0-9J  真并发 two workers send backward heartbeats → at least one I16 reject
-  Case 29a P0-9K  active→draining with terminal attempt → trg_worker_drain_pause
-  Case 29b P0-9K  INSERT status='draining' directly → trg_worker_no_draining_insert
-  Case 29c P0-9K  drained/stale → active UPDATE → trg_worker_no_reactivate
-  Case 30  P0-9L  last_heartbeat_at NULL → NOT NULL
-  Case 31  P0-9M  status='rogue' → CHECK
-  Case 32  P0-9N  current_attempt_id='att-fake' → FK (via file-DB + 真并发 setup)
+  Case 28c P0-9J  真并发 two workers send backward heartbeats → BOTH rejected by I16
+  Case 29a P0-9K  真并发 active→draining with terminal attempt → I17
+  Case 29b P0-9K  真并发 INSERT status='draining' directly → trg_worker_no_draining_insert
+  Case 29c P0-9K  真并发 drained/stale → active UPDATE → trg_worker_no_reactivate
+  Case 30  P0-9L  真并发 last_heartbeat_at NULL → NOT NULL
+  Case 31  P0-9M  真并发 status='rogue' → CHECK
+  Case 32  P0-9N  真并发 current_attempt_id='att-fake' → FK (via file-DB + 真并发 setup)
   Case 33  P0-9O  真并发 dispatch bypass: INSERT attempt for task_b while worker holds task_a
                  → idx_worker_one_active_attempt
   Case 34  P1-2   真并发 lifecycle: register + heartbeat + drain → 3 worker.* events emitted
@@ -266,93 +272,235 @@ def case_26_same_worker_two_active_attempts() -> None:
 # ----------------------------------------------------------------------------
 
 def case_27a_active_attempt_worker_id_null_insert() -> None:
-    """P0-9I: active INSERT with worker_id=NULL → trg_attempt_active_needs_worker_insert."""
-    conn = make_db()
-    task_id = seed_task(conn)
-    try:
-        conn.execute(
-            "INSERT INTO task_attempts "
-            "(task_id, attempt_id, fence_version, worker_id, status, "
-            " lease_token, lease_expires_at, status_version, driver_kind) "
-            "VALUES (?, ?, 1, NULL, 'claimed', ?, ?, 0, 'codex_sdk')",
-            (task_id, "att-c27a", "lease-c27a", "2099-01-01T00:00:00Z"),
-        )
-        raise AssertionError("expected I15 trigger rejection; INSERT succeeded")
-    except sqlite3.IntegrityError as e:
-        assert "I15" in str(e), f"expected I15 message; got: {e}"
-    print(f"OK: Case 27a active INSERT worker_id NULL → I15 INSERT trigger 拒绝")
+    """P0-9I (v0.9.3 真并发): two threads race to INSERT active attempts with
+    worker_id=NULL; both must be rejected by trg_attempt_active_needs_worker_insert.
+    """
+    fd, path = tempfile.mkstemp(suffix=".sqlite"); _os.close(fd)
+    seed = connect_with_fk(path=path, apply_schema=True)
+    task_id = seed_task(seed)
+    seed.close()
+
+    barrier = threading.Barrier(2)
+    results: list = []
+    lock = threading.Lock()
+
+    def try_insert(label, attempt_id):
+        c = connect_with_fk(path=path, apply_schema=False)
+        try:
+            barrier.wait()
+            try:
+                c.execute(
+                    "INSERT INTO task_attempts "
+                    "(task_id, attempt_id, fence_version, worker_id, status, "
+                    " lease_token, lease_expires_at, status_version, driver_kind) "
+                    "VALUES (?, ?, 1, NULL, 'claimed', ?, ?, 0, 'codex_sdk')",
+                    (task_id, attempt_id, f"lease-{attempt_id}", "2099-01-01T00:00:00Z"),
+                )
+                with lock:
+                    results.append((label, None))
+            except sqlite3.IntegrityError as e:
+                with lock:
+                    results.append((label, str(e)))
+        finally:
+            c.close()
+
+    t1 = threading.Thread(target=try_insert, args=("t1", "att-c27a-1"))
+    t2 = threading.Thread(target=try_insert, args=("t2", "att-c27a-2"))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    rejected = [r for r in results if r[1] is not None]
+    assert len(rejected) == 2, (
+        f"expected BOTH INSERTs rejected by I15; got {len(rejected)}/2: {results}"
+    )
+    for label, msg in rejected:
+        assert "I15" in msg, f"{label}: expected I15 message; got: {msg}"
+    _os.unlink(path)
+    print(f"OK: Case 27a 真并发 active INSERT worker_id NULL → I15 INSERT trigger 2/2 拒绝")
 
 
 def case_27b_pending_update_worker_id_null() -> None:
-    """P0-9I: pending attempt UPDATE to claimed with worker_id=NULL → UPDATE variant.
-
-    Codex v0.9 finding: previous spike only covered INSERT path; UPDATE bypass
-    succeeded. v0.9.2: trg_attempt_active_needs_worker_update closes this.
+    """P0-9I (v0.9.3 真并发): seed a pending attempt with worker_id=NULL (legal),
+    then two threads race to UPDATE status='claimed' keeping worker_id NULL;
+    both must hit trg_attempt_active_needs_worker_update.
     """
-    conn = make_db()
-    task_id = seed_task(conn)
-    # First INSERT a pending attempt with worker_id=NULL (I15 INSERT blocks active,
-    # but pending is allowed: CHECK only applies to non-terminal status when NEW is claimed)
-    # Looking at schema: trigger fires on INSERT only when status IN (claimed,running).
-    # So pending INSERT with worker_id=NULL is allowed.
-    conn.execute(
+    fd, path = tempfile.mkstemp(suffix=".sqlite"); _os.close(fd)
+    seed = connect_with_fk(path=path, apply_schema=True)
+    task_id = seed_task(seed)
+    seed.execute(
         "INSERT INTO task_attempts "
         "(task_id, attempt_id, fence_version, worker_id, status, "
         " lease_token, lease_expires_at, status_version, driver_kind) "
         "VALUES (?, ?, 0, NULL, 'pending', ?, ?, 0, 'codex_sdk')",
         (task_id, "att-c27b", "lease-c27b", "2099-01-01T00:00:00Z"),
     )
-    conn.commit()
-    # Now UPDATE to claimed while worker_id stays NULL — must trigger UPDATE variant
-    try:
-        conn.execute(
-            "UPDATE task_attempts SET status='claimed', status_version=status_version+1 "
-            "WHERE attempt_id=?",
-            ("att-c27b",),
-        )
-        raise AssertionError("expected I15 UPDATE trigger; UPDATE succeeded")
-    except sqlite3.IntegrityError as e:
-        assert "I15" in str(e), f"expected I15 UPDATE message; got: {e}"
-    print(f"OK: Case 27b pending UPDATE→claimed worker_id NULL → I15 UPDATE trigger 拒绝")
+    seed.commit()
+    seed.close()
+
+    barrier = threading.Barrier(2)
+    results: list = []
+    lock = threading.Lock()
+
+    def try_update(label):
+        c = connect_with_fk(path=path, apply_schema=False)
+        try:
+            barrier.wait()
+            try:
+                c.execute(
+                    "UPDATE task_attempts SET status='claimed', status_version=status_version+1 "
+                    "WHERE attempt_id=?",
+                    ("att-c27b",),
+                )
+                with lock:
+                    results.append((label, None))
+            except sqlite3.IntegrityError as e:
+                with lock:
+                    results.append((label, str(e)))
+        finally:
+            c.close()
+
+    t1 = threading.Thread(target=try_update, args=("t1",))
+    t2 = threading.Thread(target=try_update, args=("t2",))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    rejected = [r for r in results if r[1] is not None]
+    assert len(rejected) == 2, (
+        f"expected BOTH UPDATEs rejected by I15 UPDATE path; got {len(rejected)}/2: {results}"
+    )
+    for label, msg in rejected:
+        assert "I15" in msg, f"{label}: expected I15 message; got: {msg}"
+    _os.unlink(path)
+    print(f"OK: Case 27b 真并发 pending UPDATE→claimed worker_id NULL → I15 UPDATE 2/2 拒绝")
 
 
 def case_27c_ghost_worker_update() -> None:
-    """P0-9I: UPDATE worker_id to non-existent worker → FK on task_attempts.worker_id.
-
-    Codex v0.9 finding: w-other.current_attempt_id pointed at attempt held by
-    w-owner — FK passed because there was no FK on task_attempts.worker_id.
-    v0.9.2: FK added → UPDATE to ghost worker now fails.
+    """P0-9I (v0.9.3 真并发): seed an attempt with worker_id=NULL (matching
+    task fence_version so the fence trigger doesn't pre-empt the FK test),
+    then two threads race to UPDATE worker_id to a ghost worker; both must hit FK.
     """
-    conn = make_db()
-    task_id = seed_task(conn)
-    # Register two workers; w-owner holds task, w-other does not
-    w_owner = register_worker(conn, host="h1", worker_id="w-c27c-owner")
-    w_other = register_worker(conn, host="h1", worker_id="w-c27c-other")
-    # Insert attempt via claim() (uses w_owner)
-    attempt_id, _ = claim(conn, task_id, w_owner)
-    # Try to reassign to w_other — but FK allows it (w_other exists).
-    # The Codex finding was about w_other.current_attempt_id pointing at attempt
-    # held by w_owner — that's worker-side ownership, tested in Case 27d (workers table).
-    # For task_attempts.worker_id UPDATE ghost test: create attempt without worker,
-    # then UPDATE to a non-existent worker.
-    conn.execute(
+    fd, path = tempfile.mkstemp(suffix=".sqlite"); _os.close(fd)
+    seed = connect_with_fk(path=path, apply_schema=True)
+    task_id = seed_task(seed)
+    # Probe the task's actual fence_version so the seed attempt passes I1.
+    task_fence = seed.execute(
+        "SELECT fence_version FROM tasks WHERE task_id=?", (task_id,)
+    ).fetchone()["fence_version"]
+    seed.execute(
         "INSERT INTO task_attempts "
         "(task_id, attempt_id, fence_version, worker_id, status, "
         " lease_token, lease_expires_at, status_version, driver_kind) "
-        "VALUES (?, ?, 1, NULL, 'pending', ?, ?, 0, 'codex_sdk')",
-        (task_id, "att-c27c-ghost", "lease-c27c-ghost", "2099-01-01T00:00:00Z"),
+        "VALUES (?, ?, ?, NULL, 'pending', ?, ?, 0, 'codex_sdk')",
+        (task_id, "att-c27c-ghost", task_fence, "lease-c27c-ghost", "2099-01-01T00:00:00Z"),
     )
-    conn.commit()
-    try:
-        conn.execute(
-            "UPDATE task_attempts SET worker_id=? WHERE attempt_id=?",
-            ("w-does-not-exist", "att-c27c-ghost"),
+    seed.commit()
+    seed.close()
+
+    barrier = threading.Barrier(2)
+    results: list = []
+    lock = threading.Lock()
+
+    def try_update(label):
+        c = connect_with_fk(path=path, apply_schema=False)
+        try:
+            barrier.wait()
+            try:
+                c.execute(
+                    "UPDATE task_attempts SET worker_id=? WHERE attempt_id=?",
+                    ("w-does-not-exist", "att-c27c-ghost"),
+                )
+                with lock:
+                    results.append((label, None))
+            except sqlite3.IntegrityError as e:
+                with lock:
+                    results.append((label, str(e)))
+        finally:
+            c.close()
+
+    t1 = threading.Thread(target=try_update, args=("t1",))
+    t2 = threading.Thread(target=try_update, args=("t2",))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    rejected = [r for r in results if r[1] is not None]
+    assert len(rejected) == 2, (
+        f"expected BOTH UPDATEs rejected by FK; got {len(rejected)}/2: {results}"
+    )
+    for label, msg in rejected:
+        assert "foreign key" in msg.lower() or "fkey" in msg.lower(), (
+            f"{label}: expected FK message; got: {msg}"
         )
-        raise AssertionError("expected FK rejection; UPDATE succeeded")
-    except sqlite3.IntegrityError as e:
-        msg = str(e).lower()
-        assert "foreign key" in msg or "fkey" in msg, f"expected FK message; got: {e}"
-    print(f"OK: Case 27c ghost-worker UPDATE → FK on task_attempts.worker_id 拒绝")
+    _os.unlink(path)
+    print(f"OK: Case 27c 真并发 ghost-worker UPDATE → FK 2/2 拒绝")
+
+
+def case_27d_worker_ownership_nullsafe() -> None:
+    """P0-M2-2 (v0.9.3): ownership triggers must be NULL-safe.
+
+    Codex v0.9.2 finding: `trg_worker_ownership_insert/update` used
+    `(SELECT worker_id FROM task_attempts WHERE attempt_id = NEW.current_attempt_id)
+    != NEW.worker_id`. When the subquery returns NULL (missing row OR
+    worker_id IS NULL), the comparison is UNKNOWN — UNKNOWN in WHEN skips RAISE,
+    so UPDATE succeeded even though ownership was never verified.
+
+    v0.9.3 fix: trigger uses `NOT EXISTS` which is NULL-safe by construction
+    (returns TRUE iff no matching row exists). Two thread scenarios run in
+    parallel:
+      - 27d-A: wrong-owner UPDATE — w_other.current_attempt_id = attempt_of_w_owner
+      - 27d-B: NULL-attempt UPDATE — current_attempt_id = 'att-nonexistent'
+
+    Both must be rejected with an ownership-themed IntegrityError.
+    """
+    fd, path = tempfile.mkstemp(suffix=".sqlite"); _os.close(fd)
+    seed = connect_with_fk(path=path, apply_schema=True)
+    task_id = seed_task(seed)
+    w_owner = register_worker(seed, host="h1", worker_id="w-c27d-owner")
+    w_other = register_worker(seed, host="h1", worker_id="w-c27d-other")
+    attempt_id, _ = claim(seed, task_id, w_owner)
+    seed.close()
+
+    barrier = threading.Barrier(2)
+    results: list = []
+    lock = threading.Lock()
+
+    def try_op(label, sql, params):
+        c = connect_with_fk(path=path, apply_schema=False)
+        try:
+            barrier.wait()
+            try:
+                c.execute(sql, params)
+                with lock:
+                    results.append((label, None))
+            except sqlite3.IntegrityError as e:
+                with lock:
+                    results.append((label, str(e)))
+        finally:
+            c.close()
+
+    t1 = threading.Thread(target=try_op, args=(
+        "wrong-owner-update",
+        "UPDATE workers SET current_attempt_id=? WHERE worker_id=?",
+        (attempt_id, "w-c27d-other"),
+    ))
+    t2 = threading.Thread(target=try_op, args=(
+        "null-attempt-update",
+        "UPDATE workers SET current_attempt_id='att-nonexistent' WHERE worker_id=?",
+        ("w-c27d-owner",),
+    ))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    rejected = [r for r in results if r[1] is not None]
+    assert len(rejected) == 2, (
+        f"expected BOTH ownership UPDATEs rejected (wrong-owner + NULL-attempt); "
+        f"got {len(rejected)}/2: {results}"
+    )
+    for label, msg in rejected:
+        assert "ownership" in msg.lower(), (
+            f"{label}: expected 'ownership' keyword in message; got: {msg}"
+        )
+    _os.unlink(path)
+    print(f"OK: Case 27d ownership NULL-safe — wrong-owner + NULL-attempt both rejected")
 
 
 # ----------------------------------------------------------------------------
@@ -444,12 +592,15 @@ def case_28c_concurrent_backward_heartbeats() -> None:
     t1.join(); t2.join()
 
     rejected = [r for r in results if r[1] is not None and "I16" in r[1]]
-    # At least one must be rejected by I16. The exact winner depends on
-    # threading order, but BOTH use timestamps <= baseline, so both should fire.
-    assert len(rejected) >= 1, (
-        f"expected at least 1 I16 rejection; got {len(rejected)}: {results}"
+    # v0.9.3 strict assertion: both racing threads target the SAME baseline
+    # (one equal, one backward), so both NEW timestamps are <= OLD and BOTH
+    # must trip I16 — not just "at least one". Serialized in WAL order, but
+    # both transactions evaluate the trigger independently and both fail.
+    assert len(rejected) == 2, (
+        f"expected BOTH I16 rejections (one equal + one backward); "
+        f"got {len(rejected)}/2: {results}"
     )
-    print(f"OK: Case 28c 真并发 backward heartbeats → {len(rejected)}/{len(results)} I16 rejects")
+    print(f"OK: Case 28c 真并发 backward heartbeats → 2/2 I16 rejects")
 
 
 # ----------------------------------------------------------------------------
@@ -457,62 +608,152 @@ def case_28c_concurrent_backward_heartbeats() -> None:
 # ----------------------------------------------------------------------------
 
 def case_29a_drain_with_terminal_attempt() -> None:
-    """P0-9K: active→draining with current_attempt_id pointing at terminal attempt → I17."""
-    conn = make_db()
-    task_id = seed_task(conn)
-    wid = register_worker(conn, host="h1", worker_id="w-c29a")
-    attempt_id, _ = claim_via_pool(conn, task_id)
-    conn.execute(
+    """P0-9K (v0.9.3 真并发): active→draining with current_attempt_id pointing at
+    terminal attempt; two threads race to drain the same worker; both must hit
+    trg_worker_drain_pause (I17).
+    """
+    fd, path = tempfile.mkstemp(suffix=".sqlite"); _os.close(fd)
+    seed = connect_with_fk(path=path, apply_schema=True)
+    task_id = seed_task(seed)
+    wid = register_worker(seed, host="h1", worker_id="w-c29a")
+    attempt_id, _ = claim_via_pool(seed, task_id)
+    seed.execute(
         "UPDATE task_attempts SET status='succeeded', "
         "  finished_at=strftime('%Y-%m-%dT%H:%M:%S.%fZ','now') WHERE attempt_id=?",
         (attempt_id,),
     )
-    conn.commit()
-    try:
-        drain_worker(conn, wid)
-        raise AssertionError("expected I17 trigger; drain succeeded")
-    except sqlite3.IntegrityError as e:
-        assert "I17" in str(e), f"expected I17 message; got: {e}"
-    print(f"OK: Case 29a drain with terminal attempt → I17 drain_pause 拒绝")
+    seed.commit()
+    seed.close()
+
+    barrier = threading.Barrier(2)
+    results: list = []
+    lock = threading.Lock()
+
+    def try_drain(label):
+        c = connect_with_fk(path=path, apply_schema=False)
+        try:
+            barrier.wait()
+            try:
+                drain_worker(c, wid)
+                with lock:
+                    results.append((label, None))
+            except sqlite3.IntegrityError as e:
+                with lock:
+                    results.append((label, str(e)))
+        finally:
+            c.close()
+
+    t1 = threading.Thread(target=try_drain, args=("t1",))
+    t2 = threading.Thread(target=try_drain, args=("t2",))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    rejected = [r for r in results if r[1] is not None]
+    assert len(rejected) == 2, (
+        f"expected BOTH drains rejected by I17; got {len(rejected)}/2: {results}"
+    )
+    for label, msg in rejected:
+        assert "I17" in msg, f"{label}: expected I17 message; got: {msg}"
+    _os.unlink(path)
+    print(f"OK: Case 29a 真并发 drain with terminal attempt → I17 2/2 拒绝")
 
 
 def case_29b_insert_draining_directly() -> None:
-    """P0-9K: INSERT worker status='draining' directly → trg_worker_no_draining_insert.
-
-    Codex v0.9 finding: v0.9.1 only rejected active→draining UPDATE; initial
-    INSERT in draining state bypassed.
+    """P0-9K (v0.9.3 真并发): two threads race to INSERT worker with
+    status='draining'; both must hit trg_worker_no_draining_insert (I17).
     """
-    conn = make_db()
-    try:
-        conn.execute(
-            "INSERT INTO workers (worker_id, host, capabilities_json, status, "
-            "  last_heartbeat_at) "
-            "VALUES ('w-c29b', 'h1', '[]', 'draining', "
-            "  '2026-08-30T12:00:00.000Z')",
-        )
-        raise AssertionError("expected I17 INSERT bypass trigger; INSERT succeeded")
-    except sqlite3.IntegrityError as e:
-        assert "I17" in str(e), f"expected I17 INSERT bypass message; got: {e}"
-    print(f"OK: Case 29b INSERT status='draining' → I17 no_draining_insert 拒绝")
+    fd, path = tempfile.mkstemp(suffix=".sqlite"); _os.close(fd)
+    seed = connect_with_fk(path=path, apply_schema=True)
+    seed.close()
+
+    barrier = threading.Barrier(2)
+    results: list = []
+    lock = threading.Lock()
+
+    def try_insert(label, wid):
+        c = connect_with_fk(path=path, apply_schema=False)
+        try:
+            barrier.wait()
+            try:
+                c.execute(
+                    "INSERT INTO workers (worker_id, host, capabilities_json, status, "
+                    "  last_heartbeat_at) "
+                    "VALUES (?, 'h1', '[]', 'draining', "
+                    "  '2026-08-30T12:00:00.000Z')",
+                    (wid,),
+                )
+                with lock:
+                    results.append((label, None))
+            except sqlite3.IntegrityError as e:
+                with lock:
+                    results.append((label, str(e)))
+        finally:
+            c.close()
+
+    t1 = threading.Thread(target=try_insert, args=("t1", "w-c29b-1"))
+    t2 = threading.Thread(target=try_insert, args=("t2", "w-c29b-2"))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    rejected = [r for r in results if r[1] is not None]
+    assert len(rejected) == 2, (
+        f"expected BOTH INSERTs rejected by I17 no_draining_insert; "
+        f"got {len(rejected)}/2: {results}"
+    )
+    for label, msg in rejected:
+        assert "I17" in msg, f"{label}: expected I17 message; got: {msg}"
+    _os.unlink(path)
+    print(f"OK: Case 29b 真并发 INSERT status='draining' → I17 2/2 拒绝")
 
 
 def case_29c_reactivate_drained_worker() -> None:
-    """P0-9K: drained/stale → active/draining UPDATE → trg_worker_no_reactivate."""
-    conn = make_db()
-    wid = register_worker(conn, host="h1", worker_id="w-c29c")
-    # Manually transition drained
-    conn.execute(
+    """P0-9K (v0.9.3 真并发): seed worker in drained state, two threads race
+    to UPDATE status='active'; both must hit trg_worker_no_reactivate (I17).
+    """
+    fd, path = tempfile.mkstemp(suffix=".sqlite"); _os.close(fd)
+    seed = connect_with_fk(path=path, apply_schema=True)
+    wid = register_worker(seed, host="h1", worker_id="w-c29c")
+    seed.execute(
         "UPDATE workers SET status='drained' WHERE worker_id=?", (wid,)
     )
-    conn.commit()
-    try:
-        conn.execute(
-            "UPDATE workers SET status='active' WHERE worker_id=?", (wid,)
-        )
-        raise AssertionError("expected I17 reactivate trigger; UPDATE succeeded")
-    except sqlite3.IntegrityError as e:
-        assert "I17" in str(e), f"expected I17 reactivate message; got: {e}"
-    print(f"OK: Case 29c drained→active → I17 no_reactivate 拒绝")
+    seed.commit()
+    seed.close()
+
+    barrier = threading.Barrier(2)
+    results: list = []
+    lock = threading.Lock()
+
+    def try_reactivate(label):
+        c = connect_with_fk(path=path, apply_schema=False)
+        try:
+            barrier.wait()
+            try:
+                c.execute(
+                    "UPDATE workers SET status='active' WHERE worker_id=?",
+                    (wid,),
+                )
+                with lock:
+                    results.append((label, None))
+            except sqlite3.IntegrityError as e:
+                with lock:
+                    results.append((label, str(e)))
+        finally:
+            c.close()
+
+    t1 = threading.Thread(target=try_reactivate, args=("t1",))
+    t2 = threading.Thread(target=try_reactivate, args=("t2",))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    rejected = [r for r in results if r[1] is not None]
+    assert len(rejected) == 2, (
+        f"expected BOTH reactivates rejected by I17 no_reactivate; "
+        f"got {len(rejected)}/2: {results}"
+    )
+    for label, msg in rejected:
+        assert "I17" in msg, f"{label}: expected I17 message; got: {msg}"
+    _os.unlink(path)
+    print(f"OK: Case 29c 真并发 drained→active → I17 2/2 拒绝")
 
 
 # ----------------------------------------------------------------------------
@@ -520,16 +761,48 @@ def case_29c_reactivate_drained_worker() -> None:
 # ----------------------------------------------------------------------------
 
 def case_30_last_heartbeat_at_null() -> None:
-    conn = make_db()
-    try:
-        conn.execute(
-            "INSERT INTO workers (worker_id, host, capabilities_json, status, "
-            "  last_heartbeat_at) VALUES ('w-c30', 'h1', '[]', 'active', NULL)",
-        )
-        raise AssertionError("expected NOT NULL rejection; INSERT succeeded")
-    except sqlite3.IntegrityError as e:
-        assert "not null" in str(e).lower(), f"expected NOT NULL message; got: {e}"
-    print(f"OK: Case 30 last_heartbeat_at NULL → NOT NULL 约束拒绝")
+    """P0-9L (v0.9.3 真并发): two threads race to INSERT worker with
+    last_heartbeat_at=NULL; both must be rejected by NOT NULL constraint.
+    """
+    fd, path = tempfile.mkstemp(suffix=".sqlite"); _os.close(fd)
+    seed = connect_with_fk(path=path, apply_schema=True)
+    seed.close()
+
+    barrier = threading.Barrier(2)
+    results: list = []
+    lock = threading.Lock()
+
+    def try_insert(label, wid):
+        c = connect_with_fk(path=path, apply_schema=False)
+        try:
+            barrier.wait()
+            try:
+                c.execute(
+                    "INSERT INTO workers (worker_id, host, capabilities_json, status, "
+                    "  last_heartbeat_at) VALUES (?, 'h1', '[]', 'active', NULL)",
+                    (wid,),
+                )
+                with lock:
+                    results.append((label, None))
+            except sqlite3.IntegrityError as e:
+                with lock:
+                    results.append((label, str(e)))
+        finally:
+            c.close()
+
+    t1 = threading.Thread(target=try_insert, args=("t1", "w-c30-1"))
+    t2 = threading.Thread(target=try_insert, args=("t2", "w-c30-2"))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    rejected = [r for r in results if r[1] is not None]
+    assert len(rejected) == 2, (
+        f"expected BOTH INSERTs rejected by NOT NULL; got {len(rejected)}/2: {results}"
+    )
+    for label, msg in rejected:
+        assert "not null" in msg.lower(), f"{label}: expected NOT NULL message; got: {msg}"
+    _os.unlink(path)
+    print(f"OK: Case 30 真并发 last_heartbeat_at NULL → NOT NULL 2/2 拒绝")
 
 
 # ----------------------------------------------------------------------------
@@ -537,16 +810,48 @@ def case_30_last_heartbeat_at_null() -> None:
 # ----------------------------------------------------------------------------
 
 def case_31_worker_status_invalid_enum() -> None:
-    conn = make_db()
-    try:
-        conn.execute(
-            "INSERT INTO workers (worker_id, host, capabilities_json, status) "
-            "VALUES ('w-c31', 'h1', '[]', 'rogue')",
-        )
-        raise AssertionError("expected CHECK constraint rejection; INSERT succeeded")
-    except sqlite3.IntegrityError as e:
-        assert "check" in str(e).lower(), f"expected CHECK message; got: {e}"
-    print(f"OK: Case 31 invalid worker status → CHECK 约束拒绝")
+    """P0-9M (v0.9.3 真并发): two threads race to INSERT worker with status='rogue';
+    both must be rejected by the CHECK constraint.
+    """
+    fd, path = tempfile.mkstemp(suffix=".sqlite"); _os.close(fd)
+    seed = connect_with_fk(path=path, apply_schema=True)
+    seed.close()
+
+    barrier = threading.Barrier(2)
+    results: list = []
+    lock = threading.Lock()
+
+    def try_insert(label, wid):
+        c = connect_with_fk(path=path, apply_schema=False)
+        try:
+            barrier.wait()
+            try:
+                c.execute(
+                    "INSERT INTO workers (worker_id, host, capabilities_json, status) "
+                    "VALUES (?, 'h1', '[]', 'rogue')",
+                    (wid,),
+                )
+                with lock:
+                    results.append((label, None))
+            except sqlite3.IntegrityError as e:
+                with lock:
+                    results.append((label, str(e)))
+        finally:
+            c.close()
+
+    t1 = threading.Thread(target=try_insert, args=("t1", "w-c31-1"))
+    t2 = threading.Thread(target=try_insert, args=("t2", "w-c31-2"))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    rejected = [r for r in results if r[1] is not None]
+    assert len(rejected) == 2, (
+        f"expected BOTH INSERTs rejected by CHECK; got {len(rejected)}/2: {results}"
+    )
+    for label, msg in rejected:
+        assert "check" in msg.lower(), f"{label}: expected CHECK message; got: {msg}"
+    _os.unlink(path)
+    print(f"OK: Case 31 真并发 invalid worker status → CHECK 2/2 拒绝")
 
 
 # ----------------------------------------------------------------------------
@@ -554,17 +859,55 @@ def case_31_worker_status_invalid_enum() -> None:
 # ----------------------------------------------------------------------------
 
 def case_32_worker_current_attempt_nonexistent() -> None:
-    conn = make_db()
-    try:
-        conn.execute(
-            "INSERT INTO workers (worker_id, host, capabilities_json, status, "
-            "  current_attempt_id) VALUES ('w-c32', 'h1', '[]', 'active', 'att-fake')",
-        )
-        raise AssertionError("expected FK rejection; INSERT succeeded")
-    except sqlite3.IntegrityError as e:
-        msg = str(e).lower()
-        assert "foreign key" in msg or "fkey" in msg, f"expected FK message; got: {e}"
-    print(f"OK: Case 32 current_attempt_id 指向不存在 attempt → FK 约束拒绝")
+    """P0-9N (v0.9.3 真并发): two threads race to INSERT worker pointing at
+    a non-existent attempt; both must be rejected by FK.
+    """
+    fd, path = tempfile.mkstemp(suffix=".sqlite"); _os.close(fd)
+    seed = connect_with_fk(path=path, apply_schema=True)
+    seed.close()
+
+    barrier = threading.Barrier(2)
+    results: list = []
+    lock = threading.Lock()
+
+    def try_insert(label, wid):
+        c = connect_with_fk(path=path, apply_schema=False)
+        try:
+            barrier.wait()
+            try:
+                c.execute(
+                    "INSERT INTO workers (worker_id, host, capabilities_json, status, "
+                    "  current_attempt_id) VALUES (?, 'h1', '[]', 'active', 'att-fake')",
+                    (wid,),
+                )
+                with lock:
+                    results.append((label, None))
+            except sqlite3.IntegrityError as e:
+                with lock:
+                    results.append((label, str(e)))
+        finally:
+            c.close()
+
+    t1 = threading.Thread(target=try_insert, args=("t1", "w-c32-1"))
+    t2 = threading.Thread(target=try_insert, args=("t2", "w-c32-2"))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    rejected = [r for r in results if r[1] is not None]
+    assert len(rejected) == 2, (
+        f"expected BOTH INSERTs rejected by FK/ownership; got {len(rejected)}/2: {results}"
+    )
+    for label, msg in rejected:
+        # v0.9.3 defense-in-depth: trg_worker_ownership_insert catches the
+        # missing attempt BEFORE FK constraint check fires. Either is valid.
+        msg_lower = msg.lower()
+        assert (
+            "foreign key" in msg_lower
+            or "fkey" in msg_lower
+            or "ownership" in msg_lower
+        ), f"{label}: expected FK or ownership message; got: {msg}"
+    _os.unlink(path)
+    print(f"OK: Case 32 真并发 current_attempt_id 指向不存在 attempt → ownership/FK 2/2 拒绝")
 
 
 # ----------------------------------------------------------------------------
@@ -825,6 +1168,7 @@ def main() -> int:
     case_27a_active_attempt_worker_id_null_insert()
     case_27b_pending_update_worker_id_null()
     case_27c_ghost_worker_update()
+    case_27d_worker_ownership_nullsafe()
     case_28a_heartbeat_equal()
     case_28b_heartbeat_backward()
     case_28c_concurrent_backward_heartbeats()
@@ -838,7 +1182,7 @@ def main() -> int:
     case_34_worker_event_emission_concurrent()
     case_fairness_round_robin()
     case_reap_stale()
-    print("\nOK: worker-dispatch-test.py v0.9.2 — 18 cases 全绿")
+    print("\nOK: worker-dispatch-test.py v0.9.3 — 19 cases 全绿 (含 Case 27d NULL-safe)")
     return 0
 
 

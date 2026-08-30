@@ -345,14 +345,27 @@ CREATE INDEX idx_snapshots_parent ON context_snapshots(parent_snapshot_id)
 -- (strict equality, not >=). Any mismatch is rejected.
 -- This closes the P0-2 oversized-fence regression Codex reproduced in v0.7.
 
+-- v0.9.3 NULL-safe rewrite: previous WHEN-clause compared a subquery to a
+-- literal, returning UNKNOWN when the subquery produced NULL (e.g. a missing
+-- or not-yet-existing task_id). UNKNOWN is falsy in WHEN, so RAISE was
+-- silently skipped — attackers could INSERT attempts with arbitrary
+-- fence_version when the task row was absent. NOT EXISTS is NULL-safe by
+-- construction (returns TRUE iff no matching row exists).
 CREATE TRIGGER trg_attempt_fence_insert
 BEFORE INSERT ON task_attempts
 FOR EACH ROW
-WHEN NEW.fence_version != (
-    SELECT fence_version FROM tasks WHERE task_id = NEW.task_id
+WHEN NOT EXISTS (
+    SELECT 1 FROM tasks
+    WHERE task_id = NEW.task_id
+      AND fence_version = NEW.fence_version
 )
 BEGIN
-    SELECT RAISE(ABORT, 'attempt.fence_version must EQUAL task.fence_version at insert (got attempt=' || NEW.fence_version || ' task=' || (SELECT fence_version FROM tasks WHERE task_id = NEW.task_id) || ')');
+    SELECT RAISE(ABORT,
+        'attempt.fence_version must EQUAL task.fence_version at insert (got attempt=' ||
+        NEW.fence_version || ' task=' || COALESCE(
+            (SELECT fence_version FROM tasks WHERE task_id = NEW.task_id), 'NULL'
+        ) || ')'
+    );
 END;
 
 -- Invariant I3: terminal task cannot transition back to non-terminal.
@@ -637,18 +650,26 @@ END;
 -- P0-M2-2 bidirectional-consistency bypass: w-other.current_attempt_id
 -- could previously point at attempt held by w-owner, FK still passed.
 -- SQLite requires separate triggers per operation.
+-- v0.9.3 NULL-safe rewrite: same three-valued-logic bug as the fence
+-- trigger above — `(SELECT worker_id ...) != NEW.worker_id` is UNKNOWN when
+-- the attempt row is absent or its worker_id is NULL, and an UNKNOWN WHEN
+-- skips RAISE. NOT EXISTS makes the bypass impossible.
 CREATE TRIGGER trg_worker_ownership_insert
 BEFORE INSERT ON workers
 FOR EACH ROW
 WHEN NEW.current_attempt_id IS NOT NULL
-     AND (
-         SELECT worker_id FROM task_attempts WHERE attempt_id = NEW.current_attempt_id
-     ) != NEW.worker_id
+     AND NOT EXISTS (
+         SELECT 1 FROM task_attempts
+         WHERE attempt_id = NEW.current_attempt_id
+           AND worker_id IS NOT NULL
+           AND worker_id = NEW.worker_id
+     )
 BEGIN
     SELECT RAISE(ABORT,
         'worker ownership: workers.current_attempt_id=' || NEW.current_attempt_id ||
-        ' belongs to worker_id=' || (
-            SELECT worker_id FROM task_attempts WHERE attempt_id = NEW.current_attempt_id
+        ' belongs to worker_id=' || COALESCE(
+            (SELECT worker_id FROM task_attempts WHERE attempt_id = NEW.current_attempt_id),
+            '<missing>'
         ) || ', not worker_id=' || NEW.worker_id
     );
 END;
@@ -657,15 +678,19 @@ CREATE TRIGGER trg_worker_ownership_update
 BEFORE UPDATE OF current_attempt_id ON workers
 FOR EACH ROW
 WHEN NEW.current_attempt_id IS NOT NULL
-     AND NEW.current_attempt_id != OLD.current_attempt_id
-     AND (
-         SELECT worker_id FROM task_attempts WHERE attempt_id = NEW.current_attempt_id
-     ) != NEW.worker_id
+     AND NEW.current_attempt_id IS NOT OLD.current_attempt_id
+     AND NOT EXISTS (
+         SELECT 1 FROM task_attempts
+         WHERE attempt_id = NEW.current_attempt_id
+           AND worker_id IS NOT NULL
+           AND worker_id = NEW.worker_id
+     )
 BEGIN
     SELECT RAISE(ABORT,
         'worker ownership: workers.current_attempt_id=' || NEW.current_attempt_id ||
-        ' belongs to worker_id=' || (
-            SELECT worker_id FROM task_attempts WHERE attempt_id = NEW.current_attempt_id
+        ' belongs to worker_id=' || COALESCE(
+            (SELECT worker_id FROM task_attempts WHERE attempt_id = NEW.current_attempt_id),
+            '<missing>'
         ) || ', not worker_id=' || NEW.worker_id
     );
 END;

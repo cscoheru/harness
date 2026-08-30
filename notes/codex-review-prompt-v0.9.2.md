@@ -1,5 +1,11 @@
 # Codex v0.9.2 合并复审指令
 
+> ⚠️ **SUPERSEDED — 2026-08-30**
+> 本 prompt 在 Codex v0.9.2 复审返回 **CHANGES REQUIRED / 17/19 PASS** 后已被替代。
+> 新权威 prompt: `notes/codex-review-prompt-v0.9.3.md`
+> 修复映射: `RESPONSE-TO-CODEX-v0.9.2-REVIEW.md`
+> 本文件保留作为历史记录。
+
 > **File**: `notes/codex-review-prompt-v0.9.2.md`
 > **Date**: 2026-08-30
 > **Source**: `notes/codex-review-prompt-v0.9-merged.md` (SUPERSEDED)

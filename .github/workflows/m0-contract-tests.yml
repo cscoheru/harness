@@ -231,7 +231,7 @@ jobs:
           set -e
           for f in spec/events/*.json; do
             [ "$(basename "$f")" = ".gitkeep" ] && continue
-            check-jsonschema --schemafile "$f" || { echo "invalid schema: $f"; exit 1; }
+            check-jsonschema --check-metaschema "$f" || { echo "invalid schema: $f"; exit 1; }
           done
           echo "OK: all event schemas are valid"
 
