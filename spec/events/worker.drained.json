@@ -2,9 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://fish-harness.local/events/worker.drained.json",
   "title": "worker.drained",
-  "description": "Emitted when a worker transitions to draining / drained / stale. I17 enforcement.",
+  "description": "Emitted when a worker transitions to draining / drained / stale. v0.9.2: emitted by trg_worker_drained_event_emit. I17 enforcement.",
   "type": "object",
-  "required": ["worker_id", "status"],
+  "required": ["worker_id", "status", "current_attempt_id", "drained_at"],
   "properties": {
     "worker_id": {
       "type": "string",
@@ -21,7 +21,7 @@
     "drained_at": {
       "type": ["string", "null"],
       "format": "date-time",
-      "description": "Set when status='drained'. Null while 'draining'."
+      "description": "Set when status='drained'. For 'draining' transitions, defaults to current time. For 'stale', equals workers.last_heartbeat_at + threshold."
     }
   },
   "additionalProperties": false

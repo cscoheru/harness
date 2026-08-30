@@ -2,9 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://fish-harness.local/events/worker.heartbeat.json",
   "title": "worker.heartbeat",
-  "description": "Emitted when a worker advances its last_heartbeat_at via WorkerPool.heartbeat(). I16 enforcement.",
+  "description": "Emitted when a worker advances its last_heartbeat_at. v0.9.2: emitted by trg_worker_heartbeat_event_emit. I16 strict monotonic enforcement.",
   "type": "object",
-  "required": ["worker_id", "last_heartbeat_at"],
+  "required": ["worker_id", "last_heartbeat_at", "current_attempt_id"],
   "properties": {
     "worker_id": {
       "type": "string",
@@ -13,7 +13,7 @@
     "last_heartbeat_at": {
       "type": "string",
       "format": "date-time",
-      "description": "New heartbeat timestamp (must be strictly greater than the prior value)."
+      "description": "New heartbeat timestamp (must be strictly greater than the prior value; enforced by trg_worker_heartbeat_renew)."
     },
     "current_attempt_id": {
       "type": ["string", "null"],

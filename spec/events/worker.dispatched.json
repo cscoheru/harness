@@ -2,29 +2,30 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://fish-harness.local/events/worker.dispatched.json",
   "title": "worker.dispatched",
-  "description": "Emitted when WorkerPool.dispatch() picks a worker for a task. Closes Codex v0.9-B P0-9G observability.",
+  "description": "Emitted on INSERT INTO workers (worker registration / dispatch). v0.9.2: emitted by trg_worker_dispatched_event_emit. Closes Codex v0.9-B P0-9G + P1-2 observability.",
   "type": "object",
-  "required": ["task_id", "worker_id"],
+  "required": ["worker_id", "host", "capabilities_json", "status", "dispatched_at"],
   "properties": {
-    "task_id": {
-      "type": "string",
-      "description": "The task being dispatched."
-    },
     "worker_id": {
       "type": "string",
-      "description": "Worker chosen by dispatch (TEXT PK in workers table)."
+      "description": "Worker that was registered (TEXT PK in workers table)."
     },
-    "attempt_id": {
-      "type": ["string", "null"],
-      "description": "Set after claim_via_pool() succeeds; null for dispatch-only events."
+    "host": {
+      "type": "string",
+      "description": "Host identifier where the worker process is running."
     },
-    "strategy": {
-      "enum": ["capability_match", "round_robin"],
-      "description": "Which dispatch strategy selected the worker."
+    "capabilities_json": {
+      "type": "string",
+      "description": "JSON-encoded array of capability ids."
+    },
+    "status": {
+      "enum": ["active", "draining", "drained", "stale"],
+      "description": "Worker status at registration time. Note: 'draining' is rejected by trg_worker_no_draining_insert (use register then drain lifecycle)."
     },
     "dispatched_at": {
       "type": "string",
-      "format": "date-time"
+      "format": "date-time",
+      "description": "registered_at timestamp at moment of INSERT."
     }
   },
   "additionalProperties": false

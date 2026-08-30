@@ -30,6 +30,21 @@ jobs:
           sqlite3 /tmp/harness-test.sqlite < spec/kernel-schema.sql
           sqlite3 /tmp/harness-test.sqlite "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;" | tee /tmp/tables.txt
           test "$(wc -l < /tmp/tables.txt)" -ge 10
+      - name: Verify v0.9.2 schema counts (13/14/24/27/39)
+        run: |
+          set -e
+          PROJECT_TABLES=$(sqlite3 /tmp/harness-test.sqlite "SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
+          ALL_TABLES=$(sqlite3 /tmp/harness-test.sqlite "SELECT count(*) FROM sqlite_master WHERE type='table';")
+          TRIGGERS=$(sqlite3 /tmp/harness-test.sqlite "SELECT count(*) FROM sqlite_master WHERE type='trigger';")
+          NAMED_INDEXES=$(sqlite3 /tmp/harness-test.sqlite "SELECT count(*) FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%';")
+          ALL_INDEXES=$(sqlite3 /tmp/harness-test.sqlite "SELECT count(*) FROM sqlite_master WHERE type='index';")
+          echo "tables(project)=$PROJECT_TABLES tables(total)=$ALL_TABLES triggers=$TRIGGERS indexes(named)=$NAMED_INDEXES indexes(total)=$ALL_INDEXES"
+          test "$PROJECT_TABLES" = "13" || { echo "FAIL: expected 13 project tables; got $PROJECT_TABLES"; exit 1; }
+          test "$ALL_TABLES" = "14" || { echo "FAIL: expected 14 total tables (incl sqlite_sequence); got $ALL_TABLES"; exit 1; }
+          test "$TRIGGERS" = "24" || { echo "FAIL: expected 24 triggers; got $TRIGGERS"; exit 1; }
+          test "$NAMED_INDEXES" = "27" || { echo "FAIL: expected 27 named indexes; got $NAMED_INDEXES"; exit 1; }
+          test "$ALL_INDEXES" = "39" || { echo "FAIL: expected 39 total indexes; got $ALL_INDEXES"; exit 1; }
+          echo "OK: schema counts match v0.9.2 (13 project / 14 incl sqlite_sequence / 24 triggers / 27 named / 39 total)"
       - name: Verify invariants at DB level
         run: |
           set -e
@@ -161,6 +176,44 @@ jobs:
           python-version: "3.12"
       - name: Run spike
         run: python spikes/m0/worker-dispatch-test.py
+
+  spike-py-worker-events-emit:
+    name: spikes/m0/worker-events-emit-test.py (v0.9.2 — closes P1-2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install jsonschema
+        run: pip install jsonschema
+      - name: Run spike
+        run: python spikes/m0/worker-events-emit-test.py
+
+  spike-py-lineage-level:
+    name: spikes/m0/lineage-level-test.py (v0.9.2 — closes P1-1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run spike
+        run: python spikes/m0/lineage-level-test.py
+
+  spike-py-mutation:
+    name: spikes/m0/mutation-test.py (v0.9.2 — causal-chain evidence)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run spike
+        run: python spikes/m0/mutation-test.py
 
   json-schema-validate:
     name: spec/events/*.json validate as JSON Schema
