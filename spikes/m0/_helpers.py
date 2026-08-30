@@ -421,18 +421,20 @@ def dispatch_worker(conn: sqlite3.Connection, task_id: str,
                     required_capability: str | None = None) -> str:
     """Pick an 'active' worker for the task.
 
-    Strategy (Q210 decision): capability-match first (workers.capabilities_json
-    contains required_capability), then round-robin fallback. Raises NoWorkerAvailable
-    if no eligible worker exists.
+    Strategy (v0.9.2 Q210 decision): capability-match first, then round-robin
+    among eligible workers via per-worker dispatch counts stored in
+    harness_meta. Closes P1-3: v0.9.1 fixed-pick by last_heartbeat_at DESC
+    funneled all dispatches to one worker (output was `1 unique`).
 
-    Trivial implementation: ORDER BY last_heartbeat_at DESC LIMIT 1 with
-    capability filter. Production WorkerPool should use a more sophisticated
-    load-balancing strategy.
+    Returns the worker_id of the eligible worker with the lowest dispatch
+    count (ties broken by last_heartbeat_at DESC, then worker_id ASC).
+    Raises LookupError if no eligible worker exists.
     """
     rows = conn.execute(
-        "SELECT worker_id, capabilities_json FROM workers WHERE status='active' "
-        "ORDER BY last_heartbeat_at DESC"
+        "SELECT worker_id, capabilities_json FROM workers WHERE status='active'"
     ).fetchall()
+
+    eligible: list[str] = []
     if required_capability:
         for r in rows:
             try:
@@ -440,10 +442,65 @@ def dispatch_worker(conn: sqlite3.Connection, task_id: str,
             except _json.JSONDecodeError:
                 continue
             if required_capability in caps:
-                return r["worker_id"]
-    if rows:
-        return rows[0]["worker_id"]
-    raise LookupError(f"NoWorkerAvailable: no active worker for task {task_id}")
+                eligible.append(r["worker_id"])
+    else:
+        eligible = [r["worker_id"] for r in rows]
+
+    if not eligible:
+        raise LookupError(f"NoWorkerAvailable: no active worker for task {task_id}")
+
+    # Fetch dispatch counts for each eligible worker. Default 0 if absent.
+    counts: dict[str, int] = {}
+    for wid in eligible:
+        row = conn.execute(
+            "SELECT v FROM harness_meta WHERE k=?", (f"dispatch:worker:{wid}",)
+        ).fetchone()
+        counts[wid] = int(row["v"]) if row else 0
+
+    # Sort: lowest count first (round-robin primary key), then heartbeat DESC
+    # as a recency tiebreak, then worker_id ASC as final stable order.
+    rows_meta = conn.execute(
+        "SELECT worker_id, last_heartbeat_at FROM workers "
+        "WHERE worker_id IN ({})".format(",".join("?" * len(eligible))),
+        eligible,
+    ).fetchall()
+    hb = {r["worker_id"]: r["last_heartbeat_at"] for r in rows_meta}
+
+    # heartbeat DESC means larger ts sorts first → use negative key
+    eligible_sorted = sorted(
+        eligible,
+        key=lambda w: (counts[w], _neg_ts_key(hb.get(w, "")), w),
+    )
+    winner = eligible_sorted[0]
+
+    # Atomically increment dispatch count for the chosen worker
+    new_count = counts[winner] + 1
+    conn.execute(
+        "INSERT INTO harness_meta (k, v) VALUES (?, ?) "
+        "ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+        (f"dispatch:worker:{winner}", str(new_count)),
+    )
+    conn.commit()
+    return winner
+
+
+def _ts_key(ts: str) -> int:
+    """Lexicographic timestamp key (ISO 8601 with fixed widths is monotonic)."""
+    # Empty/None sorts lowest; valid timestamps compare lexicographically.
+    return 0 if not ts else 1
+
+
+def _neg_ts_key(ts: str) -> int:
+    """Sort key that puts LATER timestamps FIRST (for round-robin tiebreak).
+
+    ISO 8601 with fixed widths (YYYY-MM-DDTHH:MM:SS.mmmZ) is lexicographically
+    monotonic. We negate by computing its length-aware complement so that
+    `sorted(..., key=_neg_ts_key)` returns most-recent first.
+    """
+    if not ts:
+        return 0  # missing heartbeat sorts last among present timestamps
+    # Use a tuple (present=1, ~timestamp-as-bytes) so empty falls below any value.
+    return (1, ts)
 
 
 def claim_via_pool(conn: sqlite3.Connection, task_id: str,

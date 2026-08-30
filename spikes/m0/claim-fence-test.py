@@ -84,35 +84,59 @@ def main() -> int:
         raise AssertionError("terminal-claim should have raised ClaimRejected")
 
     # === Case 3 (P0-2 反例 oversized-fence): attempt fence != task fence must reject ===
+    # v0.9.2 fix: MUST register a valid worker first so I15 does NOT intercept.
+    # Otherwise the rejection comes from I15 (worker_id NULL), not fence trigger.
+    # The fence trigger fires only when fence_version != task.fence_version at
+    # the SQL layer (independent of I15 / I16 / I17 paths).
     oversized_task = seed_task(conn)
+    # Register a valid worker BEFORE attempting fence-violating INSERT.
+    from _helpers import register_worker
+    w_fence = register_worker(conn, host="h-fence", worker_id="w-fence-test")
     # Manually bump task fence to 5
     conn.execute("UPDATE tasks SET fence_version = 5 WHERE task_id=?", (oversized_task,))
     conn.commit()
     cur = conn.execute("SELECT fence_version FROM tasks WHERE task_id=?", (oversized_task,))
     assert cur.fetchone()["fence_version"] == 5
-    # Try to insert attempt with fence=999 (way > task fence)
+    # Try to insert attempt with fence=999 (way > task fence) AND valid worker_id
     try:
         conn.execute(
             "INSERT INTO task_attempts "
-            "(task_id, attempt_id, fence_version, status, driver_kind) "
-            "VALUES (?, 'att-bad', 999, 'claimed', 'codex_sdk')",
-            (oversized_task,),
+            "(task_id, attempt_id, fence_version, worker_id, status, "
+            " lease_token, lease_expires_at, status_version, driver_kind) "
+            "VALUES (?, 'att-bad', 999, ?, 'claimed', ?, ?, 0, 'codex_sdk')",
+            (oversized_task, w_fence, "lease-bad", "2099-01-01T00:00:00Z"),
         )
     except sqlite3.IntegrityError as e:
-        print(f"OK: oversized-fence rejected by trigger → {e}")
+        err_msg = str(e)
+        # MUST be fence trigger, NOT I15
+        assert "fence_version must EQUAL" in err_msg, (
+            f"P0-2 fence spike: error must mention fence_version; got: {err_msg}"
+        )
+        assert "I15" not in err_msg, (
+            f"P0-2 fence spike: I15 intercepted before fence trigger — test invalid; got: {err_msg}"
+        )
+        print(f"OK: oversized-fence rejected by trg_attempt_fence_insert → {err_msg}")
     else:
         raise AssertionError("oversized-fence should have raised IntegrityError")
 
-    # And: attempt fence LESS than task fence must also reject
+    # And: attempt fence LESS than task fence must also reject (still by fence trigger)
     try:
         conn.execute(
             "INSERT INTO task_attempts "
-            "(task_id, attempt_id, fence_version, status, driver_kind) "
-            "VALUES (?, 'att-low', 4, 'claimed', 'codex_sdk')",
-            (oversized_task,),
+            "(task_id, attempt_id, fence_version, worker_id, status, "
+            " lease_token, lease_expires_at, status_version, driver_kind) "
+            "VALUES (?, 'att-low', 4, ?, 'claimed', ?, ?, 0, 'codex_sdk')",
+            (oversized_task, w_fence, "lease-low", "2099-01-01T00:00:00Z"),
         )
     except sqlite3.IntegrityError as e:
-        print(f"OK: undersized-fence rejected by trigger → {e}")
+        err_msg = str(e)
+        assert "fence_version must EQUAL" in err_msg, (
+            f"P0-2 undersized-fence error must mention fence_version; got: {err_msg}"
+        )
+        assert "I15" not in err_msg, (
+            f"P0-2 undersized-fence: I15 intercepted before fence trigger; got: {err_msg}"
+        )
+        print(f"OK: undersized-fence rejected by trg_attempt_fence_insert → {err_msg}")
     else:
         raise AssertionError("undersized-fence should have raised IntegrityError")
 

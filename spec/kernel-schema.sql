@@ -1,6 +1,6 @@
 -- Fish Harness kernel schema (canonical, executable)
 -- File: spec/kernel-schema.sql
--- Version: v0.9.1 (v0.9-A + append-only + lineage + event emission triggers)
+-- Version: v0.9.2 (closes Codex v0.9 MERGED CHANGES REQUIRED)
 -- This file MUST be applied via PRAGMA + CREATE TABLE statements.
 -- CI runs this file with `sqlite3 :memory: < spec/kernel-schema.sql` and
 -- then executes the spike tests in spikes/m0/ against the resulting DB.
@@ -28,6 +28,26 @@
 --   + trg_attempt_worker_exists        (I15 伴生: worker_id 必须存在)
 --   + trg_worker_heartbeat_renew       (I16: heartbeat 必须推进 last_heartbeat_at)
 --   + trg_worker_drain_pause           (I17: drain 时 current_attempt_id 不能已 terminal)
+--
+-- v0.9.2 delta (closes Codex v0.9 MERGED CHANGES REQUIRED):
+--   ~ trg_snapshot_event_emit: payload_json now includes task_id + attempt_id
+--   ~ trg_attempt_active_needs_worker: covers UPDATE OF status, worker_id (closes P0-M2-2 / P0-9I UPDATE bypass)
+--   ~ trg_attempt_worker_exists: covers UPDATE OF worker_id (closes ghost-worker UPDATE bypass)
+--   + task_attempts.worker_id FK -> workers(worker_id) (closes P0-M2-2)
+--   ~ trg_worker_heartbeat_renew: NEW <= OLD (strictly monotonic; closes P0-9J backward heartbeat)
+--                                AND BEFORE UPDATE OF last_heartbeat_at (no longer fires on unrelated UPDATEs)
+--   ~ trg_lineage_l2_needs_parent: parent.level must be L0/L1 (closes P1-1 L3-with-L1-parent bypass)
+--   ~ trg_lineage_l3_needs_parent: parent.level must be L2 (closes P1-1 same)
+--   + trg_worker_ownership: workers.current_attempt_id must point to attempt whose worker_id == self
+--   + trg_worker_no_draining_insert: rejects INSERT status='draining' (closes P0-9K INSERT bypass)
+--   + trg_worker_no_reactivate: rejects drained/stale -> active/draining (closes P0-9K reactivation)
+--   + trg_worker_dispatched_event_emit: emit worker.dispatched on INSERT
+--   + trg_worker_heartbeat_event_emit: emit worker.heartbeat on heartbeat advance
+--   + trg_worker_drained_event_emit: emit worker.drained on status transition
+--   Totals (v0.9.2): 13 project tables / 14 incl. sqlite_sequence
+--                    21 triggers (was 15)
+--                    27 named indexes / 39 incl. autoindex
+--                    11 event schemas
 --
 -- IMPORTANT: production connections MUST issue `PRAGMA foreign_keys=ON` after
 -- sqlite3.connect(); the per-connection default is OFF. spike helpers do this
@@ -105,7 +125,8 @@ CREATE TABLE task_attempts (
     failure_code         TEXT,                  -- e.g. 'policy_denied', 'lease_lost', 'budget_exceeded'
     failure_message      TEXT,
     PRIMARY KEY (task_id, attempt_id),
-    FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
+    FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE,
+    FOREIGN KEY (worker_id) REFERENCES workers(worker_id)   -- v0.9.2: closes P0-M2-2 ghost-worker UPDATE
 );
 
 CREATE INDEX idx_attempts_status ON task_attempts(status, lease_expires_at);
@@ -157,8 +178,8 @@ CREATE INDEX idx_workers_attempt ON workers(current_attempt_id)
 -- Append-only event log. Every state transition emits one event envelope.
 CREATE TABLE task_events (
     event_id             TEXT PRIMARY KEY,
-    task_id              TEXT NOT NULL,
-    attempt_id           TEXT,
+    task_id              TEXT,                   -- v0.9.2: nullable for worker.* events (NULL = worker-scoped, no FK)
+    attempt_id           TEXT,                   -- v0.9.2: nullable for worker.* events
     event_type           TEXT NOT NULL,
     payload_json         TEXT NOT NULL,
     source_event_id      TEXT,                  -- for dedupe vs external sinks
@@ -365,7 +386,10 @@ END;
 
 -- v0.9-B Invariant I15 (companion): an active attempt (claimed/running/
 -- cancel_requested) MUST reference a non-NULL worker_id. Closes P0-9I.
-CREATE TRIGGER trg_attempt_active_needs_worker
+-- v0.9.2: split into INSERT + UPDATE OF (status, worker_id) to close
+-- P0-M2-2 / P0-9I UPDATE bypass (pending+NULL → UPDATE status='claimed'
+-- would otherwise pass). SQLite requires separate triggers per operation.
+CREATE TRIGGER trg_attempt_active_needs_worker_insert
 BEFORE INSERT ON task_attempts
 FOR EACH ROW
 WHEN NEW.status IN ('claimed', 'running', 'cancel_requested')
@@ -374,15 +398,36 @@ BEGIN
     SELECT RAISE(ABORT, 'I15: active attempt must reference a worker_id');
 END;
 
+CREATE TRIGGER trg_attempt_active_needs_worker_update
+BEFORE UPDATE OF status, worker_id ON task_attempts
+FOR EACH ROW
+WHEN NEW.status IN ('claimed', 'running', 'cancel_requested')
+     AND NEW.worker_id IS NULL
+BEGIN
+    SELECT RAISE(ABORT, 'I15: active attempt must reference a worker_id (UPDATE path)');
+END;
+
 -- v0.9-B Invariant I15 (companion): if worker_id is set, the referenced
 -- worker MUST exist in the workers table. Closes P0-9N.
-CREATE TRIGGER trg_attempt_worker_exists
+-- v0.9.2: split into INSERT + UPDATE OF worker_id to close ghost-worker
+-- UPDATE bypass.
+CREATE TRIGGER trg_attempt_worker_exists_insert
 BEFORE INSERT ON task_attempts
 FOR EACH ROW
 WHEN NEW.worker_id IS NOT NULL
      AND NOT EXISTS (SELECT 1 FROM workers WHERE worker_id = NEW.worker_id)
 BEGIN
     SELECT RAISE(ABORT, 'I15: task_attempts.worker_id must reference an existing workers row');
+END;
+
+CREATE TRIGGER trg_attempt_worker_exists_update
+BEFORE UPDATE OF worker_id ON task_attempts
+FOR EACH ROW
+WHEN NEW.worker_id IS NOT NULL
+     AND NEW.worker_id != OLD.worker_id
+     AND NOT EXISTS (SELECT 1 FROM workers WHERE worker_id = NEW.worker_id)
+BEGIN
+    SELECT RAISE(ABORT, 'I15: task_attempts.worker_id must reference an existing workers row (UPDATE path)');
 END;
 
 -- ==================== v0.9-A INVARIANTS ====================
@@ -418,25 +463,54 @@ BEGIN
     SELECT RAISE(ABORT, 'I14: L3 handoff trust_label cannot be untrusted_external');
 END;
 
--- Invariant I15 (lineage: L2 must have parent): a L2 working_set entry MUST have
--- a parent_snapshot_id pointing to an L1 (or higher). Closed at DB layer so
--- drivers cannot bypass lineage rules via application code.
+-- Invariant I15 (lineage: L2 must have parent at L0 or L1): a L2 working_set
+-- entry MUST have a parent_snapshot_id pointing to an L0 or L1 in the same
+-- task. Closed at DB layer so drivers cannot bypass lineage rules via
+-- application code.
+-- v0.9.2: closes P1-1 — parent.level is now actually checked (was: NULL-only).
 CREATE TRIGGER trg_lineage_l2_needs_parent
 BEFORE INSERT ON context_snapshots
 FOR EACH ROW
-WHEN NEW.level = 'L2' AND NEW.parent_snapshot_id IS NULL
+WHEN NEW.level = 'L2'
+     AND (
+         NEW.parent_snapshot_id IS NULL
+         OR COALESCE(
+             (SELECT level FROM context_snapshots WHERE snapshot_id = NEW.parent_snapshot_id),
+             ''
+         ) NOT IN ('L0', 'L1')
+     )
 BEGIN
-    SELECT RAISE(ABORT, 'lineage: L2 snapshot must have parent_snapshot_id (lineage rule)');
+    SELECT RAISE(ABORT,
+        'lineage: L2 snapshot must have parent_snapshot_id of level L0 or L1, got parent level="' ||
+        COALESCE(
+            (SELECT level FROM context_snapshots WHERE snapshot_id = NEW.parent_snapshot_id),
+            'NULL'
+        ) || '"'
+    );
 END;
 
--- Invariant I16 (lineage: L3 must have parent): a L3 handoff MUST have a
--- parent_snapshot_id pointing to an L2 in the same task.
+-- Invariant I16 (lineage: L3 must have parent at L2): a L3 handoff MUST have
+-- a parent_snapshot_id pointing to an L2 in the same task.
+-- v0.9.2: closes P1-1 — L3 using L1 as parent was previously accepted.
 CREATE TRIGGER trg_lineage_l3_needs_parent
 BEFORE INSERT ON context_snapshots
 FOR EACH ROW
-WHEN NEW.level = 'L3' AND NEW.parent_snapshot_id IS NULL
+WHEN NEW.level = 'L3'
+     AND (
+         NEW.parent_snapshot_id IS NULL
+         OR COALESCE(
+             (SELECT level FROM context_snapshots WHERE snapshot_id = NEW.parent_snapshot_id),
+             ''
+         ) != 'L2'
+     )
 BEGIN
-    SELECT RAISE(ABORT, 'lineage: L3 handoff must have parent_snapshot_id (lineage rule)');
+    SELECT RAISE(ABORT,
+        'lineage: L3 handoff must have parent_snapshot_id of level L2, got parent level="' ||
+        COALESCE(
+            (SELECT level FROM context_snapshots WHERE snapshot_id = NEW.parent_snapshot_id),
+            'NULL'
+        ) || '"'
+    );
 END;
 
 -- Invariant I17 (lineage: parent must be in same task): closes cross-task parent
@@ -473,6 +547,8 @@ END;
 -- append a row to task_events with event_type='context.snapshot'. This makes the
 -- snapshot ledger observable through the same event stream as other kernel
 -- transitions and closes Codex v0.9-A P1-3.
+-- v0.9.2: payload_json now includes task_id and attempt_id so the actual
+-- emitted payload satisfies spec/events/context.snapshot.json required[].
 CREATE TRIGGER trg_snapshot_event_emit
 AFTER INSERT ON context_snapshots
 FOR EACH ROW
@@ -486,6 +562,8 @@ BEGIN
         'context.snapshot',
         json_object(
             'snapshot_id', NEW.snapshot_id,
+            'task_id', NEW.task_id,
+            'attempt_id', NEW.attempt_id,
             'level', NEW.level,
             'token_count', NEW.token_count,
             'trust_label', NEW.trust_label,
@@ -498,24 +576,29 @@ BEGIN
 END;
 
 -- ==================== v0.9-B INVARIANTS ====================
--- Invariant I16 (worker heartbeat must advance last_heartbeat_at): any UPDATE
--- on an active worker MUST set last_heartbeat_at to a newer value. Closes
--- P0-9J.
+-- Invariant I16 (worker heartbeat must STRICTLY advance last_heartbeat_at):
+-- any UPDATE OF last_heartbeat_at on an active worker MUST set it to a strictly
+-- newer value. ISO 8601 with milliseconds is lexicographically monotonic when
+-- widths are fixed; helpers enforce this format.
+-- Closes P0-9J (v0.9.1 only rejected equal; backward 12:00:00 → 11:00:00 was
+-- accepted). v0.9.2: NEW <= OLD instead of OLD = NEW.
+-- Also BEFORE UPDATE OF last_heartbeat_at — does NOT fire on unrelated
+-- UPDATEs (e.g. status changes).
 CREATE TRIGGER trg_worker_heartbeat_renew
-BEFORE UPDATE ON workers
+BEFORE UPDATE OF last_heartbeat_at ON workers
 FOR EACH ROW
 WHEN NEW.status = 'active'
-     AND OLD.last_heartbeat_at = NEW.last_heartbeat_at
+     AND NEW.last_heartbeat_at <= OLD.last_heartbeat_at
 BEGIN
-    SELECT RAISE(ABORT, 'I16: worker heartbeat must advance last_heartbeat_at (worker_id=' || OLD.worker_id || ')');
+    SELECT RAISE(ABORT, 'I16: worker heartbeat must strictly advance last_heartbeat_at (worker_id=' || OLD.worker_id || '; OLD=' || OLD.last_heartbeat_at || ' NEW=' || NEW.last_heartbeat_at || ')');
 END;
 
 -- Invariant I17 (drain pause with stale current_attempt_id): a worker
 -- transitioning from active → draining MUST NOT have a current_attempt_id
 -- pointing at an already-terminal task_attempts row (stale pointer).
--- Closes P0-9K.
+-- Closes P0-9K (UPDATE path).
 CREATE TRIGGER trg_worker_drain_pause
-BEFORE UPDATE ON workers
+BEFORE UPDATE OF status ON workers
 FOR EACH ROW
 WHEN OLD.status = 'active' AND NEW.status = 'draining'
      AND NEW.current_attempt_id IS NOT NULL
@@ -524,6 +607,136 @@ WHEN OLD.status = 'active' AND NEW.status = 'draining'
      ) IN ('succeeded','failed','canceled','expired')
 BEGIN
     SELECT RAISE(ABORT, 'I17: cannot drain worker with stale current_attempt_id (worker_id=' || OLD.worker_id || ')');
+END;
+
+-- v0.9.2 I17 INSERT bypass backstop: a worker cannot be INSERTed directly
+-- in 'draining' state (must go through active → drain lifecycle).
+-- Closes P0-9K INSERT bypass.
+CREATE TRIGGER trg_worker_no_draining_insert
+BEFORE INSERT ON workers
+FOR EACH ROW
+WHEN NEW.status = 'draining'
+BEGIN
+    SELECT RAISE(ABORT, 'I17: worker cannot be INSERTed directly in draining status (worker_id=' || NEW.worker_id || '); use register() then drain()');
+END;
+
+-- v0.9.2 I17 reactivation backstop: a worker in 'drained' or 'stale' cannot
+-- transition back to active or draining.
+-- Closes P0-9K reactivation bypass.
+CREATE TRIGGER trg_worker_no_reactivate
+BEFORE UPDATE OF status ON workers
+FOR EACH ROW
+WHEN OLD.status IN ('drained', 'stale')
+     AND NEW.status IN ('active', 'draining')
+BEGIN
+    SELECT RAISE(ABORT, 'I17: cannot transition worker from terminal status ' || OLD.status || ' back to ' || NEW.status || ' (worker_id=' || OLD.worker_id || ')');
+END;
+
+-- v0.9.2 I15 companion on workers: workers.current_attempt_id, when non-NULL,
+-- MUST reference an attempt whose worker_id equals self.worker_id. Closes
+-- P0-M2-2 bidirectional-consistency bypass: w-other.current_attempt_id
+-- could previously point at attempt held by w-owner, FK still passed.
+-- SQLite requires separate triggers per operation.
+CREATE TRIGGER trg_worker_ownership_insert
+BEFORE INSERT ON workers
+FOR EACH ROW
+WHEN NEW.current_attempt_id IS NOT NULL
+     AND (
+         SELECT worker_id FROM task_attempts WHERE attempt_id = NEW.current_attempt_id
+     ) != NEW.worker_id
+BEGIN
+    SELECT RAISE(ABORT,
+        'worker ownership: workers.current_attempt_id=' || NEW.current_attempt_id ||
+        ' belongs to worker_id=' || (
+            SELECT worker_id FROM task_attempts WHERE attempt_id = NEW.current_attempt_id
+        ) || ', not worker_id=' || NEW.worker_id
+    );
+END;
+
+CREATE TRIGGER trg_worker_ownership_update
+BEFORE UPDATE OF current_attempt_id ON workers
+FOR EACH ROW
+WHEN NEW.current_attempt_id IS NOT NULL
+     AND NEW.current_attempt_id != OLD.current_attempt_id
+     AND (
+         SELECT worker_id FROM task_attempts WHERE attempt_id = NEW.current_attempt_id
+     ) != NEW.worker_id
+BEGIN
+    SELECT RAISE(ABORT,
+        'worker ownership: workers.current_attempt_id=' || NEW.current_attempt_id ||
+        ' belongs to worker_id=' || (
+            SELECT worker_id FROM task_attempts WHERE attempt_id = NEW.current_attempt_id
+        ) || ', not worker_id=' || NEW.worker_id
+    );
+END;
+
+-- v0.9.2 worker event emission (closes P1-2). Three AFTER triggers mirror
+-- the v0.9-A context.snapshot event-emission pattern. These let downstream
+-- observers (and audit_log) react to worker lifecycle.
+CREATE TRIGGER trg_worker_dispatched_event_emit
+AFTER INSERT ON workers
+FOR EACH ROW
+BEGIN
+    INSERT INTO task_events (
+        event_id, task_id, attempt_id, event_type, payload_json, recorded_at
+    ) VALUES (
+        'evt-wd-' || NEW.worker_id,
+        NULL,
+        NULL,
+        'worker.dispatched',
+        json_object(
+            'worker_id', NEW.worker_id,
+            'host', NEW.host,
+            'capabilities_json', NEW.capabilities_json,
+            'status', NEW.status,
+            'dispatched_at', NEW.registered_at
+        ),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    );
+END;
+
+CREATE TRIGGER trg_worker_heartbeat_event_emit
+AFTER UPDATE OF last_heartbeat_at ON workers
+FOR EACH ROW
+WHEN OLD.last_heartbeat_at != NEW.last_heartbeat_at
+BEGIN
+    INSERT INTO task_events (
+        event_id, task_id, attempt_id, event_type, payload_json, recorded_at
+    ) VALUES (
+        'evt-wh-' || NEW.worker_id || '-' || NEW.last_heartbeat_at,
+        NULL,
+        NULL,
+        'worker.heartbeat',
+        json_object(
+            'worker_id', NEW.worker_id,
+            'last_heartbeat_at', NEW.last_heartbeat_at,
+            'current_attempt_id', NEW.current_attempt_id
+        ),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    );
+END;
+
+CREATE TRIGGER trg_worker_drained_event_emit
+AFTER UPDATE OF status ON workers
+FOR EACH ROW
+WHEN NEW.status IN ('draining', 'drained', 'stale')
+     AND OLD.status != NEW.status
+BEGIN
+    INSERT INTO task_events (
+        event_id, task_id, attempt_id, event_type, payload_json, recorded_at
+    ) VALUES (
+        'evt-wdr-' || NEW.worker_id || '-' || NEW.status,
+        NULL,
+        NULL,
+        'worker.drained',
+        json_object(
+            'worker_id', NEW.worker_id,
+            'status', NEW.status,
+            'current_attempt_id', NEW.current_attempt_id,
+            'drained_at', COALESCE(NEW.drained_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        ),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    );
 END;
 
 -- ==================== DONE ====================
