@@ -1,0 +1,157 @@
+# fish-harness v1.0 deploy (T-DO-4)
+#
+# Goal: when a `v*` tag is pushed (or workflow_dispatch for dry-run),
+# build the runtime image, push it to GHCR, and run an in-container
+# spike smoke gate.
+#
+# Interim mutation gate (T-QA-1 dependency)
+# ----------------------------------------
+# GA plan §2 T-DO-4 originally required a `mutation_suite` smoke gate
+# (18/18 PASS). `harness.testing.mutation_suite` does NOT yet exist —
+# it lands in T-QA-1 (mutation-test.py lift). Until T-QA-1 ships, the
+# `smoke` job runs the same 5-spike subset the docker-compose
+# `test-runner` service runs locally — see TODO marker below.
+#
+# Triggers
+#   - push tags matching `v*`        : real release
+#   - workflow_dispatch              : manual dry-run (Actions tab → Run workflow)
+#
+# Required secrets (only on tag push, NOT on workflow_dispatch dry-run):
+#   - (none today) — push job is gated `if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')`.
+#     To actually push to GHCR, the runner needs `packages: write` (default for repo on GHE/GHEC).
+#
+# Image naming (per GA plan §6 M3 tag):
+#   ghcr.io/cscoheru/fish-harness:<tag>      (immutable, tag-pinned)
+#   ghcr.io/cscoheru/fish-harness:latest    (only on main-merge; not done here — deploy workflow fires on tags only)
+
+name: deploy
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# Avoid concurrent deploy runs clobbering the same tag image.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------
+  # 1. build — produce the OCI image; cache it for the smoke job below.
+  # ---------------------------------------------------------------------
+  build:
+    name: Build image (fish-harness:${{ github.ref_name }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # needed by the push job below
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          TAG="${GITHUB_REF_NAME}"
+          IMAGE="ghcr.io/${OWNER}/fish-harness"
+          echo "image=${IMAGE}"       >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}"           >> "$GITHUB_OUTPUT"
+          echo "::group::Image metadata"
+          echo "  owner : ${OWNER}"
+          echo "  image : ${IMAGE}"
+          echo "  tag   : ${TAG}"
+          echo "::endgroup::"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build (load into runner daemon — needed for downstream `docker run` smoke)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+          # No push here; the push job handles GHCR auth + push separately.
+
+  # ---------------------------------------------------------------------
+  # 2. push — publish the tag to GHCR (skipped on workflow_dispatch dry-run).
+  # ---------------------------------------------------------------------
+  push:
+    name: Push to GHCR
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push tag + latest
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ needs.build.outputs.image }}:${{ needs.build.outputs.tag }}
+            ${{ needs.build.outputs.image }}:latest
+
+  # ---------------------------------------------------------------------
+  # 3. smoke — INTERIM gate (5-spike subset). TODO T-QA-1: replace with
+  #    `python -m harness.testing.mutation_suite` once the mutation lift
+  #    lands. Mirrors docker-compose `test-runner` service command.
+  # ---------------------------------------------------------------------
+  smoke:
+    name: In-container spike smoke (interim — TODO T-QA-1 mutation_suite)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run 5-spike gate (container-internal, sqlite≥3.47 enforced by Dockerfile gate)
+        run: |
+          set -euo pipefail
+          IMAGE="${{ needs.build.outputs.image }}:${{ needs.build.outputs.tag }}"
+
+          # Bind-mount the checked-out spikes/ into the container so the
+          # python spikes can run against the spec/harness baked into the
+          # image. spikes/ is excluded from build context (.dockerignore)
+          # so we must inject it here.
+          docker run --rm \
+            -v "$(pwd)/spikes:/app/spikes:ro" \
+            -v "harness-smoke-db:/data" \
+            "$IMAGE" \
+            sh -c '
+              set -e
+              echo "=== spike suite gate ==="
+              python spikes/m0/conformance-second-impl.py
+              python spikes/m0/egress-httpx-actual.py
+              python spikes/m0/worker-dispatch-test.py
+              python spikes/m0/worker-events-emit-test.py
+              python spikes/m0/context-budget-test.py
+              echo "=== ALL SPIKES PASS ==="
+            '
+
+      - name: Confirm sqlite + harness import inside image
+        run: |
+          docker run --rm \
+            "${{ needs.build.outputs.image }}:${{ needs.build.outputs.tag }}" \
+            python -c "
+          from harness.runtime import SqliteWorkerPool, SqliteEventSink, SqliteContextManager
+          from harness.gateway import HttpEgressService, ToolInvocationGatewayImpl, RealArtifactStore
+          import sqlite3, harness
+          v = sqlite3.sqlite_version
+          assert tuple(map(int, v.split('.'))) >= (3, 47, 0), f'sqlite {v} < 3.47'
+          print(f'harness={harness.__version__} sqlite={v}')
+          "

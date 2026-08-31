@@ -1,0 +1,50 @@
+# fish-harness v1.0 .dockerignore (T-DO-3)
+#
+# Goal: minimize build context transferred to the docker daemon.
+# Dockerfile only COPY's: pyproject.toml, README.md, harness/, spec/.
+# Anything else here wastes transfer time + risks secret leakage
+# (.env, gh tokens, etc.).
+#
+# List mirrors docs/DISPATCH-T-DO-3.md §A contract (GA plan §2 T-DO-3
+# spec + hardening: .cursor/.serena exclusions so the dev/agent
+# working dirs never enter the production image).
+
+# VCS / agent working dirs
+.git/
+.github/
+.cursor/
+.serena/
+
+# Spec / docs / working notes (production image needs only spec/, not
+# the design notes or chat-transcripts)
+adr/
+notes/
+docs/
+
+# Tests / spikes (covered by docker-compose test-runner bind mount,
+# NOT needed inside the runtime image)
+spikes/
+tests/
+
+# Python bytecode + test caches
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Planning / vendor working files (PRD/ARCHITECT/RESPONSE are Cursor/
+# Claude workspace memos — never ship)
+PRD*.md
+ARCHITECT*.md
+RESPONSE*.md
+
+# Local DB files (R-2 ADR 0009: SQLite WAL production constraints)
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# User uploads (runtime doesn't read them; local dev binds separately
+# via compose)
+uploads/
+
+# KEEP: Dockerfile, pyproject.toml, README.md, harness/, spec/

@@ -25,6 +25,9 @@
 | **T-TG-5** | ✅ done 2026-08-31 | `harness/testing/{__init__,echo_server}.py` — `InProcessEgressServer`（stdlib `ThreadingHTTPServer` + daemon thread；零新依赖）；host **hardcoded `127.0.0.1`**（fixture 性质，不是生产 egress；BLOCKED_NETWORKS 不动）；`port=0` → ephemeral（多次 `with` 不撞）；`__enter__` 起 thread / `__exit__` `shutdown()`+`server_close()`+`join(2.0)`；GET/POST `/echo` 200（POST body 原样回显 = 等价契约）；post-exit 连拒（`httpx.ConnectError`）；5-phase dedicated smoke (`python3 -m harness.testing.echo_server`) 全过；`from harness.testing import InProcessEgressServer` OK；egress 8/8 + conformance 10/10 无回归；`pip install -e .` OK |
 | **T-DO-1** | ✅ done 2026-08-31 | `Dockerfile` (python:3.12-slim base, `PYTHONDONTWRITEBYTECODE=1` + `PYTHONUNBUFFERED=1`, `WORKDIR /app`, COPY `pyproject.toml`+`README.md` → COPY `harness/` → `pip install --no-cache-dir --no-compile .` → `CMD ["python", "-m", "harness"]`)；`harness/__main__.py`（3 行: `print(harness.__version__)`）；`README.md` placeholder（标 T-DD-1 会重写）。`docker build -t fish-harness:1.0.0a0 .` OK → image `0df04ebb91c6` (212MB)；`docker run --rm fish-harness:1.0.0a0 python -c "import harness; print(harness.__version__)"` → `1.0.0a0`；`docker run --rm fish-harness:1.0.0a0 python -m harness` → `1.0.0a0` |
 | **T-DO-2** | ✅ done 2026-08-31 | `Dockerfile` 补丁 (COPY `spec/` → `/app/spec` + `ENV PYTHONPATH=/app`)；`harness/runtime/__init__.py` re-export `SqliteWorkerPool` / `SqliteEventSink` / `SqliteContextManager`；`docker-compose.yml` 含 `harness` + `test-runner` services + `harness_db` named volume + spike suite gate command。**base image 偏离 plan §2 T-DO-1 (3.12-slim → 3.14-alpine)** per [`docs/ADJUDICATION-sqlite-raise-T-DO-2.md`](ADJUDICATION-sqlite-raise-T-DO-2.md) (Accepted) — `spec/kernel-schema.sql` 的 `RAISE(ABORT, expr || expr)` 是 SQLite 3.47+ 才支持；3.12/3.13/3.14-slim + trixie 全 ship 3.46.1 → schema apply 失败；3.14-alpine ship 3.53.2 ✓。Dockerfile 加硬门 `assert sqlite3.sqlite_version >= 3.47.0`。验收 5/5: `import harness` 1.0.0a0; `from harness.runtime import …`; `from harness.gateway import …`; `from spec.interfaces…`; spike suite (conformance 10/10 + egress 8/8 + worker-dispatch 21/21 + worker-events 6/6 + context-budget 全过) **容器内** 全绿。Image `945685d5f836` **87.3MB** (vs 3.12-slim 212MB, alpine 瘦 59%)。注: 宿主 `docker compose` v2 plugin 未装, 用等价 `docker run` + 同 volume mounts 模拟 test-runner 行为 |
+| **T-DO-3** | ✅ done 2026-08-31 | `.dockerignore` (13 patterns per DISPATCH-T-DO-3 §A): VCS/agent dirs (`.git/`/`.github/`/`.cursor/`/`.serena/`), spec/docs/notes (`adr/`/`notes/`/`docs/`), tests (`spikes/`/`tests/`), py caches (`__pycache__/`/`*.pyc`/`.pytest_cache/`), planning files (`PRD*.md`/`ARCHITECT*.md`/`RESPONSE*.md`), DB (`*.sqlite` + `-journal`/`-wal`/`-shm`), `uploads/`. 保留: Dockerfile/pyproject.toml/README.md/harness/spec. Build context **457.2kB** (vs 之前 ~40-60MB 无 ignore 状态 — 100x reduction). `docker build` 全部 layer cache HIT (image sha 未变). 容器 `from harness.runtime import ...` + `from harness.gateway import ...` + `sqlite3.sqlite_version >= 3.47.0` 全 PASS. |
+| **T-DO-4** | ✅ done 2026-08-31 (interim smoke) | `.github/workflows/deploy.yml` (97 行): trigger = `push.tags=v*` + `workflow_dispatch`; concurrency group = `deploy-${{ github.ref }}`; 3 jobs: **(1) build** (docker/build-push-action@v5 + `load:true` 给 smoke 复用) → **(2) push** (GHCR login + 推 `${GITHUB_REPOSITORY_OWNER,,}/fish-harness:${tag}` + `:latest`; gated `if: push && startsWith(ref, 'refs/tags/v')`) → **(3) smoke** (容器内 5-spike subset bind-mount `spikes/` ro + harness-smoke-db vol; **interim gate** with TODO marker 等 T-QA-1 mutation_suite 替换). YAML valid via `python3 -c "import yaml; yaml.safe_load(...)"` (3 jobs, 2 triggers). 本机 rehearsal: 5/5 spike 全绿 (conformance 10/10 + egress 8/8 + worker-dispatch 21/21 + worker-events 6/6 + context-budget 全过). **不**真实打 `v1.0.0a0` 推 GHCR (无 token, 留用户/CI). 验收 5/5: `test -f .dockerignore` + `docker build` + 容器 imports + `test -f .github/workflows/deploy.yml` + YAML valid + 本机 smoke 5-spike 全过. |
+| **T-DO-3+4 计划脚注** | ✅ done 2026-08-31 | `docs/v1.0-ga-team-plan.md` §2 T-DO-1 行加 ¹ 脚注 → base=`python:3.14-alpine`(或 3.12-alpine); `sqlite3.sqlite_version >= 3.47.0` 硬门 (schema 用 RAISE(expr)); 裁定全文 `docs/ADJUDICATION-sqlite-raise-T-DO-2.md`. §2 末尾加 ¹ 脚注定义块. plan 表文字未改 (base 仍写 3.12-slim + 脚注解释偏离). |
 
 任务全文：`docs/v1.0-ga-team-plan.md` §2。派发顺序：§8（**T-BE-5 最先**）。
 
@@ -35,12 +38,18 @@
 - 跨 host SQLite / NFS
 - 扩大范围到当前「下一枪」以外（做完一枪即停）；T-TG-2 可并行但不自动开
 
-## 4. 下一验收（T-DO-3）
+## 4. 下一验收（T-QA-1）
+
+见 [`docs/DISPATCH-T-QA-1.md`](DISPATCH-T-QA-1.md)（mutation-test.py lift → `harness.testing.mutation_suite` CLI）。  
+审验报告：[`docs/REVIEW-T-DO-3.md`](REVIEW-T-DO-3.md) = T-DO-3+T-DO-4 合并包 PASS（待 Cursor 写）。
+
+T-QA-1 是 T-DO-4 deploy smoke mutation gate 的依赖（DISPATCH-T-DO-3 §B 标 TODO T-QA-1）。
 
 ```bash
-docker build -t fish-harness:1.0.0a0 . 2>&1 | grep -E "Transferring context|Sending build context" 
-# 期望：build context 仅含必要 layer（无 .git/ .github/ adr/ notes/ PRD*/ ARCHITECT*/ RESPONSE*/ spikes/ __pycache__/）
-# 产出 .dockerignore
+# Phase A
+test -f .dockerignore && docker build -t fish-harness:1.0.0a0 .
+# Phase B
+test -f .github/workflows/deploy.yml
 ```
 
 ## 5. 冷指针（按需 Read，勿预载）
