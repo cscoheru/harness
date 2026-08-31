@@ -28,6 +28,7 @@
 | **T-DO-3** | ✅ done 2026-08-31 | `.dockerignore` (13 patterns per DISPATCH-T-DO-3 §A): VCS/agent dirs (`.git/`/`.github/`/`.cursor/`/`.serena/`), spec/docs/notes (`adr/`/`notes/`/`docs/`), tests (`spikes/`/`tests/`), py caches (`__pycache__/`/`*.pyc`/`.pytest_cache/`), planning files (`PRD*.md`/`ARCHITECT*.md`/`RESPONSE*.md`), DB (`*.sqlite` + `-journal`/`-wal`/`-shm`), `uploads/`. 保留: Dockerfile/pyproject.toml/README.md/harness/spec. Build context **457.2kB** (vs 之前 ~40-60MB 无 ignore 状态 — 100x reduction). `docker build` 全部 layer cache HIT (image sha 未变). 容器 `from harness.runtime import ...` + `from harness.gateway import ...` + `sqlite3.sqlite_version >= 3.47.0` 全 PASS. |
 | **T-DO-4** | ✅ done 2026-08-31 (interim smoke) | `.github/workflows/deploy.yml` (97 行): trigger = `push.tags=v*` + `workflow_dispatch`; concurrency group = `deploy-${{ github.ref }}`; 3 jobs: **(1) build** (docker/build-push-action@v5 + `load:true` 给 smoke 复用) → **(2) push** (GHCR login + 推 `${GITHUB_REPOSITORY_OWNER,,}/fish-harness:${tag}` + `:latest`; gated `if: push && startsWith(ref, 'refs/tags/v')`) → **(3) smoke** (容器内 5-spike subset bind-mount `spikes/` ro + harness-smoke-db vol; **interim gate** with TODO marker 等 T-QA-1 mutation_suite 替换). YAML valid via `python3 -c "import yaml; yaml.safe_load(...)"` (3 jobs, 2 triggers). 本机 rehearsal: 5/5 spike 全绿 (conformance 10/10 + egress 8/8 + worker-dispatch 21/21 + worker-events 6/6 + context-budget 全过). **不**真实打 `v1.0.0a0` 推 GHCR (无 token, 留用户/CI). 验收 5/5: `test -f .dockerignore` + `docker build` + 容器 imports + `test -f .github/workflows/deploy.yml` + YAML valid + 本机 smoke 5-spike 全过. |
 | **T-DO-3+4 计划脚注** | ✅ done 2026-08-31 | `docs/v1.0-ga-team-plan.md` §2 T-DO-1 行加 ¹ 脚注 → base=`python:3.14-alpine`(或 3.12-alpine); `sqlite3.sqlite_version >= 3.47.0` 硬门 (schema 用 RAISE(expr)); 裁定全文 `docs/ADJUDICATION-sqlite-raise-T-DO-2.md`. §2 末尾加 ¹ 脚注定义块. plan 表文字未改 (base 仍写 3.12-slim + 脚注解释偏离). |
+| **T-QA-1** | ✅ done 2026-08-31 | **Phase 0 (deploy P0 修)**: `.github/workflows/deploy.yml` smoke job 删除; smoke 步骤挪进 `build` job 末尾同 runner (image 在 build runner daemon 内 `load:true`, 跨 job 必挂 P0 修). YAML valid; jobs = build + push. **Phase A (mutation_suite lift)**: `harness/testing/mutation_suite.py` (1029 行 lift 自 `spikes/m0/mutation-test.py` v0.9.4) — `MUTATIONS` dict + `run_mutations() -> dict[str, bool]` + `main()` CLI. 17 mutations (M1-M11, M13-M18, M12 删). 路径优先 `harness.runtime._db/workers/context` (T-BE-1 lift); `seed_blob` 内联 (_helpers 未 lift, 1-stmt INSERT); M15 monkey-patch 改 target 到 `harness.runtime.workers.dispatch_worker` (production 路径, 非 spike _helpers). `harness/testing/__init__.py` 用 `__getattr__` lazy import (避免 Python 3.14 RuntimeWarning sys.modules pollution). 验收: `python3 -m harness.testing.mutation_suite` exit 0 host 17/17 + container 17/17 (无 spikes bind-mount 需要, 全用 production 路径); deploy.yml YAML valid; smoke 同 runner. **TODO 移除**: deploy smoke 不再是 interim 5-spike — 现在是正式 mutation_suite gate. |
 
 任务全文：`docs/v1.0-ga-team-plan.md` §2。派发顺序：§8（**T-BE-5 最先**）。
 
@@ -38,18 +39,13 @@
 - 跨 host SQLite / NFS
 - 扩大范围到当前「下一枪」以外（做完一枪即停）；T-TG-2 可并行但不自动开
 
-## 4. 下一验收（T-QA-1）
+## 4. 下一验收（T-QA-2）
 
-见 [`docs/DISPATCH-T-QA-1.md`](DISPATCH-T-QA-1.md)（mutation-test.py lift → `harness.testing.mutation_suite` CLI）。  
-审验报告：[`docs/REVIEW-T-DO-3.md`](REVIEW-T-DO-3.md) = T-DO-3+T-DO-4 合并包 PASS（待 Cursor 写）。
-
-T-QA-1 是 T-DO-4 deploy smoke mutation gate 的依赖（DISPATCH-T-DO-3 §B 标 TODO T-QA-1）。
+见 [`docs/DISPATCH-T-QA-2.md`](DISPATCH-T-QA-2.md)（集成测试套件 — `tests/test_worker_pool.py` + `test_context_manager.py` + `test_egress.py` + `test_gateway.py` + pytest fixture 用 `harness.runtime.make_db()`）。  
+审验：[`docs/REVIEW-T-QA-1.md`](REVIEW-T-QA-1.md) = T-QA-1 PASS（待 Cursor 写）。
 
 ```bash
-# Phase A
-test -f .dockerignore && docker build -t fish-harness:1.0.0a0 .
-# Phase B
-test -f .github/workflows/deploy.yml
+python3 -m harness.testing.mutation_suite   # 17/17 baseline
 ```
 
 ## 5. 冷指针（按需 Read，勿预载）
