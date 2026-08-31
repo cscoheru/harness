@@ -10,23 +10,33 @@
 
 | ID | 状态 | 关键交付 |
 |----|------|----------|
-| T-BE-5…T-TG-4 | ✅ | 见 NOW.md §2 |
-| **T-TG-5** | ✅ done 2026-08-31 | `harness/testing/{__init__,echo_server}.py` — `InProcessEgressServer`（127.0.0.1 hardcoded + ephemeral port + context manager） |
-| **T-TG-5 审验** | ✅ 2026-08-31 | `python3 -m harness.testing.echo_server` 5-phase smoke 全过（import / GET-POST 200 / post-exit ConnectError / 连 re-bind 端口不撞 / host==127.0.0.1）；import OK；egress 8/8 + conformance 10/10 无回归；`pip install -e .` OK |
+| T-BE-5…T-DO-1 | ✅ | 见 NOW.md §2 |
+| **T-DO-2** | ✅ done 2026-08-31 | Dockerfile 补丁（COPY spec + PYTHONPATH + SQLite≥3.47 硬门 + base 切 3.14-alpine）+ `harness/runtime/__init__.py` re-export 3 类 + `docker-compose.yml`（harness + test-runner + harness_db volume） |
+| **T-DO-2 审验** | ✅ 2026-08-31 | 5/5 验收全过：① `import harness` 1.0.0a0; ② `from harness.runtime import …`; ③ `from harness.gateway import …`; ④ `from spec.interfaces…`; ⑤ 容器内 5-spike gate 全绿 (conformance 10/10 + egress 8/8 + worker-dispatch 21/21 + worker-events 6/6 + context-budget) |
 
 ## 需要审验（当前 untracked）
 
 | 文件 | 类型 | 审什么 |
 |------|------|--------|
-| `harness/testing/__init__.py` | new | export `InProcessEgressServer` |
-| `harness/testing/echo_server.py` | new | host hardcoded `127.0.0.1`；port=0 ephemeral；`__exit__` shutdown+server_close+join(2.0)；daemon thread；`__main__` 5-phase smoke |
+| `Dockerfile` | modified (T-DO-2) | COPY `spec/` + `ENV PYTHONPATH=/app` + SQLite ≥ 3.47 硬门 + base `python:3.14-alpine` (偏离原文 3.12-slim per 裁定) |
+| `harness/runtime/__init__.py` | modified (T-DO-2) | re-export `SqliteWorkerPool` / `SqliteEventSink` / `SqliteContextManager` (满足 plan §4 第 3 步) |
+| `docker-compose.yml` | new (T-DO-2) | services `harness` + `test-runner`；named volume `harness_db`；test-runner 跑 5 spike 脚本 |
 
-P1（不挡 T-DO-1）：
-1. `python3 -m harness.testing.echo_server` 启动时 `RuntimeWarning`（模块被 `__init__` 预导入 → runpy 重复发现；无害）
-2. 仅 `/echo` 端点；`/status` / `/redirect` 留给 T-QA-2 integration tests
-3. 无并发上限（每次 `with` 起 1 thread + 1 socket）；T-QA-5 stress_test 验证
-4. TG 角色 5 任务全部 done
+**裁定引用**: [`docs/ADJUDICATION-sqlite-raise-T-DO-2.md`](ADJUDICATION-sqlite-raise-T-DO-2.md) Accepted — base image 偏离 plan §2 T-DO-1 (3.12-slim → 3.14-alpine) 的根因 (SQLite 3.46.1 不支持 RAISE(expr)) 记录在案。
 
-## 下一步做什么（**T-DO-1**，下一枪；DO 角色首发，建议 Dockerfile）
+P1（不挡 T-DO-3）：
+1. 宿主 `docker compose` v2 plugin 未装；本次用等价 `docker run` + 同 volume mounts 模拟 test-runner — 在能装 compose 的机器上 `docker compose up --build test-runner` 应 exit 0
+2. 镜像以 root 运行 (alpine 也含 root) — non-root user hardening 留给 M2
+3. T-TG-5 smoke Phase 3 偶发：`__exit__` 后仍可连（shutdown race）；与本枪无关
+4. **plan §2 T-DO-1 脚注待补**: 行末加 `base = python:3.12-alpine（或 3.14-alpine）；要求 stdlib sqlite3 ≥ 3.47`。CC 可顺手改，Cursor 审验时改也行
+
+## 轮询（2026-08-31 起）
+
+- 协议：[`docs/POLL-PROTOCOL.md`](POLL-PROTOCOL.md)
+- CC 短卡：[`docs/CC-POLL.md`](CC-POLL.md)
+- 状态：`docs/poll/state.json`（当前 `issued_task=T-DO-2`, `awaiting=cc_ready`）
+- Cursor 本会话：**30 min** 审验 tick；CC：**commit/push 后** 才 **5 min** 拉 REVIEW/下一单
+
+## 下一步做什么（**T-DO-3**，下一枪；建议 `.dockerignore`）
 
 见用户消息中的 CC 合并任务包。

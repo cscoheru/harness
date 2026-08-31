@@ -1,0 +1,51 @@
+# docker-compose.yml — fish-harness v1.0 local dev (T-DO-2)
+#
+# Two services, one named volume:
+#   - harness:       long-running container; uses harness_db for SQLite WAL
+#   - test-runner:   spike-suite smoke; same image, mounts spikes/ ro,
+#                    runs the 5 core spike scripts as a gate
+#
+# Volume:
+#   - harness_db:    shared between harness + test-runner (test-runner
+#                    inherits DB to verify schema compatibility)
+#
+# Constraints (per docs/PRD-V0.1-NORTH-STAR.md §13 + ADR 0009):
+#   - SQLite WAL is SINGLE-HOST only. Compose must run on ONE machine.
+#   - DO NOT deploy harness_db via NFS or any shared filesystem; the
+#     POSIX file-lock that WAL relies on is undefined there.
+#   - production hardening (non-root user, image scanning, GHCR push,
+#     mutation-suite smoke) lives in T-DO-4 deploy.yml + T-DO-5
+#     codex-review.yml, not here.
+
+services:
+  harness:
+    build: .
+    image: fish-harness:1.0.0a0
+    # Long-running placeholder. v1.0 has no daemon loop yet; the
+    # container runs `python -m harness` (prints version) and exits.
+    # Future T-DO-* will replace this with a worker entrypoint.
+    volumes:
+      - harness_db:/data
+
+  test-runner:
+    build: .
+    image: fish-harness:1.0.0a0
+    # Mount the spike suite read-only so test runs always exercise the
+    # committed spike source, not a stale copy baked into the image.
+    # This also keeps the production image lean (spikes/ excluded from
+    # build by future T-DO-3 .dockerignore).
+    volumes:
+      - ./spikes:/app/spikes:ro
+      - harness_db:/data
+    working_dir: /app
+    command: >
+      sh -c "echo '=== spike suite gate ===' &&
+             python spikes/m0/conformance-second-impl.py &&
+             python spikes/m0/egress-httpx-actual.py &&
+             python spikes/m0/worker-dispatch-test.py &&
+             python spikes/m0/worker-events-emit-test.py &&
+             python spikes/m0/context-budget-test.py &&
+             echo '=== ALL SPIKES PASS ==='"
+
+volumes:
+  harness_db:

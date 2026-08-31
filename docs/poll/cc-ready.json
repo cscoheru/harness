@@ -1,0 +1,7 @@
+{
+  "task_id": "T-DO-2",
+  "commit": null,
+  "pushed_at": "2026-08-31T21:30:00+08:00",
+  "branch": "main",
+  "notes": "T-DO-2 done. Dockerfile base = python:3.14-alpine (per docs/ADJUDICATION-sqlite-raise-T-DO-2.md Accepted; SQLite 3.46.1 cannot parse RAISE(expr)). Image 945685d5f836 = 87.3MB. harness/runtime/__init__.py re-exports 3 production classes. docker-compose.yml has harness + test-runner + harness_db volume. 5/5 acceptance: harness import + 3 subpackage imports + spec import + container-internal 5-spike gate (conformance 10/10 + egress 8/8 + worker-dispatch 21/21 + worker-events 6/6 + context-budget). NOTE: host has no docker compose v2 plugin; acceptance #5 ran via equivalent docker run + same volume mounts."
+}
