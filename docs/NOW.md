@@ -30,6 +30,7 @@
 | **T-DO-3+4 计划脚注** | ✅ done 2026-08-31 | `docs/v1.0-ga-team-plan.md` §2 T-DO-1 行加 ¹ 脚注 → base=`python:3.14-alpine`(或 3.12-alpine); `sqlite3.sqlite_version >= 3.47.0` 硬门 (schema 用 RAISE(expr)); 裁定全文 `docs/ADJUDICATION-sqlite-raise-T-DO-2.md`. §2 末尾加 ¹ 脚注定义块. plan 表文字未改 (base 仍写 3.12-slim + 脚注解释偏离). |
 | **T-QA-1** | ✅ done 2026-08-31 | **Phase 0 (deploy P0 修)**: `.github/workflows/deploy.yml` smoke job 删除; smoke 步骤挪进 `build` job 末尾同 runner (image 在 build runner daemon 内 `load:true`, 跨 job 必挂 P0 修). YAML valid; jobs = build + push. **Phase A (mutation_suite lift)**: `harness/testing/mutation_suite.py` (1029 行 lift 自 `spikes/m0/mutation-test.py` v0.9.4) — `MUTATIONS` dict + `run_mutations() -> dict[str, bool]` + `main()` CLI. 17 mutations (M1-M11, M13-M18, M12 删). 路径优先 `harness.runtime._db/workers/context` (T-BE-1 lift); `seed_blob` 内联 (_helpers 未 lift, 1-stmt INSERT); M15 monkey-patch 改 target 到 `harness.runtime.workers.dispatch_worker` (production 路径, 非 spike _helpers). `harness/testing/__init__.py` 用 `__getattr__` lazy import (避免 Python 3.14 RuntimeWarning sys.modules pollution). 验收: `python3 -m harness.testing.mutation_suite` exit 0 host 17/17 + container 17/17 (无 spikes bind-mount 需要, 全用 production 路径); deploy.yml YAML valid; smoke 同 runner. **TODO 移除**: deploy smoke 不再是 interim 5-spike — 现在是正式 mutation_suite gate. |
 | **T-QA-2** | ✅ done 2026-08-31 | **集成测试套件** (GA plan §2): 5 文件全在 `tests/` 下 (conftest.py + 4 test_*.py). `conftest.py` 4 fixtures: `conn` (per-test `make_db()`) + `artifact_root` + `upload_root` + `attempt` / `attempt_factory` (走 `harness.runtime._db.claim()` 拿真 attempt row 满足 `context_snapshots.attempt_id` FK + `trg_attempt_fence_insert`). `pyproject.toml` 加 `[tool.pytest.ini_options]` (testpaths=`tests`, filterwarnings=ignore PytestUnraisable). **37/37 PASS** in 0.24s: worker_pool 8 (register/dispatch×2 round-robin/heartbeat×2 monotonic/drain/claim_via_pool/Protocol/NoWorkerAvailable ⊂ WorkerPoolError); context_manager 8 (distill 幂等 + 缺 raw blob 报 ContextError + charge 累加 + 超 budget 报 BudgetExceeded + snapshot/restore 跨 terminal 新 attempt + restore 超 budget 报 BudgetExceeded + remaining/total + Protocol×2); egress 12 (PinnedResolver allowlist/private-IP-block/reject_rebinding + HttpEgressService 无 proxy 拒绝/MockTransport happy path/unlisted host 重定向/retry-on-ConnectError×2/backoff cap 8s); gateway 7 (allow 全 6 步 + deny 不调 provider + needs_approval 写 pending + bad lease/bad fence/no such attempt 全 step-1 拒绝 + provider 级 deny 透传). 验收: `pip install -e .` OK + `pytest tests/ -q` 37/37 + `python3 -m harness.testing.mutation_suite` 仍 17/17. 约束遵守: 0 处 import `spikes.m0._helpers`; egress 全 httpx.MockTransport (无真网); gateway 4 fake collaborator (FakePDP + FakeProvider + InMemoryArtifactStore[写 blobs 表满足 artifacts FK] + no linker). |
+| **T-QA-3** | ✅ done 2026-08-31 | **benchmark 套件** (GA plan §2): `harness/benchmark/{__init__,runner}.py`. CLI `python -m harness.benchmark.runner --tasks=N --workers=N --out=path --csv=path` (defaults 50/4/results.json). `__init__.py` 用 PEP 562 `__getattr__` lazy import (避免 Python 3.14 sys.modules RuntimeWarning). 核心循环: `make_db()` (file DB) + `SqliteWorkerPool.register N` + `seed_task M` + 每 task 手写 `dispatch_worker + claim + terminal transition` (绕过 `claim_via_pool` 因其固定 `_now_iso(offset_seconds=15.0)` 在第 2 次同 worker 调用会触发 I16 backslide + 也会无谓改 last_heartbeat_at). I15 partial UNIQUE `idx_worker_one_active_attempt` 要求 worker 只能持 1 个 active attempt → 每 task 后 UPDATE attempt → succeeded + workers.current_attempt_id = NULL (不 bump last_heartbeat_at — I16 sub-millisecond ties 风险 + benchmark 不测 reap_stale). **硬门 p99 < 5000ms** exit 0, 否则 1. smoke `--tasks=10 --workers=2`: p99=0.43ms / 3695 tasks/s. 默认 `--tasks=50 --workers=4`: p99=1.49ms / 4128 tasks/s, **exit 0**. 输出 `results.json` 含 tasks/workers/wall_seconds/throughput_tasks_per_sec/latency_ms{p50,p95,p99,min,max,mean}/passes_gate/gate_threshold_ms. 无回归: `pytest tests/ -q` 37/37 + `python3 -m harness.testing.mutation_suite` 17/17. |
 
 任务全文：`docs/v1.0-ga-team-plan.md` §2。派发顺序：§8（**T-BE-5 最先**）。
 
@@ -40,14 +41,15 @@
 - 跨 host SQLite / NFS
 - 扩大范围到当前「下一枪」以外（做完一枪即停）；T-TG-2 可并行但不自动开
 
-## 4. 下一验收（T-QA-3）
+## 4. 下一验收（T-QA-4）
 
-见 [`docs/DISPATCH-T-QA-3.md`](DISPATCH-T-QA-3.md)（如已签发；否则等 Cursor）。  
-审验：[`docs/REVIEW-T-QA-2.md`](REVIEW-T-QA-2.md)（等 Cursor 签发）。
+见 [`docs/DISPATCH-T-QA-4.md`](DISPATCH-T-QA-4.md)（如已签发；否则等 Cursor）。  
+审验：[`docs/REVIEW-T-QA-3.md`](REVIEW-T-QA-3.md)（等 Cursor 签发）。
 
 ```bash
-# 默认下一枪 = T-QA-3 (benchmark 套件, per GA plan §2)
-# 兜底 = T-DO-5 (codex-review gate)
+# 默认下一枪 = T-QA-4 (3 个新 CI job: integration-tests / mutation-suite /
+# benchmark-baseline, per GA plan §2 T-QA-4)
+# 兜底 = T-QA-5 (50×200 SQLite 并发压力测试)
 ```
 
 ## 5. 冷指针（按需 Read，勿预载）
