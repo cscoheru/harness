@@ -1,7 +1,7 @@
 {
-  "task_id": "T-DO-2",
-  "commit": null,
-  "pushed_at": "2026-08-31T21:30:00+08:00",
+  "task_id": "T-DO-3+T-DO-4",
+  "commit": "52d272a",
+  "pushed_at": "2026-08-31T13:38:03Z",
   "branch": "main",
-  "notes": "T-DO-2 done. Dockerfile base = python:3.14-alpine (per docs/ADJUDICATION-sqlite-raise-T-DO-2.md Accepted; SQLite 3.46.1 cannot parse RAISE(expr)). Image 945685d5f836 = 87.3MB. harness/runtime/__init__.py re-exports 3 production classes. docker-compose.yml has harness + test-runner + harness_db volume. 5/5 acceptance: harness import + 3 subpackage imports + spec import + container-internal 5-spike gate (conformance 10/10 + egress 8/8 + worker-dispatch 21/21 + worker-events 6/6 + context-budget). NOTE: host has no docker compose v2 plugin; acceptance #5 ran via equivalent docker run + same volume mounts."
+  "notes": "Merged package T-DO-3 + T-DO-4 done. Phase A = .dockerignore (13 patterns; build context 457.2kB, 100x reduction vs unfiltered; all Dockerfile layers cache HIT, image sha unchanged at 945685d5f836). Phase B = .github/workflows/deploy.yml (3 jobs: build/push/smoke; trigger = push tags v* + workflow_dispatch; GHCR push gated on real tag event; smoke runs 5-spike interim gate, TODO T-QA-1 mutation_suite). Plan §2 T-DO-1 footnote ¹ added pointing at ADJUDICATION-sqlite-raise-T-DO-2.md. 5/5 acceptance: .dockerignore exists + docker build OK + container imports runtime+gateway+sqlite≥3.47 (3.53.2) + deploy.yml exists + YAML valid (3 jobs / 2 triggers). Local smoke rehearsal: 5/5 spikes green (conformance 10/10 + egress 8/8 + worker-dispatch 21/21 + worker-events 6/6 + context-budget). Host lacks GHCR token; real tag push v1.0.0a0 left to user/CI. Next task per DISPATCH-T-DO-3 §B = T-QA-1 (mutation-test.py lift to harness/testing/mutation_suite; deploy smoke TODO depends on it)."
 }
