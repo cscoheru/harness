@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "harness"
+version = "1.0.0a0"
+description = "fish-harness v1.0 runtime (Python kernel) — task orchestration with SQLite-backed worker pool, event sink, and tool gateway."
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [{name = "cscoheru"}]
+dependencies = [
+    "httpx>=0.28,<0.29",
+    "jsonschema>=4.0,<5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+# tests/ mirrors the runtime package layout (conftest.py + 4 module tests).
+# We deliberately do NOT add the spikes/ tree — spikes are the spike
+# suite's domain, exercised by ``python spikes/m0/*.py`` directly.
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+filterwarnings = [
+    # Python 3.14 RuntimeWarning: a previous pytest 9 warning about
+    # 'harness.testing.mutation_suite found in sys.modules' is now
+    # sidestepped by harness/testing/__init__.py PEP 562 __getattr__.
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+]
+
+[tool.setuptools.packages.find]
+include = ["harness*"]
+exclude = ["spec*", "spikes*", "tests*", "docs*", "adr*", "notes*"]
