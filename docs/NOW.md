@@ -22,7 +22,7 @@
 | **T-TG-2** | ✅ done 2026-08-31 | `harness/gateway/gateway.py` — `ToolInvocationGatewayImpl` 实现 ADR 0005 6 步链（lease/fence → PDP → audit → provider → artifact_store → task_links）；写入侧 5 表持久化（`audit_log` 永写含 deny / `policy_decisions` / `approvals` 仅 needs_approval / `artifacts` 仅 allow / `task_links` 仅 allow）；lease/fence 校验走 `task_attempts` DB 读（I1 fence_version 一致性）；deny 不调 provider 且不写 artifact/link；needs_approval 写 `approvals(status='pending')` 返回 `approval_id` 不调 provider；provider-level denial 透传不写 artifact；artifact_store.put 与 artifacts.blob_id FK 解耦（gateway 分配新 blob_id）；`harness/gateway/__init__.py` export `ToolInvocationGatewayImpl` + `GatewayError`（保留 T-TG-1 的 6 export）；`python3 spikes/m0/conformance-second-impl.py` 10/10 Protocols + gateway 6 步链 全绿无回归；dedicated smoke 7 phases 全过（allow / deny / needs_approval / bad lease / bad fence / provider deny 透传 / Protocol isinstance） |
 | **T-TG-3** | ✅ done 2026-08-31 | `harness/gateway/artifact_store.py` — `RealArtifactStore` 实现 `ArtifactStore` Protocol（4 方法：put/get/stat/delete，local_fs 后端）；`put` 算 sha256 → atomic temp+fsync+rename → UPSERT `blobs` 行（REAL sha256，非假值）；幂等（同 id + 同 bytes no-op）；conflict（同 id + 不同 bytes）→ `BlobConflictError`；`expected_sha256` 不匹配 → `Sha256MismatchError`（rename 前拒）；`get` 读文件重 hash → 不匹配 raise；`delete` 删文件 + blobs 行（`artifacts` FK ON DELETE RESTRICT → IntegrityError 由调用方处理）；`__init__.py` export `RealArtifactStore` + 3 异常类（保留前序 8 export）；同步重构 `gateway.py:_store_artifact` 用 PutResult 真值（删除假 sha256 预插）；`python3 -m harness.gateway.artifact_store` minimal smoke OK；8-phase dedicated smoke（put/幂等/conflict/get+篡改/stat/delete/Protocol isinstance/gateway allow 联调）全过；`pip install -e .` OK → `harness.__version__`=1.0.0a0；conformance 10/10 + 4 其他 spike suite 无回归 |
 | **T-TG-4** | ✅ done 2026-08-31 | `harness/drivers/{_stub,codex_sdk,codex_exec,__init__}.py` + 2 evidence 文件 — `CodexSdkDriver` (`DriverKind.CODEX_SDK`) + `CodexExecDriver` (`DriverKind.CODEX_EXEC`) 共享 `StubDriverBase`（capability/run/interrupt/heartbeat 4 法）；`run()` 幂等缓存 `(attempt_id, fence_version) → [STARTED, FINISHED]`；`interrupt()` / `heartbeat()` 安全 no-op（FINISHED 后 interrupt 也不抛）；`capability()` 报 `supports_tool_gateway=False`（Q112：无证据 driver MUST NOT claim True）+ `max_concurrent_attempts=1` + `supports_{streaming=False,interrupt=True,heartbeat=True}`；`evidence_uri = file://harness/drivers/evidence-{sdk,exec}-stub.json`（两文件实存，3B 空 JSON）；10-phase dedicated smoke 全过（isinstance + capability 字段 + run→2 events + interrupt/heartbeat no-raise + duplicate run cached 同 identity + namespace 单类 + evidence 文件存在）；`python3 -c "from harness.drivers import CodexSdkDriver, CodexExecDriver; print('ok')"` OK；`python3 spikes/m0/conformance-second-impl.py` 10/10 Protocols + TrivialDriver driver 部分无回归；`spikes/m0/egress-httpx-actual.py` 8/8 无回归；`pip install -e .` OK |
-| T-TG-5 | 下一枪 | `harness/testing/echo_server.py` — `InProcessEgressServer` echo（127.0.0.1 绑定 + context manager 清理）；验收：echo 测试全绿 |
+| **T-TG-5** | ✅ done 2026-08-31 | `harness/testing/{__init__,echo_server}.py` — `InProcessEgressServer`（stdlib `ThreadingHTTPServer` + daemon thread；零新依赖）；host **hardcoded `127.0.0.1`**（fixture 性质，不是生产 egress；BLOCKED_NETWORKS 不动）；`port=0` → ephemeral（多次 `with` 不撞）；`__enter__` 起 thread / `__exit__` `shutdown()`+`server_close()`+`join(2.0)`；GET/POST `/echo` 200（POST body 原样回显 = 等价契约）；post-exit 连拒（`httpx.ConnectError`）；5-phase dedicated smoke (`python3 -m harness.testing.echo_server`) 全过；`from harness.testing import InProcessEgressServer` OK；egress 8/8 + conformance 10/10 无回归；`pip install -e .` OK |
 
 任务全文：`docs/v1.0-ga-team-plan.md` §2。派发顺序：§8（**T-BE-5 最先**）。
 
@@ -33,12 +33,12 @@
 - 跨 host SQLite / NFS
 - 扩大范围到当前「下一枪」以外（做完一枪即停）；T-TG-2 可并行但不自动开
 
-## 4. 下一验收（T-TG-5）
+## 4. 下一验收（T-DO-1）
 
 ```bash
-python3 -c "from harness.testing import InProcessEgressServer; print('ok')"
-# 期望：echo server 在 127.0.0.1 绑定随机端口 + context manager 清理；
-# 产出 harness/testing/echo_server.py
+docker build -t fish-harness:1.0.0a0 . && docker run --rm fish-harness:1.0.0a0 python -c "import harness; print(harness.__version__)"
+# 期望：python:3.12-slim base；COPY pyproject.toml → pip install → COPY harness/；
+# 容器内 import OK → 1.0.0a0
 ```
 
 ## 5. 冷指针（按需 Read，勿预载）
