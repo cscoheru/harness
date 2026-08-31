@@ -1,7 +1,7 @@
 {
-  "task_id": "T-DO-3+T-DO-4",
-  "commit": "52d272a",
-  "pushed_at": "2026-08-31T13:38:03Z",
+  "task_id": "T-QA-1",
+  "commit": "2a223b2",
+  "pushed_at": "2026-08-31T13:50:38Z",
   "branch": "main",
-  "notes": "Merged package T-DO-3 + T-DO-4 done. Phase A = .dockerignore (13 patterns; build context 457.2kB, 100x reduction vs unfiltered; all Dockerfile layers cache HIT, image sha unchanged at 945685d5f836). Phase B = .github/workflows/deploy.yml (3 jobs: build/push/smoke; trigger = push tags v* + workflow_dispatch; GHCR push gated on real tag event; smoke runs 5-spike interim gate, TODO T-QA-1 mutation_suite). Plan §2 T-DO-1 footnote ¹ added pointing at ADJUDICATION-sqlite-raise-T-DO-2.md. 5/5 acceptance: .dockerignore exists + docker build OK + container imports runtime+gateway+sqlite≥3.47 (3.53.2) + deploy.yml exists + YAML valid (3 jobs / 2 triggers). Local smoke rehearsal: 5/5 spikes green (conformance 10/10 + egress 8/8 + worker-dispatch 21/21 + worker-events 6/6 + context-budget). Host lacks GHCR token; real tag push v1.0.0a0 left to user/CI. Next task per DISPATCH-T-DO-3 §B = T-QA-1 (mutation-test.py lift to harness/testing/mutation_suite; deploy smoke TODO depends on it)."
+  "notes": "T-QA-1 done. Phase 0 (deploy P0 fix): smoke job merged into build job — image lives in build runner daemon via load:true, separate smoke runner fails; YAML valid (jobs=build+push, no standalone smoke). Phase A: harness/testing/mutation_suite.py (1029 lines) lifts spikes/m0/mutation-test.py v0.9.4 → production CLI. 17/17 reverse-DROP causal mutations (M1-M11 + M13-M18; M12 removed). Imports prefer harness.runtime._db/workers/context; seed_blob inlined (not yet lifted, 1-stmt INSERT); M15 monkey-patch now targets harness.runtime.workers.dispatch_worker (production path, not spike _helpers). harness/testing/__init__.py uses __getattr__ lazy import (Python 3.14 RuntimeWarning fix). deploy.yml smoke step now calls 'python -m harness.testing.mutation_suite' (mutation_suite is the gate, no more 5-spike interim). Acceptance: mutation_suite.py exists (1029 lines) + host CLI exit 0 17/17 + container CLI exit 0 17/17 (no spikes bind-mount needed; production path used) + deploy.yml YAML valid + no standalone smoke job."
 }
