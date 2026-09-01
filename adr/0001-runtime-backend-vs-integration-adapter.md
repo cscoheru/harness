@@ -63,3 +63,21 @@ IntegrationAdapter (具体 SDK 包装)      ← execution_driver/codex_sdk.py
   不可行，因为同一 SDK 可能需要不同 adapter 实现。
 - **A3: 用 Anthropic Agent SDK 替代 Codex SDK**：技术上可行，但 Codex 是
   本项目的现有投资；不在本 ADR 决策范围内。
+---
+
+## v1.0 Status
+
+**v1.0 Status: Included in GA** — 2026-09-01.
+
+本 ADR 在 fish-harness **v1.0.0a0** release 已纳入最终交付物；后续 v1.x 改动走标准 ADR 流程：
+
+- 新增 ADR 编号 ≥ 0010
+- 不修改本 ADR 内容（保留 v1.0.0a0 历史快照）
+- 引用本文时用 `<adr-XXXX>` tag
+
+详见：
+
+- [`CHANGELOG.md`](../CHANGELOG.md) `## [v1.0.0a0]` 段
+- [ADR 0008](./0008-v1.0-package-architecture.md) — `harness/` 5-subpackage layout
+- [ADR 0009](./0009-sqlite-wal-production-constraints.md) — SQLite WAL single-host rule
+

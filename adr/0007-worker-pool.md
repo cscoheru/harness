@@ -179,3 +179,21 @@ done
 - v0.8 spike `cancel-race-test.py`（attempt 状态机的形式化先例）
 - v0.9-A ADR 0006-context-layering.md（I11-I19 不变量触发器风格延续）
 - Codex v0.7-v0.9-A review（spec vs Protocol drift、append-only、event emission 等教训）
+---
+
+## v1.0 Status
+
+**v1.0 Status: Included in GA** — 2026-09-01.
+
+本 ADR 在 fish-harness **v1.0.0a0** release 已纳入最终交付物；后续 v1.x 改动走标准 ADR 流程：
+
+- 新增 ADR 编号 ≥ 0010
+- 不修改本 ADR 内容（保留 v1.0.0a0 历史快照）
+- 引用本文时用 `<adr-XXXX>` tag
+
+详见：
+
+- [`CHANGELOG.md`](../CHANGELOG.md) `## [v1.0.0a0]` 段
+- [ADR 0008](./0008-v1.0-package-architecture.md) — `harness/` 5-subpackage layout
+- [ADR 0009](./0009-sqlite-wal-production-constraints.md) — SQLite WAL single-host rule
+

@@ -55,3 +55,21 @@ Codex v0.6 报告 P0-2 是 v0.7 spec 修这个 bug 的源头。
 - `spikes/m0/claim-fence-test.py`：连续 10 次 claim，fence 必须单调递增。
 - `spec/kernel-schema.sql` 的 `trg_attempt_fence_insert` 与 `trg_task_fence_bump`：
   必须在 spike 中可执行。
+---
+
+## v1.0 Status
+
+**v1.0 Status: Included in GA** — 2026-09-01.
+
+本 ADR 在 fish-harness **v1.0.0a0** release 已纳入最终交付物；后续 v1.x 改动走标准 ADR 流程：
+
+- 新增 ADR 编号 ≥ 0010
+- 不修改本 ADR 内容（保留 v1.0.0a0 历史快照）
+- 引用本文时用 `<adr-XXXX>` tag
+
+详见：
+
+- [`CHANGELOG.md`](../CHANGELOG.md) `## [v1.0.0a0]` 段
+- [ADR 0008](./0008-v1.0-package-architecture.md) — `harness/` 5-subpackage layout
+- [ADR 0009](./0009-sqlite-wal-production-constraints.md) — SQLite WAL single-host rule
+

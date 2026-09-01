@@ -97,7 +97,21 @@ GA plan §5 R-2 已经识别风险：「SQLite WAL 并发上限（~20 写并发�
 本 ADR 由架构师自签（per GA plan §2 T-DD-5 模板，Cursor 暂不可用）。
 回签时：Cursor 复活后请追加签名 / 标 P1 — 本 ADR 内容无需重做。
 
-## v1.0 Status Footer (T-DD-6 同步加)
+---
 
-待 T-DD-6（9 ADR v1.0 footer updates）时加：
-> **v1.0 Status: Included in GA**. 本 ADR 在 v1.0.0a0 release 已纳入最终交付物；后续 v1.x 改动走标准 ADR 流程。
+## v1.0 Status
+
+**v1.0 Status: Included in GA** — 2026-09-01.
+
+本 ADR 在 fish-harness **v1.0.0a0** release 已纳入最终交付物；后续 v1.x 改动走标准 ADR 流程：
+
+- 新增 ADR 编号 ≥ 0010
+- 不修改本 ADR 内容（保留 v1.0.0a0 历史快照）
+- 引用本文时用 `<adr-XXXX>` tag
+
+详见：
+
+- [`CHANGELOG.md`](../CHANGELOG.md) `## [v1.0.0a0]` 段
+- [ADR 0008](./0008-v1.0-package-architecture.md) — `harness/` 5-subpackage layout
+- [ADR 0009](./0009-sqlite-wal-production-constraints.md) — SQLite WAL single-host rule
+
