@@ -1,9 +1,55 @@
 # Changelog
 
-fish-harness v1.0.0a0 — all notable changes to this project are documented in this file.
+fish-harness v1.0.0 — all notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+---
+
+## [1.0.0] — 2026-09-01
+
+**General Availability release.** Production runtime backing the v0.9-B spec baseline
+([`spec/`](spec/) + [ADR 0001-0009](adr/)) — see
+[`docs/v1.0-ga-team-plan.md`](docs/v1.0-ga-team-plan.md) for the GA ladder
+and [`docs/NOW.md`](docs/NOW.md) for current stage.
+
+This tag is **byte-identical to `v1.0.0a1` at the library layer**
+(`harness/`, `spec/`, `spikes/`, `tests/`, `Dockerfile`, `pyproject.toml`,
+all 9 ADRs unchanged between `a1` and `1.0.0`); it only bumps the version
+quartet (`pyproject.toml` / `harness.__version__` / `CHANGELOG` / compose
+`image:`) to drop the alpha tag per ADR 0008 §版本对齐, and flips the
+GHCR `fish-harness` package to `public` visibility.
+
+### Changed
+
+- Version bump `1.0.0a1` → `1.0.0` across the version quartet (per
+  ADR 0008 §版本对齐): `pyproject.toml`, `harness/__init__.py`,
+  `CHANGELOG.md`, `docker-compose.yml` `image:`.
+- GHCR package `ghcr.io/cscoheru/fish-harness` visibility flipped
+  from `private` to `public` so any user can `docker pull` without
+  `docker login ghcr.io`.
+- 9 ADR `v1.0 Status: Included in GA` footer remains in force; no ADR
+  number ≥ 0010 added (post-v1.0 work goes to a new cycle per
+  VISION-v1.0-supplement.md).
+
+### Notes
+
+- Pre-release review evidence (all green on `1.0.0` HEAD):
+  - **Codex 初次审验** ([`notes/codex-review-v1.0.0a1-report.md`](notes/codex-review-v1.0.0a1-report.md)):
+    CHANGES REQUIRED → 6 FAIL (1 major + 5 minor) fixed in commit `47ba181`
+  - **Codex 修复复审** ([`notes/codex-review-v1.0.0a1-recheck-report.md`](notes/codex-review-v1.0.0a1-recheck-report.md)):
+    PASS (9/9 FAIL fixes + 4/4 regression + 5/5 hard rules + 10/10 scope clean)
+  - **GA plan §4 12-step verification** on `1.0.0` HEAD = 12/12 ✅
+    (incl. FAIL-1 regression command
+    `python3 -c "from harness.benchmark import runner"` = exit 0)
+  - 13 spike baseline (v0.9.5) + 37/37 pytest + 17/17 mutation + benchmark
+    `passes_gate=true` + 10/10 Protocol conformance — zero regressions
+  - GitHub Actions deploy.yml run on tag push: build + smoke (build job)
+    + push to GHCR (push job) — both jobs `completed/success`
+- All 4 Codex prompt-quality defects noted in the recheck report are
+  pre-existing in the *recheck* prompt file and have no effect on this
+  release; they will be cleaned up in the first `v1.0.x` patch.
 
 ---
 
@@ -251,5 +297,7 @@ docker run --rm fish-harness:1.0.0a0 python -c "import harness; print(harness.__
 The 7 v0.9 ADRs all gain a `v1.0 Status: Included in GA` footer in
 [T-DD-6](docs/v1.0-ga-team-plan.md).
 
-[Unreleased]: # (next minor; v1.0.0b0)
+[Unreleased]: # (next minor; v1.0.1)
+[1.0.0]: # (2026-09-01)
+[v1.0.0a1]: # (2026-09-01)
 [v1.0.0a0]: # (2026-09-01)

@@ -2,7 +2,7 @@
 
 **v1.0 runtime (Python kernel)** — task orchestration with SQLite-backed worker pool, event sink, and tool gateway.
 
-`v1.0.0a0` · MIT License · Python ≥ 3.12
+`v1.0.0` · MIT License · Python ≥ 3.12
 
 ---
 
@@ -43,7 +43,7 @@ pip install -e .
 
 # Verify import
 python -c "import harness; print(harness.__version__)"
-# 1.0.0a0
+# 1.0.0
 
 # Run the full test pyramid (37 integration + 17 mutation + benchmark + stress)
 pytest tests/ -q
@@ -52,8 +52,8 @@ python -m harness.benchmark.runner --tasks=50 --workers=4 --out results.json
 python -m harness.testing.stress_test --workers=50 --tasks=200 --out stress.json
 
 # Container
-docker build -t fish-harness:1.0.0a0 .
-docker run --rm fish-harness:1.0.0a0 python -c "import harness; print(harness.__version__)"
+docker build -t fish-harness:1.0.0 .
+docker run --rm fish-harness:1.0.0 python -c "import harness; print(harness.__version__)"
 ```
 
 ## 10 Protocol 接口表
@@ -83,7 +83,7 @@ docker run --rm fish-harness:1.0.0a0 python -c "import harness; print(harness.__
 
 ## Tests + Benchmarks
 
-| suite | command | gate | status (v1.0.0a0) |
+| suite | command | gate | status (v1.0.0) |
 |-------|---------|------|------------------|
 | Integration | `pytest tests/ -q` | 37/37 exit 0 | ✅ |
 | Mutation (v0.9.4) | `python -m harness.testing.mutation_suite` | 17/17 exit 0 | ✅ |
@@ -95,8 +95,8 @@ The stress suite is a manual diagnostic tool (per GA plan §5 R-5) and is **not*
 ## Container + CI
 
 ```bash
-docker build -t fish-harness:1.0.0a0 .           # 87 MB on python:3.14-alpine
-docker run --rm fish-harness:1.0.0a0 python -c "import harness; print(harness.__version__)"
+docker build -t fish-harness:1.0.0 .           # 87 MB on python:3.14-alpine
+docker run --rm fish-harness:1.0.0 python -c "import harness; print(harness.__version__)"
 ```
 
 Three CI jobs in `.github/workflows/ci.yml` (T-QA-4):
@@ -116,7 +116,7 @@ Deploy is a separate workflow: `.github/workflows/deploy.yml` (T-DO-4 / T-QA-1 f
 - [`docs/v1.0-ga-team-plan.md §2`](docs/v1.0-ga-team-plan.md) — task breakdown (T-BE-* / T-TG-* / T-DO-* / T-QA-* / T-DD-*)
 - [`adr/0008-v1.0-package-architecture.md`](adr/0008-v1.0-package-architecture.md) — package layout + spike→production ownership
 - [`adr/0009-sqlite-wal-production-constraints.md`](adr/0009-sqlite-wal-production-constraints.md) — SQLite WAL single-host rule + multi-region post-v1.0 path
-- [`CHANGELOG.md`](CHANGELOG.md) — v1.0.0a0 release notes; Keep-a-Changelog style. (T-DD-2)
+- [`CHANGELOG.md`](CHANGELOG.md) — v1.0.0 release notes; Keep-a-Changelog style. (T-DD-2)
 - [`LICENSE`](LICENSE) — MIT; matches `pyproject.toml` `license = {text = "MIT"}` + `authors = [{name = "cscoheru"}]`. (T-DD-3)
 
 ## License

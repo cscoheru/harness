@@ -24,7 +24,7 @@ services:
     # (only `.github/workflows/deploy.yml` changed between tags); compose
     # pins to v1.0.0a1 to match the latest published GHCR tag and the
     # default `docker build -t fish-harness:1.0.0a1 .` invocation.
-    image: fish-harness:1.0.0a1
+    image: fish-harness:1.0.0
     # Long-running placeholder. v1.0 has no daemon loop yet; the
     # container runs `python -m harness` (prints version) and exits.
     # Future T-DO-* will replace this with a worker entrypoint.
@@ -33,7 +33,7 @@ services:
 
   test-runner:
     build: .
-    image: fish-harness:1.0.0a1
+    image: fish-harness:1.0.0
     # Mount the spike suite read-only so test runs always exercise the
     # committed spike source, not a stale copy baked into the image.
     # This also keeps the production image lean (spikes/ excluded from
