@@ -190,14 +190,36 @@ head -3 LICENSE
 
 ## 架构师复审 prep（Codex 跑前）
 
+> **FIX 2026-09-01**（per Codex review FAIL-5）：以下 13 份 REVIEW-T-*.md 是
+> 仓库中实际存在的自签 review 文件。原始 prep 表列出的
+> `REVIEW-T-BE-*` / `REVIEW-T-TG-*` / `REVIEW-T-DO-1/4/5` 共 10 个文件名
+> 在 git 全历史中从未存在 — M1/M2 期间架构师对 BE/TG/DO 任务的验收未产出
+> 独立 REVIEW 载体，而是直接被 GA plan §4 12 步验证清单 + 本轮工件级
+> 复核覆盖。
+
 | 文件 | 自签结论 | 自签时间 | 重点看什么 |
 |------|---------|---------|-----------|
-| `docs/REVIEW-T-BE-1..5` | PASS | M1 | `harness/runtime/_db.py + workers.py + context.py` 是否真复用 `_helpers.py` 行为（dispatch / heartbeat / drain / context snapshot）|
-| `docs/REVIEW-T-TG-1..5` | PASS | M2 | `harness/gateway/egress.py` pinned DNS + 私网阻断 + 指数退避是否真在；`gateway.py` 6 步链是否齐 |
-| `docs/REVIEW-T-DO-1..4` | PASS | M2 | Dockerfile 走 pyproject 不是源码 COPY；docker-compose 命名 volume；deploy workflow tag 触发器 |
-| `docs/REVIEW-T-DO-5` | DEFER | M3 | codex-review gate 是否真的 deferred（Codex CLI 不支持 gpt-5.6-sol for ChatGPT）|
-| `docs/REVIEW-T-QA-1..5` | PASS | M2/M3 | mutation_suite 17/17 行为零漂移；benchmark runner 真输出 CSV+JSON；stress_test 50×200 |
-| `docs/REVIEW-T-DD-1..6` | PASS | M3 | README 引用 ADR 0008/0009；CHANGELOG v1.0.0a0 段 5 块齐；LICENSE MIT 2026；9 ADR v1.0 Status footer 完整 |
+| `docs/REVIEW-T-DD-1.md` | PASS | 2026-09-01 | README 9 sections + 10 Protocol 接口表 + 5 特性表 + Tests/CI table 是否真覆盖 |
+| `docs/REVIEW-T-DD-2.md` | PASS | 2026-09-01 | CHANGELOG v1.0.0a0 段 5 块（Added/Changed/Deprecated/Security/Fixed）是否齐 |
+| `docs/REVIEW-T-DD-3.md` | PASS | 2026-09-01 | LICENSE = MIT + 2026 + cscoheru |
+| `docs/REVIEW-T-DD-4.md` | PASS | 2026-09-01 | ADR 0008 5-subpackage 表 + 4 binding 复用规则 + 依赖方向图 + 10 Protocol 出口 |
+| `docs/REVIEW-T-DD-5.md` | PASS | 2026-09-01 | ADR 0009 SQLite WAL 单 host 4 硬约束 + perf baseline（1968/s p99<70ms BUSY_TIMEOUT 5000ms）|
+| `docs/REVIEW-T-DD-6.md` | PASS | 2026-09-01 | 9 ADR 全部含 `v1.0 Status: Included in GA` footer + 3 cross-ref link (CHANGELOG + ADR 0008 + ADR 0009) |
+| `docs/REVIEW-T-DO-2.md` | PASS | 2026-09-01 | Dockerfile 走 pyproject 安装 + alpine SQLite ≥3.47 硬门 + harness_db 命名 volume |
+| `docs/REVIEW-T-DO-3.md` | PASS | 2026-09-01 | `.dockerignore` 排除 .git/docs/notes/spikes/tests + 镜像复现性 |
+| `docs/REVIEW-T-QA-1.md` | PASS | 2026-09-01 | `harness/testing/mutation_suite.py` 从 `_helpers.py` / `mutation-test.py` lift，行为零漂移（17/17）|
+| `docs/REVIEW-T-QA-2.md` | PASS | 2026-09-01 | tests/ 集成测试套件（37/37）+ harness.runtime.make_db fixture 正确性 |
+| `docs/REVIEW-T-QA-3.md` | PASS | 2026-09-01 | `harness/benchmark/runner.py` 输出 CSV+JSON；passes_gate=true；p99 < 5000ms |
+| `docs/REVIEW-T-QA-4.md` | PASS | 2026-09-01 | 3 新 CI job：integration-tests / mutation-suite / benchmark-baseline（workflow_dispatch）|
+| `docs/REVIEW-T-QA-5.md` | PASS | 2026-09-01 | `harness/testing/stress_test.py` 50 workers × 200 tasks (WAL) 设计 + 退出语义 |
+
+**未独立 review 的 13 任务**（BE-1..5 + TG-1..5 + DO-1/4/5）：Codex
+本次以「工件级独立验证」覆盖 — 对照 `_helpers.py` / `conformance-second-impl.py` /
+`mutation-test.py` 等 spike reference 与 `harness/runtime/*.py` /
+`harness/gateway/*.py` / `Dockerfile` / `deploy.yml` 的实际代码，验证
+GA plan §4 12 步命令的实际跑出（spike 全绿、pytest 37/37、mutation 17/17、
+benchmark passes_gate、docker build + 容器内导入、9 ADR footer、deploy workflow
+success）。不基于任何自签 review 的措辞。
 
 ## 硬规则（绝对不能触，触了就算 FAIL）
 

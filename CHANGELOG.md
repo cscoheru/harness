@@ -22,8 +22,12 @@ and [`docs/NOW.md`](docs/NOW.md) for current stage.
 - New `harness/` package: 5 subpackages (`runtime` / `gateway` / `drivers` /
   `testing` / `benchmark`) + 10 Protocol exports (`WorkerPool`, `EventSink`,
   `ContextDistiller`, `ContextBudget`, `ContextManager`, `ArtifactStore`,
-  `ToolInvocationGateway`, `ToolProvider`, `PolicyDecision`,
+  `ToolInvocationGateway`, `ToolProvider`, `PolicyDecisionPoint`,
   `ExecutionDriver`).
+  (`PolicyDecisionPoint` is the Protocol name per
+  `spec/interfaces/policy_decision.py`; the `PolicyDecision` *dataclass*
+  returned by `PDP.evaluate()` is a distinct type living in
+  `spec/interfaces/tool_provider.py` and is not re-exported here.)
 - [`harness/runtime/SqliteWorkerPool`](harness/runtime/worker_pool.py) —
   production WorkerPool backed by SQLite triggers (I15 / I16 / I17).
   Round-robin via `harness_meta` UPSERT. (T-BE-2)
@@ -143,6 +147,41 @@ v0.9.4 fixes (P0-9G/H/I/J/K/L/M/N/O + P0-M2-2 + P1-2 + P1-3) are
 inherited from the v0.9-B spec baseline and live in
 [`spec/kernel-schema.sql`](spec/kernel-schema.sql) + the spike suite in
 [`spikes/m0/`](spikes/m0/).
+
+---
+
+## [v1.0.0a1] — 2026-09-01
+
+Deploy-only patch over `v1.0.0a0` (tag → commit `41ca3c5`).
+**Zero code/library changes**; library version stays `1.0.0a0` because the
+runtime artifacts (harness/, spec/, Dockerfile, pyproject.toml, all spike
+references, all 9 ADRs) are byte-identical to `v1.0.0a0`. The patch fixes
+the GHCR publish pipeline so the runtime image actually reaches
+`ghcr.io/cscoheru/fish-harness:v1.0.0a1`.
+
+### Fixed
+
+- `.github/workflows/deploy.yml` push job now has `actions/checkout@v4`
+  so the second runner (which does the registry push) can read
+  `Dockerfile`. Without this, `docker/build-push-action@v5` errored
+  `open Dockerfile: no such file or directory` on the first deploy
+  attempt (GH Actions run `33472159405`). After the fix, deploy run
+  `33481141073` completed successfully and the image is on GHCR.
+
+### Notes
+
+- Scope of `git diff v1.0.0a0..v1.0.0a1 --stat` is 21 files: the patch
+  commit + the post-GA documentation/state sweep
+  (`.gitignore` additions, 13 poll-protocol artefacts archived,
+  `notes/codex-review-v0.9.5-report.md`, `results.json`). **No
+  library code, no spec, no Dockerfile, no CI workflow beyond the
+  deploy patch, no ADR body changed.** The 21-file diff is the
+  patch commit plus the subsequent post-M3 polish commit chain,
+  not code drift.
+- `pyproject.toml` `version = "1.0.0a0"` and `harness.__version__`
+  remain at `1.0.0a0` deliberately; bumping them would force a
+  `v1.0.0a2` tag (the existing `v1.0.0a1` tag is immutable per GA
+  plan §6) and is deferred until the next functional release.
 
 ---
 

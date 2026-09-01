@@ -17,6 +17,13 @@ __all__ = ["runner"]
 
 def __getattr__(name: str):
     if name == "runner":
-        from . import runner as _r
-        return _r
+        # FAIL-1 fix (Codex v1.0.0a1 review): ``from . import runner`` triggers
+        # PEP 562 __getattr__("runner") recursion (Python's import system calls
+        # hasattr on the parent package). Use importlib.import_module to break
+        # the cycle. Harness/testing/__init__.py is unaffected because its
+        # lazy exports are attribute names (``run_mutations`` / ``MUTATIONS``)
+        # not submodule names.
+        import importlib
+
+        return importlib.import_module("harness.benchmark.runner")
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
