@@ -5,8 +5,8 @@
 > **用户裁定（B 路径）**：采纳 `docs/v1.0-ga-team-plan.md` 的 Python kernel runtime v1.0 路线。
 >
 > **当前实施合同**：
-> - 鱼鳞（runtime）→ `docs/v1.0-ga-team-plan.md`（Python lift、5 周、不重开 M0、不引入 dsh）
-> - 鱼之（产品） → `docs/PRD-v1.1-product.md`（手机语音 + 6 host + dsh wrapper，另议）
+> - **鱼鳞（runtime）** → `docs/v1.0-ga-team-plan.md`（Python lift、5 周、不重开 M0、不引入 dsh）— **v1.0.0a0 已发 2026-09-01（tag → commit dc9d61b）**
+> - **鱼之（产品）** → `docs/PRD-v1.1-product.md`（手机语音 + 6 host + dsh wrapper）— **v1.1+ scope，不在 v1.0.0a0**；当前本文仅作 鱼鳞 定位 + Codex 扩充概念地图参考
 >
 > **本文保留理由**：愿景回收 + 鱼鳞定位 + Codex 扩充概念地图，三项作为 v1.1 product PRD 的输入参考。
 >

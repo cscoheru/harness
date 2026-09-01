@@ -24,3 +24,11 @@ __pycache__/
 *.egg-info/
 /build/
 /dist/
+
+# Agent workspace + ephemeral poll state (post-M3 polish 2026-09-01)
+# Per scope discipline: agent working dirs + runtime poll state are not v1.0.0a0 deliverables.
+.cursor/
+.serena/
+docs/poll/ACTIVE
+docs/poll/state.json
+docs/poll/ticks.log
