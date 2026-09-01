@@ -2,7 +2,7 @@
 
 > **用途**：Codex CLI 复审 v0.1 修订版的固定 scope + key points 沉淀；未来 Codex 复审轮次可复用本文件作为复审清单。
 > **生成时间**：2026-09-01
-> **对应 commit**：pending `feat(m0b): 5 DISPATCH §6.X 三姿势候选 + docs/m0b/ 5 模板 + cc-ready 更新`
+> **对应 commit**: `9f5ef4b`（v0.1 三姿势工件）+ `fb429e3`（self-audit 报告）
 
 ---
 
@@ -31,7 +31,7 @@ v0.0 plan 已由 `gpt-5.6-sol` + `xhigh` 推理 FAIL（详见 `notes/codex-revie
 | (R1) | `notes/codex-review-v1.1-m0b-plan-report.md` | NEW（v0.0 阶段生成）| v0.0 Codex FAIL 报告 — audit trail |
 | (R2) | `notes/codex-audit-scope-v1.1-m0b-v0.1.md` | NEW（本文件）| Codex 复审 scope + key points 沉淀 |
 
-**总计 12 改动 + 2 reference = 14 文件**（commit 含 12 改动；2 reference 在 commit 范围内 audit trail）。
+**总计 12 改动 + 2 reference = 14 文件**（14 files 单 commit）。
 
 ---
 
@@ -43,7 +43,7 @@ v0.0 plan 已由 `gpt-5.6-sol` + `xhigh` 推理 FAIL（详见 `notes/codex-revie
 - **(B) 4 yaml 拆分（base + 3 role）的 schema 正确性**：已用 `dsh --profile web --patch docs/m0b/profile-override-base.yaml --patch docs/m0b/profile-override-<role>.yaml --dump-config` 静态验证 8 工具 `disabled: false`
 - **(C) rest-spike.py 实现与 plan §2.3 描述的一致性**：median / exit 1 / `.log` / `--max-tokens` / retry / code-change 警告
 - **(D) 5 DISPATCH §6.X 模板的覆盖完整性 + DD-1 §3.1.5 汇总占位的合理性**（M1 修复）
-- **(E) 守门设计**：grep guard 收窄到 `docs/m0b/+spec/capabilities/+adr/001*.md`（DISPATCH 文档允许叙述性引用模型名）
+- **(E) 守门设计**：grep guard 收窄到 `docs/m0b/+adr/`（DISPATCH 文档允许叙述性引用模型名）
 - **(F) cc-ready.json notes 字段的事实准确性**：dsh CLI v0.1.1-rc.2 / `disabled: false` 语法 / 5 docs/m0b/ 文件
 
 ### 2.2 必查的潜在新 finding
@@ -82,11 +82,11 @@ v0.0 plan 已由 `gpt-5.6-sol` + `xhigh` 推理 FAIL（详见 `notes/codex-revie
 | ID | finding | v0.1 修法 | 验证命令 |
 |----|---------|----------|----------|
 | C1 | tmp/ 被 .gitignore | `docs/m0b/` 路径（不入 .gitignore）| `grep "^docs/m0b/?$" .gitignore` 应 exit 1 |
-| C2 | grep 守门矛盾 | 收窄到 `docs/m0b/+spec/capabilities/+adr/001*.md` | `grep -rE "Fable 5\|GLM 5.3\|MiniMax-M3" docs/m0b/ spec/capabilities/ adr/` 应 exit 2 |
+| C2 | grep 守门矛盾 | 收窄到 `docs/m0b/+adr/` | `grep -rE "Fable 5\|GLM 5.3\|MiniMax-M3" docs/m0b/ adr/ | wc -l` 应 == 0（`spec/capabilities/` 落地后再并入 scope）|
 | M1 | DD-1 无 §6 锚点 | DD-1 在 §3.1 骨架内插 §3.1.5 | `grep -c "^### §3.1.5" docs/DISPATCH-T-M0b-DD-1.md` 应 == 1 |
 | M2 | worker 档映射不一致 | 4 yaml 统一 worker = v4-flash | `grep "model: deepseek-v4-flash" docs/m0b/profile-override-worker.yaml` 应 == 1（无 vision-exp 替代）|
 | M3 | 姿势 A 未按档位 | 拆 4 yaml；§6.X 跑命令按档位 3 行 | `ls docs/m0b/profile-override-*.yaml` 应 == 4 |
-| M4 | 漏启 tool-goal / tool-ralph | base.yaml 含两者 + tool-subagent | `grep -c "^- id: tool-" docs/m0b/profile-override-base.yaml` 应 == 8 |
+| M4 | 漏启 tool-goal / tool-ralph | base.yaml 含两者 + tool-subagent | `grep -cE "^- id: (tool-|agent-instructions)" docs/m0b/profile-override-base.yaml` 应 == 8 |
 | M5 | 姿势 B 无法 TG-1 改代码 | §6.X B 选择指南 + rest-spike.py code-change 警告 | `grep -c "code-change" docs/m0b/m0b-rest-spike.py` 应 ≥ 2 |
 | M6 | rest-spike.py 描述不符 | median + exit 1 + .log + --max-tokens + retry | `python3 docs/m0b/m0b-rest-spike.py --help` 应 exit 0 |
 | M7 | ADR pathspec 字面失效 | 改 glob `adr/000[1-9]-*.md` | `git diff v1.0.0..HEAD -- 'adr/000[1-9]-*.md'` 应 == 0 lines |
