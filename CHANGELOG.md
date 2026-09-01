@@ -207,7 +207,7 @@ docker run --rm fish-harness:1.0.0a0 python -c "import harness; print(harness.__
 | [ADR 0006](adr/0006-context-layering.md) | Accepted (v0.9) | unchanged — implemented by `SqliteContextManager` |
 | [ADR 0007](adr/0007-worker-pool.md) | Accepted (v0.9) | unchanged — implemented by `SqliteWorkerPool` |
 | [ADR 0008](adr/0008-v1.0-package-architecture.md) | Accepted (v1.0) | documents `harness/` 5-subpackage layout + spike→production ownership |
-| ADR 0009 (SQLite WAL production constraints) | _pending T-DD-5_ | will document WAL single-host rule + post-v1.0 rqlite/Litestream path |
+| [ADR 0009](adr/0009-sqlite-wal-production-constraints.md) | Accepted (v1.0) | documents WAL single-host rule + multi-host/region NOT + post-v1.0 rqlite/Litestream evaluation path |
 
 The 7 v0.9 ADRs all gain a `v1.0 Status: Included in GA` footer in
 [T-DD-6](docs/v1.0-ga-team-plan.md).
