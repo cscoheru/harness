@@ -1,0 +1,61 @@
+# dsh profile patch — BASE (enable A-class task tools, common across roles)
+#
+# Per Codex review M4: tool-goal + tool-ralph are required for A-class tasks
+# (research/code-change/summary) and are `disabled: true` in default web profile.
+#
+# Usage (stacked with role-specific override for model selection):
+#   dsh --profile web \
+#     --patch docs/m0b/profile-override-base.yaml \
+#     --patch docs/m0b/profile-override-<role>.yaml \
+#     -- "<prompt>"
+#
+# Required: export DEEPSEEK_API_KEY=sk-...
+#
+# Class → SKU mapping (per Codex review M2 unified table):
+#   orch      → deepseek-v4-pro
+#   commander → deepseek-v4-flash (default)
+#   worker    → deepseek-v4-flash (cost-driven batch; vision-exp = optional exploration arm)
+# Source: docs/v1.1-ga-team-plan.md §2 + NORTH-STAR A-4 等价类约束
+
+# --- Enable tools disabled by default web profile ---
+# Per `dsh --profile web --dump-default-config`, these tools have
+# `disabled: true` at the plugin top-level. The dsh --patch mechanism MERGES
+# this YAML on top of the default — to ENABLE a tool, set `disabled: false`
+# at the same top-level (NOT `enabled: true`, which is silently ignored).
+# tool-bash + tool-fs + tool-fs-search: filesystem + shell access (A-class task base)
+# tool-str-replace-editor: code-change A-class task
+# tool-goal + tool-ralph: goal-loop runner (multi-turn agent for research/code/summary)
+# tool-subagent: spawn sub-agents for parallel decomposition
+- id: tool-bash
+  disabled: false
+- id: tool-fs
+  disabled: false
+- id: tool-fs-search
+  disabled: false
+- id: tool-str-replace-editor
+  disabled: false
+- id: tool-goal
+  disabled: false
+- id: tool-ralph
+  disabled: false
+- id: tool-subagent
+  disabled: false
+- id: agent-instructions
+  disabled: false
+
+# --- Sandbox: workspace-write (default) ---
+# switch to read-only for research/summary tasks; danger-full-access = NO (PRD-v1.1 §4.1)
+- id: sandbox-policy
+  config:
+    mode: workspace-write
+
+# --- Telemetry: explicitly DISABLED ---
+# (default already DISABLED but pin it; otherwise opens send to harness-telemetry.deepseeksvc.com)
+- id: session-telemetry-otel
+  config:
+    mode: DISABLED
+
+# --- Approval: ask (default; never auto-approve) ---
+- id: approval
+  config:
+    policy: ask

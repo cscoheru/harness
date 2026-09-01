@@ -1,0 +1,18 @@
+# dsh profile patch — COMMANDER role (mid-context, single-workflow orchestration)
+#
+# Stacks on top of profile-override-base.yaml. Sets model to deepseek-v4-flash.
+#
+# Usage:
+#   dsh --profile web \
+#     --patch docs/m0b/profile-override-base.yaml \
+#     --patch docs/m0b/profile-override-commander.yaml \
+#     -- "<code-change A-class task prompt>"
+#
+# Per Codex review M3: this yaml is for TG-1 commander-class tasks.
+# Per M2: commander → deepseek-v4-flash (class: commander, tier: mid-context).
+# This is the dsh DEFAULT model.
+
+- id: agent-default-model
+  config:
+    provider: deepseek-official
+    model: deepseek-v4-flash

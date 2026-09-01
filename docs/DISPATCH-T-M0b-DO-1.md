@@ -311,6 +311,79 @@ git diff v1.0.0..HEAD -- harness/ spec/ spikes/ adr/0001-0009.md Dockerfile dock
 - **verdict**：__（PASS / FAIL / 升独立 VPS）
 - **理由**：__
 
+### §6.X 三姿势候选（执行者按 DEEPSEEK_API_KEY 可用性 + 用户偏好选）
+
+> 三路径 spike 实测并行设计 ——
+> 姿势 A：dsh + profile override（v1.1 GA plan 钦定路径，需 DEEPSEEK_API_KEY）
+> 姿势 B：DeepSeek REST API 直跑（绕开 dsh，直接验证 H-1 模型能力）
+> 姿势 C：架构判定（A + B 数据回填后由架构师判定 H-1/H-2/H-3）
+>
+> 详细设计：`docs/v1.1-m0b-three-path-spike-plan.md` §0 修订对照表 + §2.1 §6.X 模板 + §2.2 4 yaml + §2.3 rest-spike.py。
+
+#### 姿势 A：dsh + profile override（本任务 = DO-1 worker 档）
+
+**前置**：
+- `npm install -g @deepseek-ai/dsh`（v0.1.1-rc.2 / 455 packages / ~30s）
+- `export DEEPSEEK_API_KEY=sk-...`
+- newvps ssh 访问权限（裁定 2 前置；已有 Tailscale 拓扑）
+
+**profile override（base + worker 档）**：
+- `docs/m0b/profile-override-base.yaml` —— 启 8 工具；sandbox=workspace-write；telemetry=DISABLED；approval=ask
+- `docs/m0b/profile-override-worker.yaml` —— model = `deepseek-v4-flash`（DO-1 worker 档；vision-exp 作探索臂）
+
+**跑命令**：
+```bash
+time dsh --profile web \
+  --patch docs/m0b/profile-override-base.yaml \
+  --patch docs/m0b/profile-override-worker.yaml \
+  -- "<§1.4 三选一摘要 A 任务 prompt>"
+```
+
+**trace 采集 + 落地**：`tmp/m0b-do-1-a.log`
+
+#### 姿势 B：DeepSeek REST API
+
+**前置**：同 BE-1
+
+**spike runner**：`docs/m0b/m0b-rest-spike.py`
+
+**跑命令**（DO-1 跑 summary 类）：
+```bash
+python3 docs/m0b/m0b-rest-spike.py \
+  --class worker \
+  --task summary \
+  --input tmp/m0b-input-do-1.txt \
+  --output tmp/m0b-output-do-1.json
+```
+
+**落地 trace**：`tmp/m0b-output-do-1.json` + `tmp/m0b-output-do-1.log`
+
+**姿势 B 适用边界**：
+- ✅ 文本型 A 类任务（summary）—— REST 单轮可验证模型能力
+- ❌ code-change（TG-1 范围）
+- ❌ multi-turn
+- 探索臂：`--model deepseek-v4-flash-vision-exp` 用于"看图"摘要
+
+#### 姿势 C：架构判定
+
+执行者**不**直接填——架构师在 A + B 数据回填后填 H-1/H-2/H-3 PASS/FAIL/PARTIAL/ABSTAIN。
+
+#### newvps RAM 实测（裁定 2 前置 — 与 spike 实测并行）
+
+```bash
+ssh newvps "free -h && echo '---' && docker stats --no-stream"
+```
+
+实测输出落 `tmp/m0b-do-1-newvps-free.txt` + `tmp/m0b-do-1-newvps-docker-stats.txt`，报告 §6.6 / §6.7 模板填实。
+
+#### 执行者选择指南
+
+| DEEPSEEK_API_KEY | 任务类型 | 建议姿势 |
+|-----------------|---------|---------|
+| 有 + 想验证 dsh 真实能力 | summary | 姿势 A（主）+ 姿势 B（对照） |
+| 有 + 只想快速验证 H-1 模型能力 | 文本型（summary） | 姿势 B（单跑） |
+| 无 | — | 仅跑 newvps RAM 实测 + 报告"Not run: DEEPSEEK_API_KEY missing" |
+
 ---
 
 ## §7 cross-ref

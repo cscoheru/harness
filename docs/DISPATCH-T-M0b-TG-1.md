@@ -243,6 +243,74 @@ grep -cE "中位数|median" docs/DISPATCH-T-M0b-TG-1.md
 - **弱项**：__
 - **commander 档位适配度**（1-5）：__
 
+### §6.X 三姿势候选（执行者按 DEEPSEEK_API_KEY 可用性 + 用户偏好选）
+
+> 三路径 spike 实测并行设计 ——
+> 姿势 A：dsh + profile override（v1.1 GA plan 钦定路径，需 DEEPSEEK_API_KEY）
+> 姿势 B：DeepSeek REST API 直跑（绕开 dsh，直接验证 H-1 模型能力）
+> 姿势 C：架构判定（A + B 数据回填后由架构师判定 H-1/H-2/H-3）
+>
+> 详细设计：`docs/v1.1-m0b-three-path-spike-plan.md` §0 修订对照表 + §2.1 §6.X 模板 + §2.2 4 yaml + §2.3 rest-spike.py。
+
+#### 姿势 A：dsh + profile override（本任务 = TG-1 commander 档）
+
+**前置**：
+- `npm install -g @deepseek-ai/dsh`（v0.1.1-rc.2 / 455 packages / ~30s）
+- `export DEEPSEEK_API_KEY=sk-...`
+
+**profile override（base + commander 档）**：
+- `docs/m0b/profile-override-base.yaml` —— 启 tool-bash / tool-fs / tool-fs-search / tool-str-replace-editor / tool-goal / tool-ralph / tool-subagent / agent-instructions；sandbox=workspace-write；telemetry=DISABLED；approval=ask
+- `docs/m0b/profile-override-commander.yaml` —— model = `deepseek-v4-flash`（TG-1 commander 档；dsh 默认模型）
+
+**跑命令**（必须在 `tmp/m0b-tg-1/` 沙箱内执行）：
+```bash
+cd tmp/m0b-tg-1
+time dsh --profile web \
+  --patch docs/m0b/profile-override-base.yaml \
+  --patch docs/m0b/profile-override-commander.yaml \
+  -- "<§1.4 三选一改代码 A 任务 prompt>"
+```
+
+**trace 采集 + 落地**：
+- wall time / token / 退出码：dsh stderr + `$?`
+- diff：dsh 输出 + `git diff` 在沙箱内
+- 落地 trace：`tmp/m0b-tg-1-a.log`
+
+#### 姿势 B：DeepSeek REST API
+
+**前置**：同 BE-1
+
+**spike runner**：`docs/m0b/m0b-rest-spike.py`（同 BE-1）
+
+**跑命令**（TG-1 跑 code-change 类 — ⚠️ **不构成 H-1 证据**，仅对照）：
+```bash
+python3 docs/m0b/m0b-rest-spike.py \
+  --class commander \
+  --task code-change \
+  --input tmp/m0b-input-tg-1.txt \
+  --output tmp/m0b-output-tg-1.json
+```
+
+**落地 trace**：`tmp/m0b-output-tg-1.json` + `tmp/m0b-output-tg-1.log`
+
+**姿势 B 适用边界（M5）**：
+- ❌ **TG-1 code-change 不被姿势 B 覆盖**：REST single-turn 无 tool loop，只能"单次吐代码块"，**无法真实验证改代码能力**（diff 落盘 + pytest 跑不了）
+- ⚠️ TG-1 H-1 覆盖率判定 = 姿势 A 跑出的 diff 行数 + pytest 通过率；姿势 B 输出仅作"模型是否能写合理代码块"对照
+- ✅ 文本型 A 任务（research/summary）用姿势 B 验有效
+- 探索臂：`--model deepseek-v4-flash-vision-exp` 用于"看图"子任务
+
+#### 姿势 C：架构判定
+
+执行者**不**直接填——架构师在 A + B 数据回填后填 H-1/H-2/H-3 PASS/FAIL/PARTIAL/ABSTAIN。
+
+#### 执行者选择指南
+
+| DEEPSEEK_API_KEY | 任务类型 | 建议姿势 |
+|-----------------|---------|---------|
+| 有 + 想验证 dsh 真实能力 | code-change | **姿势 A 必跑**；姿势 B 仅对照 |
+| 有 + 只想快速验证 H-1 模型能力 | 文本型（research/summary） | 姿势 B（单跑） |
+| 无 | — | 静态校验 + 报告"Not run: DEEPSEEK_API_KEY missing" |
+
 ---
 
 ## §7 cross-ref

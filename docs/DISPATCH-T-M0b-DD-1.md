@@ -135,6 +135,30 @@ v1.1 GA plan v0.0 DRAFT §2.5 T-M0b-DD-1：M0b 收尾 + ADR 0010 是 v1.1+ 周�
   - 鱼之重新定义 → 启动 NORTH-STAR §10 冲突 5 专项讨论
 ```
 
+### §3.1.5 三姿势数据来源 + 架构判定（M1 修订加段）
+
+> DD-1 是汇总者，不直接执行三姿势；本节列出"姿势 A 实测数据来源"+"姿势 B 实测数据来源"+"架构判定占位"。
+
+**姿势 A 实测数据来源**（由 BE-1 / TG-1 / DO-1 / QA-1 回填）：
+- BE-1 §6.X 姿势 A 实测：trace `tmp/m0b-be-1-a.log`（orch 档 dsh profile override）
+- TG-1 §6.X 姿势 A 实测：trace `tmp/m0b-tg-1-a.log`（commander 档 dsh profile override）
+- DO-1 §6.X 姿势 A 实测：trace `tmp/m0b-do-1-a.log`（worker 档 dsh profile override）
+- QA-1 §6.X 姿势 A 实测：trace `tmp/m0b-qa-1-{orch,commander,worker}-a.log`（H-2 等价类对比 3 档）
+
+**姿势 B 实测数据来源**（同上）：
+- BE-1 §6.X 姿势 B 实测：JSON `tmp/m0b-output-be-1.json` + sidecar `tmp/m0b-output-be-1.log`（orch 档 REST API）
+- TG-1 §6.X 姿势 B 实测：JSON `tmp/m0b-output-tg-1.json` + sidecar `.log`（commander 档 REST API；**仅做对照**，不算 H-1 证据，per M5）
+- DO-1 §6.X 姿势 B 实测：JSON `tmp/m0b-output-do-1.json` + sidecar `.log`（worker 档 REST API）
+- QA-1 §6.X 姿势 B 实测：JSON `tmp/m0b-output-qa-1-{orch,commander,worker}.json` + sidecar `.log`（H-2 REST 对比 3 档）
+
+**架构判定占位**（由架构师填）：
+- H-1（dsh + REST API 覆盖 ≥ 80% A 类任务）：[ PASS / FAIL / PARTIAL / ABSTAIN ]
+- H-2（等价类 v4-pro / v4-flash / v4-flash 三档可替代性）：[ PASS / FAIL / PARTIAL / ABSTAIN ]
+- H-3（v1.1 周期 6 月窗口 dsh 可用性）：[ PASS / FAIL / PARTIAL / ABSTAIN ]
+- H-1 FAIL → 启动「鱼之重新定义」专项（PRD-v1.1 §3 + DOCS-REVIEW §3 裁定 6 + NORTH-STAR §10 冲突 5）
+
+**详细设计**：`docs/v1.1-m0b-three-path-spike-plan.md` §0 修订对照表 + §2.1 DD-1 §3.1.5 模板 + §2.2 4 yaml + §2.3 rest-spike.py。
+
 ### 3.2 主产出 2：ADR 0010（必交付）
 
 **文件**：`adr/0010-v1.1-cycle-scope-admission.md`（新文件）

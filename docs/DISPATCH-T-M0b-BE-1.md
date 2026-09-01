@@ -245,6 +245,83 @@ grep -cE "中位数|median" docs/DISPATCH-T-M0b-BE-1.md
 - **建议改档位**：__（如不 orch，改其他档）
 - **理由**：__
 
+### §6.X 三姿势候选（执行者按 DEEPSEEK_API_KEY 可用性 + 用户偏好选）
+
+> 三路径 spike 实测并行设计 ——
+> 姿势 A：dsh + profile override（v1.1 GA plan 钦定路径，需 DEEPSEEK_API_KEY）
+> 姿势 B：DeepSeek REST API 直跑（绕开 dsh，直接验证 H-1 模型能力）
+> 姿势 C：架构判定（A + B 数据回填后由架构师判定 H-1/H-2/H-3）
+>
+> 详细设计：`docs/v1.1-m0b-three-path-spike-plan.md` §0 修订对照表 + §2.1 §6.X 模板 + §2.2 4 yaml + §2.3 rest-spike.py。
+
+#### 姿势 A：dsh + profile override（本任务 = BE-1 orch 档）
+
+**前置**：
+- `npm install -g @deepseek-ai/dsh`（v0.1.1-rc.2 / 455 packages / ~30s）
+- `export DEEPSEEK_API_KEY=sk-...`
+
+**profile override（base + orch 档）**：
+- `docs/m0b/profile-override-base.yaml` —— 启 tool-bash / tool-fs / tool-fs-search / tool-str-replace-editor / tool-goal / tool-ralph / tool-subagent / agent-instructions（via `disabled: false`）；sandbox=workspace-write；telemetry=DISABLED；approval=ask
+- `docs/m0b/profile-override-orch.yaml` —— model = `deepseek-v4-pro`（BE-1 orch 档）
+
+**跑命令**：
+```bash
+time dsh --profile web \
+  --patch docs/m0b/profile-override-base.yaml \
+  --patch docs/m0b/profile-override-orch.yaml \
+  -- "<§1.4 三选一调研 A 任务 prompt>"
+```
+
+**trace 采集 + 落地**：
+- wall time：`time` 输出
+- token 用量：dsh 内置 `token-meter` plugin 输出到 stderr；或读 `~/.dsh-home/sessions/<session-id>.jsonl`
+- 退出码：`$?`
+- 落地 trace：`tmp/m0b-be-1-a.log`（含 wall / token / 退出码）
+
+#### 姿势 B：DeepSeek REST API
+
+**前置**：
+- `export DEEPSEEK_API_KEY=sk-...`
+- Python ≥ 3.10 + httpx（v1.0 runtime 已有 `httpx>=0.28,<0.29`）
+
+**spike runner**：`docs/m0b/m0b-rest-spike.py`
+- 端点：`https://api.deepseek.com/v1/chat/completions`（OpenAI 兼容）
+- 3 等价类模型：orch = `deepseek-v4-pro` / commander = `deepseek-v4-flash`（默认）/ worker = `deepseek-v4-flash`（vision-exp 作探索臂）
+- 输出：`--output` 写 JSON + sidecar `.log`（per-run trace + retry 计数 + 失败 reason）
+- 聚合：median(wall_s) / median(input_tokens) / median(output_tokens)
+- 失败：全部 run 失败 → exit 1
+- 成本护栏：--max-tokens 默认 4096
+- 重试：429/5xx + 网络错误 → 指数退避（2^attempt 秒），默认 2 次
+
+**跑命令**（BE-1 跑 research 类）：
+```bash
+python3 docs/m0b/m0b-rest-spike.py \
+  --class orch \
+  --task research \
+  --input tmp/m0b-input-be-1.txt \
+  --output tmp/m0b-output-be-1.json
+```
+
+**落地 trace**：`tmp/m0b-output-be-1.json` + `tmp/m0b-output-be-1.log`
+
+**姿势 B 适用边界**：
+- ✅ 文本型 A 类任务（research / summary）—— REST 单轮可验证模型能力
+- ❌ code-change A 类任务（TG-1）—— REST 单轮无 tool loop；H-1 证据必须含姿势 A
+- ❌ multi-turn 研究
+- 探索臂：`--model deepseek-v4-flash-vision-exp` 用于"看图"子任务
+
+#### 姿势 C：架构判定
+
+执行者**不**直接填——架构师在 A + B 数据回填后填 H-1/H-2/H-3 PASS/FAIL/PARTIAL/ABSTAIN。
+
+#### 执行者选择指南
+
+| DEEPSEEK_API_KEY | 任务类型 | 建议姿势 |
+|-----------------|---------|---------|
+| 有 + 想验证 dsh 真实能力 | 任意 A | 姿势 A（主）+ 姿势 B（对照） |
+| 有 + 只想快速验证 H-1 模型能力 | 文本型（research/summary） | 姿势 B（单跑） |
+| 无 | — | 静态校验 + 报告"Not run: DEEPSEEK_API_KEY missing" |
+
 ---
 
 ## §7 cross-ref

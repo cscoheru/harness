@@ -239,6 +239,84 @@ grep -cE "^\|.*orch.*\|.*commander.*\|.*worker.*\|" docs/DISPATCH-T-M0b-QA-1.md
   - 如 FAIL：通知架构师，启动「鱼之重新定义」专项（PRD-v1.1 §3 H-1 失败处理 + NORTH-STAR §10 冲突 5）
   - 如 PARTIAL：架构师裁断是否补 spike
 
+### §6.X 三姿势候选（执行者按 DEEPSEEK_API_KEY 可用性 + 用户偏好选）
+
+> 三路径 spike 实测并行设计 ——
+> 姿势 A：dsh + profile override（v1.1 GA plan 钦定路径，需 DEEPSEEK_API_KEY）
+> 姿势 B：DeepSeek REST API 直跑（绕开 dsh，直接验证 H-1 模型能力）
+> 姿势 C：架构判定（A + B 数据回填后由架构师判定 H-1/H-2/H-3）
+>
+> 详细设计：`docs/v1.1-m0b-three-path-spike-plan.md` §0 修订对照表 + §2.1 §6.X 模板 + §2.2 4 yaml + §2.3 rest-spike.py。
+
+#### 姿势 A：dsh + profile override（本任务 = QA-1 三档等价类对比）
+
+**前置**：同 BE-1
+
+**profile override（H-2 等价类对比需 3 档都跑）**：
+- `docs/m0b/profile-override-base.yaml` —— 启 8 工具
+- `docs/m0b/profile-override-orch.yaml` —— orch 档 model = `deepseek-v4-pro`
+- `docs/m0b/profile-override-commander.yaml` —— commander 档 model = `deepseek-v4-flash`
+- `docs/m0b/profile-override-worker.yaml` —— worker 档 model = `deepseek-v4-flash`
+
+**跑命令**（3 档各跑同一 A 任务，对比差异）：
+```bash
+# orch 档
+time dsh --profile web --patch docs/m0b/profile-override-base.yaml \
+  --patch docs/m0b/profile-override-orch.yaml \
+  -- "<同一 A 任务 prompt>"
+
+# commander 档
+time dsh --profile web --patch docs/m0b/profile-override-base.yaml \
+  --patch docs/m0b/profile-override-commander.yaml \
+  -- "<同一 A 任务 prompt>"
+
+# worker 档
+time dsh --profile web --patch docs/m0b/profile-override-base.yaml \
+  --patch docs/m0b/profile-override-worker.yaml \
+  -- "<同一 A 任务 prompt>"
+```
+
+**trace 落地**：`tmp/m0b-qa-1-orch-a.log` / `tmp/m0b-qa-1-commander-a.log` / `tmp/m0b-qa-1-worker-a.log`
+
+#### 姿势 B：DeepSeek REST API（H-2 等价类对比 3 档）
+
+**前置**：同 BE-1
+
+**spike runner**：`docs/m0b/m0b-rest-spike.py`
+
+**跑命令**（3 档各跑一次）：
+```bash
+# orch 档
+python3 docs/m0b/m0b-rest-spike.py --class orch --task research \
+  --input tmp/m0b-input-qa-1.txt --output tmp/m0b-output-qa-1-orch.json
+
+# commander 档
+python3 docs/m0b/m0b-rest-spike.py --class commander --task research \
+  --input tmp/m0b-input-qa-1.txt --output tmp/m0b-output-qa-1-commander.json
+
+# worker 档
+python3 docs/m0b/m0b-rest-spike.py --class worker --task research \
+  --input tmp/m0b-input-qa-1.txt --output tmp/m0b-output-qa-1-worker.json
+```
+
+**落地 trace**：`tmp/m0b-output-qa-1-{orch,commander,worker}.json` + `.log`
+
+#### 姿势 C：架构判定（QA-1 §6.7 已含）
+
+H-1/H-2/H-3 总判定由 QA-1 本人填 §6.7。H-2 等价类对比由 §6.2 表填实。
+
+#### 执行者选择指南
+
+| DEEPSEEK_API_KEY | 任务类型 | 建议姿势 |
+|-----------------|---------|---------|
+| 有 + 想验证 H-2 等价类差异 | 三档同一任务 | 姿势 A 三档各跑 + 姿势 B 三档各跑（6 次） |
+| 有 + 只想快速验 H-2 模型差异 | 文本型 | 姿势 B 三档各跑（3 次；最快） |
+| 无 | — | 静态校验 capability JSON 草案 + 报告"Not run: DEEPSEEK_API_KEY missing" |
+
+#### H-3 LOC 估算范围（per §6.5）
+
+不锁数字；4 档（orch / commander / worker / 共用基础）写 `__-__` 范围格式 `^[0-9]+-[0-9]+$`。
+
 ---
 
 ## §7 cross-ref
