@@ -47,14 +47,14 @@
 - 跨 host SQLite / NFS
 - 扩大范围到当前「下一枪」以外（做完一枪即停）；T-TG-2 可并行但不自动开
 
-## 4. 下一验收（T-DD-4）
+## 4. 下一验收（T-DD-5）
 
-见 [`docs/DISPATCH-T-DD-4.md`](DISPATCH-T-DD-4.md)（如已签发；否则等 Cursor 复活 / 下条用户信号）。  
-审验：[`docs/REVIEW-T-DD-3.md`](REVIEW-T-DD-3.md) = **PASS**（架构师自签 — Cursor 暂不可用，LICENSE 标准 MIT 21 行 + 4 文件一致 + GA plan §4 step 11 = 5/5 ✅；无回归 4/4 PASS）。
+见 [`docs/DISPATCH-T-DD-5.md`](DISPATCH-T-DD-5.md)（如已签发；否则等 Cursor 复活 / 下条用户信号）。  
+审验：[`docs/REVIEW-T-DD-4.md`](REVIEW-T-DD-4.md) = **PASS**（架构师自签 — Cursor 暂不可用，ADR 0008 167 行 + 5 subpackage + 4 binding + 4 反向依赖禁令 + 10 Protocol 出口；GA plan §4 step 12 进度 8/9；无回归 4/4 PASS）。
 
 ```bash
-# 期望：ADR 0008 Status=Accepted + harness/{runtime,gateway,drivers,testing,benchmark} 布局 + spike→production ownership 映射
-test -f adr/0008-v1.0-package-architecture.md && head -5 adr/0008-v1.0-package-architecture.md
+# 期望：ADR 0009 Status=Accepted (v1.0) + WAL single-host rule + post-v1.0 rqlite/Litestream 评估路径
+test -f adr/0009-sqlite-wal-production-constraints.md && head -4 adr/0009-sqlite-wal-production-constraints.md
 ```
 
 ## 5. 冷指针（按需 Read，勿预载）
