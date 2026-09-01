@@ -15,6 +15,12 @@
 # `load: true` into the build runner's local daemon). Moved the smoke
 # step INTO the build job — same runner, same daemon, same image.
 #
+# P1 fix (2026-09-01): the `push` job runs on a SEPARATE runner and needs its
+# own `actions/checkout@v4` — the build job's checkout doesn't propagate, so
+# `context: .` in `Push tag + latest` was resolving to an empty cwd and buildx
+# errored with `open Dockerfile: no such file or directory` (run 33472159405).
+# Without this checkout the tag push will always fail.
+#
 # Triggers
 #   - push tags matching `v*`        : real release
 #   - workflow_dispatch              : manual dry-run (Actions tab → Run workflow)
@@ -117,6 +123,9 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
