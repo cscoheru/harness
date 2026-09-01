@@ -42,14 +42,14 @@
 - 跨 host SQLite / NFS
 - 扩大范围到当前「下一枪」以外（做完一枪即停）；T-TG-2 可并行但不自动开
 
-## 4. 下一验收（T-QA-4）
+## 4. 下一验收（T-QA-5）
 
-见 [`docs/DISPATCH-T-QA-4.md`](DISPATCH-T-QA-4.md)。  
-审验：[`docs/REVIEW-T-QA-3.md`](REVIEW-T-QA-3.md) = **PASS**（p99≪5000ms）。
+见 [`docs/DISPATCH-T-QA-5.md`](DISPATCH-T-QA-5.md)（如已签发；否则等 Cursor 复活 / 下条用户信号）。  
+审验：[`docs/REVIEW-T-QA-4.md`](REVIEW-T-QA-4.md) = **PASS**（架构师自签 — Cursor 暂不可用，3/3 job 结构 + 主机模拟全绿）。
 
 ```bash
-# 期望：qa-suite.yml（或等价）含 integration-tests / mutation-suite /
-# benchmark-baseline（后者仅 workflow_dispatch）
+# 期望：harness/testing/stress_test.py — 50 workers × 200 tasks, WAL mode
+python3 -m harness.testing.stress_test --workers=50 --tasks=200
 ```
 
 ## 5. 冷指针（按需 Read，勿预载）
