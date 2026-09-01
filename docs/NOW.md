@@ -46,14 +46,14 @@
 - 跨 host SQLite / NFS
 - 扩大范围到当前「下一枪」以外（做完一枪即停）；T-TG-2 可并行但不自动开
 
-## 4. 下一验收（T-DD-3）
+## 4. 下一验收（T-DD-4）
 
-见 [`docs/DISPATCH-T-DD-3.md`](DISPATCH-T-DD-3.md)（如已签发；否则等 Cursor 复活 / 下条用户信号）。  
-审验：[`docs/REVIEW-T-DD-2.md`](REVIEW-T-DD-2.md) = **PASS**（架构师自签 — Cursor 暂不可用，5 H3 块结构 + Upgrade path + ADR table 9 行；无回归 4/4 PASS）。
+见 [`docs/DISPATCH-T-DD-4.md`](DISPATCH-T-DD-4.md)（如已签发；否则等 Cursor 复活 / 下条用户信号）。  
+审验：[`docs/REVIEW-T-DD-3.md`](REVIEW-T-DD-3.md) = **PASS**（架构师自签 — Cursor 暂不可用，LICENSE 标准 MIT 21 行 + 4 文件一致 + GA plan §4 step 11 = 5/5 ✅；无回归 4/4 PASS）。
 
 ```bash
-# 期望：LICENSE 含 MIT 头部 + 年份 + 版权
-test -f LICENSE && head -3 LICENSE
+# 期望：ADR 0008 Status=Accepted + harness/{runtime,gateway,drivers,testing,benchmark} 布局 + spike→production ownership 映射
+test -f adr/0008-v1.0-package-architecture.md && head -5 adr/0008-v1.0-package-architecture.md
 ```
 
 ## 5. 冷指针（按需 Read，勿预载）
