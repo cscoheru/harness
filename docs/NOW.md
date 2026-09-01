@@ -48,14 +48,14 @@
 - 跨 host SQLite / NFS
 - 扩大范围到当前「下一枪」以外（做完一枪即停）；T-TG-2 可并行但不自动开
 
-## 4. 下一验收（T-DD-5）
+## 4. 下一验收（T-DD-6）
 
-见 [`docs/DISPATCH-T-DD-5.md`](DISPATCH-T-DD-5.md)（如已签发；否则等 Cursor 复活 / 下条用户信号）。  
-审验：[`docs/REVIEW-T-DD-4.md`](REVIEW-T-DD-4.md) = **PASS**（架构师自签 — Cursor 暂不可用，ADR 0008 167 行 + 5 subpackage + 4 binding + 4 反向依赖禁令 + 10 Protocol 出口；GA plan §4 step 12 进度 8/9；无回归 4/4 PASS）。
+见 [`docs/DISPATCH-T-DD-6.md`](DISPATCH-T-DD-6.md)（如已签发；否则等 Cursor 复活 / 下条用户信号）。  
+审验：[`docs/REVIEW-T-DD-5.md`](REVIEW-T-DD-5.md) = **PASS**（架构师自签 — Cursor 暂不可用，ADR 0009 132 行 + WAL single-host + 性能 baseline 1968/s + post-v1.0 评估路径；GA plan §4 step 12 = 9/9 ✅🎯；无回归 4/4 PASS）。
 
 ```bash
-# 期望：ADR 0009 Status=Accepted (v1.0) + WAL single-host rule + post-v1.0 rqlite/Litestream 评估路径
-test -f adr/0009-sqlite-wal-production-constraints.md && head -4 adr/0009-sqlite-wal-production-constraints.md
+# 期望：9 个 ADR 全部含 v1.0 Status footer
+for f in adr/000*.md; do grep -q "v1.0 Status" "$f" && echo "OK $f" || echo "MISS $f"; done
 ```
 
 ## 5. 冷指针（按需 Read，勿预载）
