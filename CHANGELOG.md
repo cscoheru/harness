@@ -95,8 +95,10 @@ and [`docs/NOW.md`](docs/NOW.md) for current stage.
 - [`README.md`](README.md) — M3-grade; 10 Protocol interface table +
   5-feature table + Architecture ASCII + quick start + 4-suite test
   pyramid. (T-DD-1)
-- `CHANGELOG.md` — this file. (T-DD-2)
-- `LICENSE` — _pending T-DD-3_.
+- [`CHANGELOG.md`](CHANGELOG.md) — v1.0.0a0 release notes;
+  Keep-a-Changelog style. (T-DD-2)
+- [`LICENSE`](LICENSE) — MIT; matches `pyproject.toml` `license =
+  {text = "MIT"}` + `authors = [{name = "cscoheru"}]`. (T-DD-3)
 
 ### Changed
 

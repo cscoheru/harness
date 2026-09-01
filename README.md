@@ -116,8 +116,8 @@ Deploy is a separate workflow: `.github/workflows/deploy.yml` (T-DO-4 / T-QA-1 f
 - [`docs/v1.0-ga-team-plan.md §2`](docs/v1.0-ga-team-plan.md) — task breakdown (T-BE-* / T-TG-* / T-DO-* / T-QA-* / T-DD-*)
 - [`adr/0008-v1.0-package-architecture.md`](adr/0008-v1.0-package-architecture.md) — package layout + spike→production ownership
 - [`adr/0009-sqlite-wal-production-constraints.md`](adr/0009-sqlite-wal-production-constraints.md) — SQLite WAL single-host rule + multi-region post-v1.0 path
-- `CHANGELOG.md` — _pending T-DD-2_
-- `LICENSE` — _pending T-DD-3 (MIT)_
+- [`CHANGELOG.md`](CHANGELOG.md) — v1.0.0a0 release notes; Keep-a-Changelog style. (T-DD-2)
+- [`LICENSE`](LICENSE) — MIT; matches `pyproject.toml` `license = {text = "MIT"}` + `authors = [{name = "cscoheru"}]`. (T-DD-3)
 
 ## License
 
