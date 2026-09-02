@@ -17,12 +17,12 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" CHANGELOG.md README.md docs/reports/T-M2-D
 
 # 历史文档豁免口径锚定（tracked 重锚 post-M2，实测）：
 git ls-files docs/ adr/ spec/capabilities/ | xargs grep -cE "Fable 5|GLM 5.3|MiniMax-M3" 2>/dev/null | grep -v ":0$" | awk -F: '{s+=$NF} END{print s}'
-# 期望: == 97（post-commit 构成：v0.3 post-stage 85 + M2 实施报告群 12 = 97；M2 5 DISPATCH 起草 6 已在 85 内含，不重复计；实测 43 文件 97 行 / 2026-09-02 重测）
-# 注: 公式 = v0.3 tracked (85) + M2 实施报告群 12 行（#40 BE-1 rep 3 + #41 TG-1 rep 2 + #42 DO-1 rep 2 + #43 DD-1 rep 2 + #44 QA-1 rep 1 + #45 QA-1 test-plan 2）= 97
+# 期望: == 101（post-commit 构成：v0.3 post-stage 85 + M2 实施报告群 12 + GATE-CALIB 自引入 4 = 101；M2 5 DISPATCH 起草 6 已在 85 内含，不重复计；实测 44 文件 101 行 / 2026-09-02 GATE-CALIB 后重测）
+# 注: 公式 = v0.3 tracked (85) + M2 实施报告群 12 行（#40 BE-1 rep 3 + #41 TG-1 rep 2 + #42 DO-1 rep 2 + #43 DD-1 rep 2 + #44 QA-1 rep 1 + #45 QA-1 test-plan 2）+ #46 GATE-CALIB exec 4 = 101
 
 # 历史文档豁免口径锚定（disk 口径）：
 grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/ adr/ spec/capabilities/ notes/codex-audit-scope-v1.1-m0c-v0.4-precommit.md | wc -l
-# 期望: ≥ 97（disk 口径，含本 audit-scope §1/§4.5/§5 自伤字面；2026-09-02 重测）
+# 期望: ≥ 101（disk 口径，含本 audit-scope §1/§4.5/§5 自伤字面；2026-09-02 GATE-CALIB 后重测）
 
 # notes/ 范围自伤豁免（本文件含 grep pattern 字面）：
 grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.4-precommit.md | wc -l
@@ -31,9 +31,9 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.4-prec
 
 **含义**：v1.1+ 周期模型决策遵守 NORTH-STAR A-4 等价类约束；v0.4 升级前向交付物（CHANGELOG.md + README.md + M2 DD-1 报告）均不含具体型号字面；DD-1 报告 §Author/§Co-Authored-By 走 §1.5 豁免。
 
-### §1.5 历史文档豁免清单（tracked 重锚 post-M2 = 97，实测 43 文件 97 行 / 2026-09-02 重测）
+### §1.5 历史文档豁免清单（tracked 重锚 post-M2 = 101，实测 44 文件 101 行 / 2026-09-02 GATE-CALIB 后重测）
 
-继承 v0.3 §1.5 docs 主表 37 文件 85 行 + notes 自伤小节 2 文件 8 行；v0.4 升级范围（M2 实施报告群 6 文件 12 行 + v0.4 audit-scope/prompt 自伤 ~3 行）= 总锚定 **tracked 重锚 post-M2 实测 = 97**（85 + 12 = 97；43 文件；M2 5 DISPATCH 起草 6 已在 85 内含，不重复计）。
+继承 v0.3 §1.5 docs 主表 37 文件 85 行 + notes 自伤小节 2 文件 8 行；v0.4 升级范围（M2 实施报告群 6 文件 12 行 + GATE-CALIB exec 自引入 4 行〔修复 commit 自带执行书 pattern 字面〕+ v0.4 audit-scope/prompt 自伤 ~3 行）= 总锚定 **tracked 重锚 post-M2 实测 = 101**（85 + 12 + 4 = 101；44 文件；M2 5 DISPATCH 起草 6 已在 85 内含，不重复计）。
 
 **v0.4 升级范围**（6 文件）：
 
@@ -45,7 +45,7 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.4-prec
 | 4 | `notes/codex-audit-scope-v1.1-m0c-v0.4-precommit.md` | NEW（本文件）| 0 | notes/ 不入主合同 |
 | 5 | `notes/codex-audit-scope-v1.1-m0c-v0.4-precommit-prompt.md` | NEW（配套 Codex 复审 prompt）| 0 | notes/ 不入主合同 |
 
-**docs 主表**（继承 v0.3 §1.5 #1-#39 + M2 实施报告群 6 文件 12 行 = **43 文件 97 行，实测 / 2026-09-02 重测**）：
+**docs 主表**（继承 v0.3 §1.5 #1-#39 + M2 实施报告群 6 文件 12 行 + GATE-CALIB exec 自引入 4 行 = **44 文件 101 行，实测 / 2026-09-02 GATE-CALIB 后重测**）：
 
 - ✅ #1-13 v0.1 历史档案 13 文件 42 行
 - ✅ #16-20 v0.2 M1c 5 DISPATCH 5 行
@@ -71,14 +71,17 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.4-prec
 - ✅ #43 T-M2-DD-1 报告 2 行（§不锁型号守门描述 L106 + §元数据自检 L233；走 §1.5 #43 自伤豁免）
 - ✅ #44 T-M2-QA-1 报告 1 行（§Author 尾注）
 - ✅ #45 T-M2-QA-1 test-plan 2 行（§Author 尾注 + §不锁型号守门描述）
-- 总计：**43 文件 97 行（实测 / 2026-09-02 重测；v0.3 85 + M2 实施报告群 12 = 97；M2 起草 6 已在 85 内含不重复计）**
+- ✅ #46 T-M2-V0.4-GATE-CALIB 执行书 4 行（v0.4 GATE-CALIB 修复 commit 277cdf8 自引入：§3 验收命令 grep pattern 字面 ×4；per v0.3 #39 即时入主表先例补列；Codex formal 报告 §5.2 F-1 第八次锚定漂移教训）
+- ✅ #47 T-M2-V0.4-HYGIENE-FIX-2 执行书 2 行（v0.4 HYGIENE-FIX-2 commit 自引入预演：§2 验收命令 grep pattern 字面 ×2；FIX-2 commit 后以实测为准）
+- 总计：**44 文件 101 行（实测 / 2026-09-02 GATE-CALIB 后重测；v0.3 85 + M2 实施报告群 12 + GATE-CALIB exec 4 = 101；M2 起草 6 已在 85 内含不重复计）**
 
-**tracked 重锚 post-M2 实测公式**（2026-09-02 重测）：
+**tracked 重锚 post-M2 实测公式**（2026-09-02 GATE-CALIB 后重测）：
 - v0.3 post-stage: 85（37 文件 docs/adr/spec/capabilities + 2 文件 notes 自伤 = 39 文件 85 行；M2 5 DISPATCH 起草 6 行已含入 85，不重复计）
 - + M2 实施报告群 12: BE-1 rep 3 + TG-1 rep 2 + DO-1 rep 2 + DD-1 rep 2 + QA-1 rep 1 + QA-1 test-plan 2
+- + #46 GATE-CALIB exec 自引入 4（per v0.3 #39 即时入列先例；Codex formal 报告 §5.2 F-1 复审确认）
 - + v0.4 audit-scope/prompt 自伤 ~3（notes 自伤豁免，不入主合同）
-- **实测 post-commit: 85 + 12 = 97 行（43 文件）**
-- 验收命令：`git ls-files docs/ adr/ spec/capabilities/ | xargs grep -cE "Fable 5|GLM 5.3|MiniMax-M3" 2>/dev/null | grep -v ":0$" | awk -F: '{s+=$NF} END{print s}'` 实测 == 97
+- **实测 post-commit: 85 + 12 + 4 = 101 行（44 文件）**
+- 验收命令：`git ls-files docs/ adr/ spec/capabilities/ | xargs grep -cE "Fable 5|GLM 5.3|MiniMax-M3" 2>/dev/null | grep -v ":0$" | awk -F: '{s+=$NF} END{print s}'` 实测 == 101
 
 **豁免口径不变**（per M0b plan §3 L89 C2 裁定 + v0.3 §1.5 末段）：**不清洗历史文档**（考古记录 + git 尾注 + DISPATCH §4 验证命令字面均保留）。
 
@@ -150,9 +153,14 @@ grep -rE "https://[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*\.ts\.net/" docs/ deploy/ | wc
 **含义**：M2 多 host 拓扑中容器互联若锁 IP，host 重启/迁移后立即断连；必须用 container_name（Docker Compose 内嵌 DNS）+ Tailscale MagicDNS（跨 host）。v0.3 起草时 M2 未实施，grep 期望值基于 DISPATCH §8 禁止条款；v0.4 启用时 M2 5 DISPATCH 均已 commit，期望值经验证。
 
 **§4.5 期望值经验证（2026-09-02 GATE-CALIB 重测 verbatim）**：
-- IP 命令（含排除 node_modules）：实测 **1** 行（`deploy/6host-compose.newvps.yml` IPAM subnet 192.168.x.x 合例白名单；详见 compose IPAM 注记）。compose IPAM subnet 是 Docker bridge 网络白名单，不属于"容器互联锁 IP"范畴；可记入 §4.5 compose IPAM 白名单注记
+- IP 命令（含排除 node_modules）：实测 **1** 行（`CHANGELOG.md` L326 RFC1918/回环网段**说明文案**——含 `10.0.0.0/8` / `127.0.0.0/8` / `169.254.0.0/16` / `::1/128` 等公网/私网说明，非锁 IP；详见 §4.5 白名单注记）
 - ts.net 域名：实测 ≥ 1（deploy/tailscale-funnel-6host.yaml）
 - Funnel URL：实测 ≥ 6（docs/M2-DEPLOY-GUIDE.md 6 + deploy/tailscale-funnel-6host.yaml 6）
+
+**§4.5 白名单注记（2026-09-02 v0.4 HYGIENE-FIX-2 F-2 落合同）**：
+- **白名单：RFC1918/回环网段/ULA 说明文案豁免**——CHANGELOG.md L326 列举的 `10.0.0.0/8` / `127.0.0.0/8` / `169.254.0.0/16` / `::1/128` 等均为文档说明文案（VPC subnet + 链路本地 + IPv6 ULA 边界定义），**非容器互联锁 IP**
+- 守门期望口径：**业务源码 0 + 说明文案白名单 1（实测全为 CHANGELOG.md L326，合规）**
+- 实测总数 = 1：CHANGELOG.md L326 1 处文案白名单；业务源码（wrapper/dsh/ wrapper/orchestrator/ wrapper/test/ deploy/ env/）0 处锁 IP
 
 ## §4.6 M2 STT 守门正式启用（音频隐私；v0.3 预备 → v0.4 正式启用）
 
@@ -225,12 +233,30 @@ grep -rE "https://fcm\.googleapis\.com|https://updates\.push\.services\.mozilla\
 - §4.5 M2 多 host 守门正式启用（v0.3 §4.5 "预备" → v0.4 §4.5 "正式启用"；GATE-CALIB 校准：IP 排除 node_modules + H5 pattern `[a-z][a-z0-9-]*`）
 - §4.6 M2 STT 守门正式启用（v0.3 §4.6 "预备" → v0.4 §4.6 "正式启用"；GATE-CALIB 校准：tmp 排除 test/ + whisper pattern `[^/$]` 排除 `${`）
 - §4.7 M2 Web Push 守门正式启用（v0.3 §4.7 "预备" → v0.4 §4.7 "正式启用"；GATE-CALIB 校准：VAPID 公钥期望反向 == 0，env-inject-only 较"可入 commit"更严）
-- 历史文档豁免口径锚定（tracked 重锚 post-M2 = 97，实测 43 文件 97 行 / 2026-09-02 GATE-CALIB 重测；v0.3 85 + M2 实施报告群 12 = 97；M2 起草 6 已在 85 内含不重复计）
+- 历史文档豁免口径锚定（tracked 重锚 post-M2 = 101，实测 44 文件 101 行 / 2026-09-02 GATE-CALIB 后重测；v0.3 85 + M2 实施报告群 12 + GATE-CALIB exec 自引入 4 = 101；M2 起草 6 已在 85 内含不重复计）
 - Codex 提交铁律：用户亲提 `gpt-5.6-sol` + `xhigh`；Claude 不亲提
 - 下一站：v0.4 升级 PASS → M3 阶段 GA final 准备（v1.1 周期收口）
 
 ---
 
-*hygiene audit-scope — v0.4 升级 6 文件改动守门 by-design（grep 字面移到 notes/；范围限定前向交付物口径 CHANGELOG.md + README.md + docs/reports/T-M2-DD-1-report.md）；启用 §4.5/§4.6/§4.7 M2 三守门从"预备"到"正式"（v0.3 起草时 M2 未实施，v0.4 启用时 M2 5 DISPATCH 均已 commit）；继承 v0.3 §1.5 历史文档豁免清单 37 文件 85 行 + tracked 重锚 post-M2 预估 91*
+## §7 教训记档（v0.4 HYGIENE-FIX-2 F-3）
+
+**教训（v0.4，第八次锚定事故）**：修复 commit 自带的执行书/报告含 grep pattern 字面 → **commit 前必须预演自引入增量**（v0.3 #39 / v0.4 #46/#47 先例），锚定期望值以 **post-commit 实测** 为准，**禁止** 仅按公式预估。
+
+**事故复盘**：
+- v0.4 GATE-CALIB 修复 commit `277cdf8` 包含 16 文件改动，其中 `docs/DISPATCH-T-M2-V0.4-GATE-CALIB.md` §3 验收命令含 grep pattern 字面 ×4
+- 该自引入未在 commit 前按 v0.3 #39 先例即时入列 audit-scope 主表，导致实测锚定 101/44 文件 ≠ 声明 97/43 文件（第八次锚定漂移）
+- Codex formal 复审 `notes/codex-review-v1.1-m0c-v0.4-formal-report.md` §5.2 F-1 检出
+- 修法：audit-scope 主表补 #46 GATE-CALIB exec 4 行；本次 HYGIENE-FIX-2 commit 预演 #47 FIX-2 exec 2 行 → 终态 101 + 2 = 103（commit 后以实测为准）
+
+**v0.5 audit-scope 纪律（前置 hard rule）**：
+- **先行起草**：commit 任何 audit-scope 引用文件前，必先起草 audit-scope §1/§1.5/§4.5 §6
+- **commit 后立即复审**：commit 后 24h 内必跑 §2 验收命令矩阵（特别 §1 锚定命令），实测 ≠ 预期即追加 fix
+- **自引入预演入列**：执行书/报告含 grep 字面时，**commit 前** 必在 audit-scope §1.5 主表预演 #N+1 行（按 v0.3 #39 / v0.4 #46/#47 先例）
+- **commit message 附实测**：commit message 必含 §1 锚定实测数（如 `tracked 重锚 post-M2 实测: 103 / 45 文件`）
+
+---
+
+*hygiene audit-scope — v0.4 升级 6 文件改动守门 by-design（grep 字面移到 notes/；范围限定前向交付物口径 CHANGELOG.md + README.md + docs/reports/T-M2-DD-1-report.md）；启用 §4.5/§4.6/§4.7 M2 三守门从"预备"到"正式"（v0.3 起草时 M2 未实施，v0.4 启用时 M2 5 DISPATCH 均已 commit）；继承 v0.3 §1.5 历史文档豁免清单 37 文件 85 行 + tracked 重锚 post-M2 实测 101（v0.4 GATE-CALIB 后）/ 预估 103（v0.4 HYGIENE-FIX-2 后实测为准）+ §4.5 IP 白名单注记 + §7 教训记档（第八次锚定事故）*
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>

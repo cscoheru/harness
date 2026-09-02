@@ -5,6 +5,7 @@
 > **审验对象**: `5010c27`（M2 实施包 + v0.4 升级 audit-scope，30 文件 +6511/-6）+ `794060e`（cc-ready 翻牌 T-M2-EXEC-PASS）；审验基线 HEAD = `794060e`（working tree DO-1 3 文件 M 活跃，diff 增量命中 = 0，不影响矩阵）
 > **判定**: **CHANGES REQUIRED** — 0 critical / **4 major / 3 minor**（守门 pattern 校准 + 锚定三源统一 + README 两处交付缺口；实施实质面健康，全部为守门/文档级修复）
 > **注**: M2 三守门「预备 → 正式启用」首轮即暴露 pattern 设计缺陷 5 处——启用前「期望值经验证」声明失实，须校准后重测方可宣称正式启用
+> **复审轮（2026-09-02 追加，见 §5）**: 首审 4M/3m 全部成立并经 `T-M2-V0.4-GATE-CALIB`（commit `277cdf8`）修复复测全绿；gate 亲手收口 tsc 0 / vitest 95p-69s-**0f**；唯 GATE-CALIB 自引入锚定漂移 97→101 → 追加 **1M/1m**，签发 `T-M2-V0.4-HYGIENE-FIX-2` 收尾即终态 PASS
 
 ---
 
@@ -62,12 +63,41 @@
 
 - tsc/vitest 复跑本轮**未收口**（限时 180s/300s 超时中断；M2 QA-1 commit 5010c27 声明双绿沿袭 v0.3 stabilized 机制）——**列入 fix 轮执行书必跑项**，收口前 v0.4 不得宣称 PASS
 
-## §4 结论与签发
+## §4 首审结论与签发（历史段，已被 §5 复审轮覆盖更新）
 
 - 实施实质面健康（M2 工件齐、双零保持、headless 19/web 0、STT 音频 0、VAPID 私钥 0、端点 4、MagicDNS 38）；问题集中在**守门 pattern 校准 + 锚定三源 + README 两处交付缺口**，全为文档/守门级
 - **签发 `T-M2-V0.4-GATE-CALIB`**（执行书另落；建议承载：M-A README:342 引用式 + M-B 锚定 97 三源 + M-C 五处 pattern 校准重测 + M-D 5 边缘 URL + m-1/2/3 + tsc/vitest 必跑收口）——涉及守门期望值（合同级）与 M2 DD-1 交付物，**留 user/执行端裁定后执行**，本轮不代改
 - M-C 校准完成 + 重测全绿 + M-A/M-D 补齐后，v0.4 复审可转 PASS；M3（GA final 准备）在新 audit-scope v0.5 起草纪律下进行（audit-scope 先行 + commit 后立即复审）
 
+## §5 复审轮（2026-09-02，对 GATE-CALIB `277cdf8` + `760e15a` 的 verbatim 回验）
+
+### §5.1 首审 findings 回验 — 4M/3m 全部成立、全部修复复测全绿
+
+| ID | 修复 | 复测（verbatim） | 裁定 |
+|----|------|------------------|------|
+| M-A C1 | README:342 → 引用式 | `grep CHANGELOG.md README.md` = **0** | ✅ 修复确认 |
+| M-B C2 | 锚定 97 三源 + 主表 #40-#45 | 当轮 97/43 ✓（但见 §5.2 F-1 自引入漂移） | ✅（当轮） |
+| M-C C3 | 五处 pattern 校准 | IP = **1**（CHANGELOG L326 RFC1918 `10.0.0.0/8` 白名单说明文案，非锁 IP）；tmp = **0**；whisper 排除 `${` = **0**；VAPID 公钥期望 == 0 实测 **0** | ✅ 全部修复确认 |
+| M-D C4 | README 补 5 边缘 Funnel URL | pattern 补数字段后 unique host = **6**（edge1-5 + newvps；首审检测 `[a-z-]+` 缺数字系复审方 pattern 缺陷，C4 修复真实） | ✅ 修复确认 |
+| m-1/2/3 C5 | DD-1 §6.4 口径 + CHANGELOG 26 项核对（8/4/5/6/3）+ placeholder 回填 | commit message 附 verbatim 计数 ✅ | ✅ |
+| C6 gate | tsc/vitest（含 C6 根因修复链：3 wrapper 文件 + vitest.config stripJs + 3 test import 路径） | **亲手复跑（项目本地 bin，非 npx 缓存假象）**：`wrapper/node_modules/.bin/tsc --noEmit` exit **0**；`vitest run` exit **0** = **8 文件 passed/5 skipped + 95 tests passed/69 skipped/0 failed** | ✅ 双绿收口 |
+
+### §5.2 复审新 findings（GATE-CALIB 引入）
+
+**F-1 (major) 锚定三源再裂：97 → 101（第八次漂移）**
+- 实测 tracked = **101 / 44 文件**；构成闭合 = 97 + GATE-CALIB 执行书 §3 验收命令 grep pattern 字面 **4**（`docs/DISPATCH-T-M2-V0.4-GATE-CALIB.md` 实测 4 命中）——**修复自引入未按 v0.3 #39 先例即时入列**（主表缺 #46；audit-scope「43 文件 97 行」×5 处 vs 实测 101/44）
+- 修法：§1 期望 == 101 + 主表补 **#46 GATE-CALIB 执行书 4 行** → **44 文件 101 行**三源同值；本报告 + FIX-2 执行书在 notes/docs 的自引入命中一并列注
+
+**F-2 (minor) §4.5 IP 白名单口径未落合同**
+- CHANGELOG L326 RFC1918 白名单说明（`10.0.0.0/8` 等）致守门实测 = 1 ≠ 0；commit message 已声明「≤1 白名单」但 audit-scope §4.5 未落注记 → 修法：§4.5 加「白名单：RFC1918/回环网段说明文案豁免（CHANGELOG L326），期望 0 + 白名单 1」
+
+### §5.3 复审环境注记（对后续所有 gate 复跑）
+- `npx tsc` 在本机会拉到 **typosquat 假 tsc 包**（"This is not the tsc command…"，exit=0 假绿）；`npx --yes vitest` 走 npx 缓存缺 rolldown binding（startup error）——**必须用项目本地 bin**：`cd wrapper && ./node_modules/.bin/tsc --noEmit && ./node_modules/.bin/vitest run`。已记入 FIX-2 执行书 §4
+
+### §5.4 复审轮判定
+
+- 首审 **0C/4M/3m 维持**（全部成立）；GATE-CALIB C1-C6 **修复确认全绿**；复审追加 **F-1 (1M) + F-2 (1m)** → 当前累计 **CHANGES REQUIRED（0C/1M/1m）**，签发 `T-M2-V0.4-HYGIENE-FIX-2`（纯锚定/注记文本收尾）→ 修完即 **v0.4 终态 PASS**，M3 GA final 放行
+
 ---
 
-*codex review done — v0.4 formal 首审 **CHANGES REQUIRED（0C/4M/3m）**：三守门启用即红（node_modules 69/测试自伤 3/env 占位误判 1/公钥期望反向 0）+ 锚定 97/91/89 三数互斥（85+6 重复计数）+ README:342 前向违规 + README 缺 5 边缘 Funnel URL；实施实质面全绿；签发 T-M2-V0.4-GATE-CALIB 待裁定。*
+*codex review done — v0.4 复审轮：首审 0C/4M/3m 全部成立并经 GATE-CALIB（`277cdf8`）修复复测全绿（README 引用式/锚定 97 当轮/五处 pattern 校准 IP=1 白名单·tmp 0·whisper 0·VAPID 0/README 6 host/tsc 0·vitest 95p-69s-0f 亲手本地 bin 收口）；复审追加 F-1 锚定 97→101 执行书自引入 4 未入列（第八次）+ F-2 IP 白名单注记缺口 → 累计 0C/1M/1m，签发 T-M2-V0.4-HYGIENE-FIX-2 收尾即终态 PASS。*
