@@ -1,11 +1,17 @@
 {
-  "task_id": "T-M0b-DONE-AWAIT-USER",
-  "commit": "HEAD = 2b0953a (T-M0b-DD-1 M0b 总报告 + ADR 0010 Accepted)",
-  "created_at": "2026-09-02T12:00:00Z",
+  "task_id": "T-M0c-DISPATCH",
+  "commit": "v0.1 升级 commit 待生成（修复 M1+m1+m3 per notes/codex-review-v1.1-m0c-v0.1-precommit-report.md 后，按 prompt §5.1 方案 A 单 commit 7 文件 + 归档 commit + Clash proxy push）",
+  "created_at": "2026-09-02T18:00:00Z",
   "branch": "main",
-  "status": "M0b PASS ✅; 5 subagent 全 done; H-1/H-2/H-3 三假设 PASS; M0b 总判定 PASS; ADR 0010 v1.1 cycle scope admission Accepted (2026-09-02); v1.1+ 周期第一份合同落地; 5 commits 链 fdd10ea/6228ff5/4cf0ece/50d4c29/2b0953a 已推 origin/main; 当前 pending = v0.1 升级 vs 「鱼之重新定义」专项裁断 (per DD-1 §1.4 HARD CONSTRAINT: 不自动改 v1.1 GA plan v0.0 DRAFT); user signals 已收 (DEEPSEEK_API_KEY env-inject only + 「Start v1.1 M0b」明示 2026-09-02) → 全链路 closed",
+  "status": "T-M0c-DISPATCH（v0.1 升级 commit 已 ready，等 push 落地；M1 守门收窄+§1.5 豁免 / m1 12-commits 统一 / m3 行数实测校正 全部修复 per docs/DISPATCH-T-M0c-V0.1-PRECOMMIT-FIX.md）. 继前: v1.1 GA plan v0.0 DRAFT → v0.1 升级 GO 完成（user 2026-09-02 「选 (a) v0.1 升级 GO」）; M0b PASS 证据（commit 5b3d263, 12 commits 链, H-1/H-2/H-3 全 PASS）已写入 v1.1-ga-team-plan.md §0 + §1 + §10.1; M0c 5 角色任务书细化完成（DISPATCH-T-M0c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md 5 文件 NEW）; ADR 0010 v1.1 cycle scope admission enforcement 已嵌入 v1.1-ga-team-plan.md §7.3 + §10.1; 当前 pending = user 「Start v1.1 M0c」 启动 M0c 实施 (per PRD-v1.1 §4.6 第 3 条); 7 文件改动: 1 v1.1-ga-team-plan.md 大修 + 5 DISPATCH NEW + 1 cc-ready.json; 不自动派发实施 (等 user 裁断)",
   "files_modified": [
-    "docs/poll/cc-ready.json (overwrite; previous task_id=T-M0b-EXEC carried forward per m3 minor)"
+    "docs/v1.1-ga-team-plan.md (v0.0 DRAFT → v0.1 升级；Status / Date / §1 M0b PASS / §2 5 角色 M0b ✅ + M0c 写实 / §3 handoff M0b done + M0c 内部 / §6.2 M0c PR4-PR7 写实 / §9 修订日志 v0.1 行 / §10.1 check 全 ✅)",
+    "docs/DISPATCH-T-M0c-BE-1.md (NEW 100 行 — TypeScript wrapper skeleton 任务书)",
+    "docs/DISPATCH-T-M0c-TG-1.md (NEW 113 行 — dsh wrapper TS client + tool provider 任务书)",
+    "docs/DISPATCH-T-M0c-DO-1.md (NEW 148 行 — Tailscale-only + newvps 共址 + 1 worker 部署任务书)",
+    "docs/DISPATCH-T-M0c-QA-1.md (NEW 118 行 — TypeScript wrapper 集成测试 + M1 E2E 前置任务书)",
+    "docs/DISPATCH-T-M0c-DD-1.md (NEW 118 行 — CHANGELOG v1.1 + README v1.1 + v0.2 准备任务书)",
+    "docs/poll/cc-ready.json (overwrite; previous task_id=T-M0b-EXEC → T-M0c-V0.1-PRECOMMIT-FIX → T-M0c-DISPATCH; notes v0.1 升级完成状态)"
   ],
   "files_unmodified_scope_discipline": [
     "harness/ (v1.0 runtime Python kernel, frozen at v1.0.0 tag ab8749a; M0b 全链路 0 行 diff)",
@@ -18,7 +24,7 @@
     "docs/PRD-v1.1-product.md (discussion draft §4 六项裁定已写入 2026-08-30; v1.1 GA plan v0.0 DRAFT 仍未升 v0.1)",
     "docs/DOCS-REVIEW-v1.1-adjudication.md (six adjudications source, unchanged)",
     "docs/v1.0-ga-team-plan.md (frozen 2026-08-30, reference only)",
-    "docs/v1.1-ga-team-plan.md (v0.0 DRAFT at bd44321; DD-1 §1.4 禁止改 → 等 user 裁断 v0.1 升级)",
+    "docs/v1.1-ga-team-plan.md (v0.0 DRAFT → v0.1 升级 done at HEAD; M0c 阶段任务书细化完成; 等 M0c 通过后 v0.2 升级 — per DD-1 §1.4 HARD CONSTRAINT: v0.0 DRAFT 不可自改, M0b 通过才解锁 v0.1, 已解锁)",
     "docs/VISION-v1.0-supplement.md (SUPERSEDED 归档, not referenced as contract)",
     "docs/NOW.md (当前 stage card 仍 v1.0.0 GA ✅ DONE; v1.1+ 周期门开 marker 等 user 裁断后写)",
     "CHANGELOG.md / README.md / LICENSE (v1.0.0 GA artifacts, unchanged)",
@@ -26,5 +32,5 @@
     "tmp/ (M0b 实测 trace 临时落点; tmp/m0b-*.log + tmp/m0b-output-*.json + tmp/m0b-do-1-newvps-free.txt; NOT tracked per .gitignore /tmp/ rule; per-plan v1.0.0 GA runtime immutability守门)",
     "v1.0-runtime-integration-roadmap.md (BE-1 dsh 生成的 untracked 调研产物; 非交付物; cleanup hole 待 user 决定)"
   ],
-  "notes": "M0b DONE (commit 2b0953a, 2026-09-02). 5 subagent 全 PASS + 10 commits 链 (BE-1/TG-1/DO-1/QA-1/DD-1 + 5 pre-M0b: 9f5ef4b/fb429e3/0da83a5/5e698c8/49e8380/9ab65b5/4cf0ece/6228ff5/fdd10ea/50d4c29/2b0953a → 实际 11 commits 含 cc-ready + dispatch + self-audit). (1) 三假设判定: H-1 PASS (3档 quality_score 中位数 4 ≥ 4 阈值; 退出码 3/3 成功); H-2 PASS (wall 19x/7x/1x 阶梯 213s/76s/11s; 任务适配边界清晰); H-3 PASS (LOC 4800-8500 范围合理; M0c 实施空间足够). (2) capability JSON 落地: spec/capabilities/{orch,commander,worker,newvps_ram}.json 4/4 ✅ (mv from _m0b_draft/; _m0b_draft/ 已 rmdir); newvps RAM verdict PASS (total 7.8 GB / available 6.0 GB / M1 估测 1.7 GB / 余量 3.5x). (3) ADR 0010 v1.1 cycle scope admission: Accepted; v1.0 runtime 0 行 diff; 不锁型号 (A-4); v1.0 9 ADR immutable. (4) 5 DISPATCH §6.X 修订: --profile web → --profile headless (BE-1/TG-1/DO-1 三 subagent 全部独立发现 web 是 Web UI server; QA-1 subagent 统一修订 5 DISPATCH §6.X 模板命令示例). (6) Codex 提交铁律: M0b v0.1 模板阶段已 PASS (commit 49e8380); M0b 实测阶段 PASS (commit 2b0953a, 含 ADR 0010); 后续 Codex 复审模式按 self-audit (用户/架构师) → pre-recheck fix (架构师 → subagent) → formal Codex CLI (用户亲提) 三段式 (per fish-harness-project.md 2026-09-01 立). (7) DEEPSEEK_API_KEY 不允许 hardcode; 仅环境变量 + inline prefix on dsh/REST commands; 已落 5 commit history 无任何 key 泄漏. (8) Outcomes (per PRD-v1.1 §3 + NORTH-STAR §10): H-1 PASS → 走路径 1 (v0.1 升级); 不触发「鱼之重新定义」专项. (9) NEXT user signals (NOT auto-dispatched, 等 user 裁断): (a) v0.1 升级 GO (→ v1.1 GA plan v1.0 落地 + M0c 任务书细化 + ADR 0010 enforcement); (b) 「鱼之重新定义」专项 GO (→ 启动 PRD-v1.1 §3 H-1 失败处理 + NORTH-STAR §10 冲突 5); (c) M0c 任务书细化 (M0b 收口后首任务); (d) cleanup: untracked v1.0-runtime-integration-roadmap.md 处理 (.gitignore tmp/ 扩展 or 主动 rm). M0b 总判定 PASS; 5 commits 链已推; ADR 0010 Accepted; v1.1+ 周期门物理性开. Co-Authored-By: Claude Code <noreply@anthropic.com>"
+  "notes": "v0.1 升级 GO 完成 (user 2026-09-02 「选 (a) v0.1 升级 GO」). 7 文件改动: 1 v1.1-ga-team-plan.md 大修 + 5 DISPATCH-T-M0c-*.md NEW + 1 cc-ready.json overwrite. (1) M0b PASS 证据落地 v1.1-ga-team-plan.md: commit 5b3d263 + **12 commits 链** (9f5ef4b/fb429e3/0da83a5/5e698c8/49e8380/9ab65b5/4cf0ece/6228ff5/fdd10ea/50d4c29/2b0953a/5b3d263) + H-1/H-2/H-3 全 PASS + ADR 0010 Accepted. (2) M0c 5 角色任务书细化: T-M0c-BE-1 TypeScript wrapper skeleton (5-7d, 100 行); T-M0c-TG-1 dsh wrapper TS client + tool provider (5-7d, 113 行); T-M0c-DO-1 Tailscale-only + newvps 共址 + 1 worker 部署 (3-5d, 148 行); T-M0c-QA-1 TS wrapper 集成测试 (3-5d, 118 行); T-M0c-DD-1 CHANGELOG v1.1 + README v1.1 + v0.2 准备 (2-3d, 118 行); 总估时 18-27d ≈ 2-3 周 (与 PRD-v1.1 §5 M0c 对齐). (3) v1.1-ga-team-plan.md 修订: Header Status 🟡 DRAFT v0.0 → 🟢 v0.1 (实施中); Date 2026-09-01 → 2026-09-02; §1 M0b 阶段 + M0c 阶段写实; §2 5 角色 M0b 任务 ✅ done + M0c 任务写实; §3 handoff M0b done + M0c 内部 handoff; §6.2 M0c PR4-PR7 写实; §9 修订日志 v0.1 行; §10.1 check 全 ✅. (4) ADR 0010 enforcement: 已嵌入 v1.1-ga-team-plan.md §7.3 + §10.1 (capability JSON 守门 + v1.0 runtime 0 行 diff 守门 + 不锁型号守门). (5) v1.0 runtime 不漂移守门: v0.1 升级不动 harness/ + spec/ + spikes/ + _helpers.py + 9 ADR body + Dockerfile + docker-compose.yml + pyproject.toml + v1.0 GA plan; 仅 docs/ 下修订. (6) DEEPSEEK_API_KEY 不允许 hardcode; 仅环境变量 + inline prefix on dsh/REST commands; M0b 已踩坑 (cc-ready.json notes line 6 写完整 key 触发 GH013 PUSH PROTECTION, amend 修复). (7) 单 commit 主方案 + 拆 2 commit 备方案; Co-Authored-By: Claude Code <noreply@anthropic.com>; push via Clash proxy. (8) pre-commit 修复 (T-M0c-V0.1-PRECOMMIT-FIX done): M1 守门 grep 范围收窄到前向交付物口径 + audit-scope §1.5 历史豁免清单 12 文件 39 处三类定性; m1 「12 commits 链」三处统一; m3 行数按 `wc -l` 实测校正; cc-ready task_id 回 T-M0c-DISPATCH; 修后方案 A 单 commit 7 文件 + push. (9) NEXT user signals (NOT auto-dispatched, 等 user 裁断): (a) Start v1.1 M0c → 架构师派发 T-M0c-{BE-1,TG-1,DO-1,QA-1,DD-1} 5 任务实施 (per PRD-v1.1 §4.6 第 3 条); (b) 走 Codex 复审三段式 (self-audit → pre-recheck fix → formal Codex CLI) — Codex 提交铁律: Claude 不亲提, 用户亲提, model=gpt-5.6-sol + reasoning=xhigh; (c) v0.2 升级 (M0c 通过后); (d) m2 孤儿 `v1.0-runtime-integration-roadmap.md` 440 行归档位裁决（`docs/m0b/` 存档 or 删除）. Co-Authored-By: Claude Code <noreply@anthropic.com>"
 }
