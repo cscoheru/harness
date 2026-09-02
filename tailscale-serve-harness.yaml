@@ -1,0 +1,29 @@
+# tailscale-serve-harness.yaml — Tailscale Serve HTTPS config (T-M0c-DO-1)
+#
+# Routes: harness.rana.asia:443 → newvps internal port 8000
+# Auth:   Tailscale identity (no Basic Auth; PRD-v1.1 §4.1 裁定)
+# Scope:  owner device + 1 worker device (ACL enforces)
+#
+# Setup (one-time, run on newvps host):
+#   tailscale serve --bg --yaml=tailscale-serve-harness.yaml
+#   tailscale serve status   # verify harness.rana.asia is serving
+#
+# Teardown:
+#   tailscale serve reset
+#
+# PRD-v1.1 §4.1: Tailscale-only — no public HTTPS, no Basic Auth.
+
+https: true
+
+# The TLS cert is issued by Tailscale (via Let's Encrypt on the tailnet).
+# No manual cert management needed.
+
+routes:
+  # harness.rana.asia → newvps internal service
+  # newvps host port 8000 is bound by the harness-kernel container.
+  # Tailscale Serve proxies HTTPS (443) → HTTP (8000) on the same host.
+  harness.rana.asia:
+    to: http://127.0.0.1:8000
+
+# Auth is handled by Tailscale identity (who you are in the tailnet).
+# ACL in tailscale-acl.yaml restricts which identities can reach this route.

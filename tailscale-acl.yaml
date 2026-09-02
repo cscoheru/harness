@@ -1,0 +1,84 @@
+# tailscale-acl.yaml — Tailscale ACL (T-M0c-DO-1)
+#
+# Scope:     newvps co-located M0c Stage 1 (1 orch + 1 commander + 1 worker + owner)
+# Policy:    least-privilege; explicit allow; default deny
+# Devices:   owner iPhone + 1 worker device + newvps host + dsh-wrapper
+#
+# Device tags (assigned via `tailscale set --advertise-tags` on each host):
+#   tag:harness      — newvps host running the harness kernel + Tailscale Serve
+#   tag:dsh-wrapper  — dsh-wrapper container (TypeScript orchestrator)
+#   tag:worker       — worker container (background task consumer)
+#   tag:admin        — owner iPhone / MacBook (full access)
+#
+# ACL structure:
+#   - tag:admin can access everything (owner)
+#   - tag:dsh-wrapper can reach tag:harness (kernel API)
+#   - tag:worker can reach tag:harness (task dispatch)
+#   - tag:harness can reach tag:dsh-wrapper (callback / events) — minimal
+#   - No public internet egress required for M0c skeleton
+#
+# PRD-v1.1 §4.1: Tailscale-only — no Basic Auth, no public HTTPS.
+# NORTH-STAR §7: Tailscale identity replaces Basic Auth.
+
+{
+  "acls": [
+    # Owner/admin full access to everything
+    {
+      "action": "accept",
+      "src": ["tag:admin"],
+      "dst": ["tag:harness:443", "tag:dsh-wrapper:*,*", "tag:worker:*,*"]
+    },
+
+    # dsh-wrapper (orchestrator) → harness-kernel API
+    {
+      "action": "accept",
+      "src": ["tag:dsh-wrapper"],
+      "dst": ["tag:harness:8000"]
+    },
+
+    # worker → harness-kernel (task fetch / result submit)
+    {
+      "action": "accept",
+      "src": ["tag:worker"],
+      "dst": ["tag:harness:8000"]
+    },
+
+    # harness-kernel → dsh-wrapper (callbacks / event push)
+    # Minimal: only the specific port/path the kernel uses for callbacks.
+    {
+      "action": "accept",
+      "src": ["tag:harness"],
+      "dst": ["tag:dsh-wrapper:*,*"]
+    },
+
+    # worker and dsh-wrapper can talk to each other (if needed for coordination)
+    {
+      "action": "accept",
+      "src": ["tag:dsh-wrapper", "tag:worker"],
+      "dst": ["tag:dsh-wrapper:*,*", "tag:worker:*,*"]
+    }
+  ],
+
+  "tagOwners": {
+    "tag:harness":     ["cscoheru"],
+    "tag:dsh-wrapper":  ["cscoheru"],
+    "tag:worker":       ["cscoheru"],
+    "tag:admin":        ["cscoheru"]
+  },
+
+  # M0c Stage 1: no HTTPS egress rules needed.
+  # If a future stage needs model API calls (DeepSeek, etc.),
+  # add egress rules for those destinations here.
+  "ssh": [
+    {
+      "action": "accept",
+      "src": ["tag:admin"],
+      "dst": ["tag:harness"],
+      "users": ["ubuntu"]
+    }
+  ],
+
+  "derpMap": {
+    "omitDefaultRegions": false
+  }
+}
