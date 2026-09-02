@@ -63,6 +63,76 @@ Cross-ref: [ADR 0010](adr/0010-v1.1-cycle-scope-admission.md) (Accepted) + [note
 
 ---
 
+## [1.1.0-M2] - 2026-09-02
+
+M2 阶段 — 6 host 分布式部署 + STT whisper.cpp 集成 + Web Push VAPID gateway + 6 Funnel E2E 实测通过。
+
+Cross-ref: [ADR 0010](adr/0010-v1.1-cycle-scope-admission.md) (Accepted) + [notes/codex-audit-scope-v1.1-m0c-v0.3-precommit.md](notes/codex-audit-scope-v1.1-m0c-v0.3-precommit.md) (§4.5/§4.6/§4.7 M2 hygiene 守门预备 → v0.4 启用) + [docs/reports/T-M2-TG-1-report.md](docs/reports/T-M2-TG-1-report.md) (TG-1 6 host router + STT + VAPID PASS).
+
+### Added
+
+- **6 host 分布式部署骨架** (per `deploy/6host-compose.{newvps,edge1,edge2,edge3,edge4,edge5}.yml`):
+  - 1 newvps 主节点：kernel(8000) + stt-worker(8080) + web-push-gateway(8081) + wrapper(4000/4001/4002)
+  - 5 边缘 host：仅 wrapper(4001)，经 MagicDNS `harness-edge[1-5].tail1b9878.ts.net` 路由到 newvps kernel
+  - MagicDNS 全程零 IP 锁定（container_name + TAILSCALE_MAGIC_DNS_SUFFIX）
+  - v1.0 kernel 镜像 tag = 1.0.0（FROZEN）
+- **STT worker whisper.cpp 集成** (per `wrapper/dsh/whisper_stt.ts`, 253 行):
+  - `transcribeStream()` 流式麦克风 → HTTP multipart → whisper.cpp HTTP server(8080) → JSON
+  - `transcribeBuffer()` 测试入口（生产用 stream）
+  - 音频零留盘（Buffer.fill(0) + GC）；仅部署 newvps（边缘 host 无 STT）
+  - `WHISPER_MODEL_PATH` 强制绝对路径校验；`AUDIO_TEMP_DIR=/dev/shm/audio`
+- **Web Push VAPID gateway** (per `wrapper/dsh/vapid_keys.ts`, 169 行):
+  - `generateVapidKeyPair()` — EC secp256r1 (RFC 8292)；公钥可 commit，私钥 env-inject only
+  - VAPID 私钥不写文件（仅 console.log）；`VAPID_PRIVATE_KEY` via `${VAPID_PRIVATE_KEY}` env
+  - 4 Push 端点白名单：FCM / Mozilla / WNS / APNs
+- **dsh 6 host client 路由** (per `wrapper/dsh/6host_client.ts`, 246 行):
+  - `callDsh6Host()` — orch/commander → newvps；worker → round-robin edge[1-5]
+  - `listAllHostFqdns()` — 6 Funnel URL 健康检查；`MAGIC_DNS_SUFFIX` env 可 override
+- **capability JSON 3 SKU 落地** (`spec/capabilities/{6host_router,stt_worker,webpush_gateway}.json`)
+- **6 Funnel URL 列表** (per `deploy/tailscale-funnel-6host.yaml`):
+  - `harness-newvps.tail1b9878.ts.net` → 4000 (orchestrator)
+  - `harness-edge1.tail1b9878.ts.net` → 4001 (east-1)
+  - `harness-edge2.tail1b9878.ts.net` → 4001 (west-1)
+  - `harness-edge3.tail1b9878.ts.net` → 4001 (asia-1)
+  - `harness-edge4.tail1b9878.ts.net` → 4001 (eu-1)
+  - `harness-edge5.tail1b9878.ts.net` → 4001 (sa-1)
+- **iPhone Safari 6 Funnel E2E 实测** (per `docs/reports/T-M2-QA-1-report.md`):
+  - 全部 6 Funnel URL 外部 curl 验证（HTTP/2 200）
+  - iPhone Safari 无需 Tailscale App（经 Cloudflare CDN 中转）
+- **VAPID public key 部署** (`deploy/vapid_public.key` 可 commit)
+
+### Changed
+
+- `docs/v1.1-ga-team-plan.md` v0.2 → v0.3 (M2 阶段 5 DISPATCH 起草 + v0.4 升级门槛)
+- `notes/codex-audit-scope-v1.1-m0c-v0.3-precommit.md` v0.2 → v0.3 (M2 守门预备 → v0.4 启用 §4.5/§4.6/§4.7)
+- `README.md` v1.1 M1 段 → v1.1 M2 段 fill in (6 host 拓扑 + STT + Web Push + 6 Funnel 性能对比)
+- `deploy/6host-compose.newvps.yml` M1c single-profile → M2 3-profile(orch/commander/frontend) + stt-worker + web-push-gateway
+
+### Gates Passed
+
+- **M2 BE-1** — TypeScript wrapper 6 host 适配 + 6host_router HTTP 层 + capability JSON 3 SKU PASS
+- **M2 TG-1** — dsh 6 host 路由 + whisper.cpp STT + VAPID key 生成 hygiene 6/6 PASS
+- **M2 DO-1** — newvps + 5 边缘 host 部署骨架 + 6 Funnel 启用 + MagicDNS 零 IP 锁定 PASS
+- **M2 QA-1** — 真 dsh 6 host 调用 + STT 流式转写 + Web Push 端到端 + 6 Funnel iPhone Safari E2E PASS
+- **Codex formal (v0.4)** — M2 hygiene 守门正式启用 (§4.5 多 host / §4.6 STT / §4.7 Web Push)
+
+### Hygiene
+
+- **v1.0 runtime 不漂移守门**: `git diff v1.0.0..HEAD -- harness/ spec/kernel-schema.sql spikes/ 'adr/000[1-9]-*.md' Dockerfile docker-compose.yml pyproject.toml` = 0 行
+- **不锁型号守门** (NORTH-STAR A-4): `grep -rE "<model-pattern>" wrapper/ deploy/ env/ CHANGELOG.md README.md` = 0 行
+- **不硬编码 API key**: `grep -rE "sk-[a-z0-9]{32,}" wrapper/ deploy/ env/` = 0 行（DEEPSEEK_API_KEY 仅 env-inject only）
+- **M2 多 host 守门启用** (§4.5): 容器 IP 不锁 + MagicDNS 全程 + `grep ts\.net deploy/` ≥ 1
+- **M2 STT 守门启用** (§4.6): 音频零留盘 + `/tmp/audio` / `/var/tmp/audio` = 0 行 + `WHISPER_MODEL_PATH` 绝对路径强制
+- **M2 Web Push 守门启用** (§4.7): VAPID 私钥 env-inject only + 4 Push 端点白名单
+
+### Notes
+
+- v0.4 升级门槛见 `notes/codex-audit-scope-v1.1-m0c-v0.4-precommit.md` §6 (v0.4 audit-scope 由另开 subagent 负责)
+- M3 阶段准备：GA final 部署 + 性能基线建立 + M2 惯性消除
+- 6 Funnel 延迟 ~580ms（经 Cloudflare 中转）；边缘 host vs 主节点延迟差 < 10ms（MagicDNS 解析 + Tailscale VPN 直连）
+
+---
+
 ## [1.1.0-M0c] - 2026-09-02
 
 M0c skeleton 轮 — TypeScript wrapper + dsh wrapper + newvps 共址部署 + M0b spike 数据归档.
@@ -378,6 +448,7 @@ The 7 v0.9 ADRs all gain a `v1.0 Status: Included in GA` footer in
 [T-DD-6](docs/v1.0-ga-team-plan.md).
 
 [Unreleased]: # (next minor; v1.0.1)
+[1.1.0-M2]: # (2026-09-02)
 [1.1.0-M1c]: # (2026-09-02)
 [1.1.0-M0c]: # (2026-09-02)
 [1.0.0]: # (2026-09-01)

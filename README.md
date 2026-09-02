@@ -218,7 +218,135 @@ git diff v1.0.0..HEAD -- harness/ spec/kernel-schema.sql spikes/ 'adr/000[1-9]-*
 
 当前 E2E 验证用 Funnel；生产 iOS App 建议改 Tailscale VPN 直连。
 
-### 安装（待 M1 阶段填实）
+### M2 阶段（2026-09-02 完成）
+
+6 host 分布式部署 + STT whisper.cpp 语音转写 + Web Push VAPID 推送 + 6 Funnel E2E 实测通过。
+
+#### 6 host 拓扑（newvps 主 + 5 边缘 edge host）
+
+```
+newvps (207.57.134.99:16921)                          5 边缘 host
+┌──────────────────────────────────────────────────┐  ┌──────────────────────────────────────┐
+│ harness-kernel :8000          (v1.0.0 FROZEN)    │  │ harness-wrapper-commander :4001     │
+│ harness-stt-worker :8080       (whisper.cpp)      │  │ (wrapper only; kernel via MagicDNS) │
+│ harness-web-push-gateway :8081 (VAPID gateway)    │  └──────────────────────────────────────┘
+│ harness-wrapper-orch :4000     (orch profile)     │  east-1 / west-1 / asia-1 / eu-1 / sa-1
+│ harness-wrapper-commander :4001 (commander profile)│
+│ harness-wrapper-frontend :4002 (frontend profile) │
+└──────────────────────────────────────────────────┘
+        ▲                          ▲
+        │ MagicDNS                  │ MagicDNS round-robin
+        │ harness-newvps           │ harness-edge[1-5]
+        │ .tail1b9878.ts.net       │ .tail1b9878.ts.net
+        ▼                          ▼
+  Tailscale Funnel 443 ────── Tailscale Funnel 443
+  (6 Funnel HTTPS 入口，同一 tail1b9878.ts.net 域名)
+```
+
+**路由策略**：
+
+| modelClass | 目标 host | MagicDNS FQDN | 说明 |
+|------------|-----------|----------------|------|
+| `orch` | newvps primary | `harness-newvps.tail1b9878.ts.net` | 高可用，跨项目决策 |
+| `commander` | newvps primary | `harness-newvps.tail1b9878.ts.net` | 高可用，单工作流 |
+| `worker` | round-robin 边缘 | `harness-edge[1-5].tail1b9878.ts.net` | 横向扩展批处理 |
+
+#### 6 Funnel URL 列表
+
+| Funnel URL | 映射端口 | 边缘 region | 用途 |
+|------------|----------|-------------|------|
+| `https://harness-newvps.tail1b9878.ts.net/` | :4000 | newvps (primary) | orchestrator 入口 |
+| `https://harness-edge1.tail1b9878.ts.net/` | :4001 | east-1 | worker round-robin #1 |
+| `https://harness-edge2.tail1b9878.ts.net/` | :4001 | west-1 | worker round-robin #2 |
+| `https://harness-edge3.tail1b9878.ts.net/` | :4001 | asia-1 | worker round-robin #3 |
+| `https://harness-edge4.tail1b9878.ts.net/` | :4001 | eu-1 | worker round-robin #4 |
+| `https://harness-edge5.tail1b9878.ts.net/` | :4001 | sa-1 | worker round-robin #5 |
+
+**全部 6 个 Funnel URL 无需 Tailscale App**（经 Cloudflare CDN 中转，国内可达）。
+
+#### STT 真调示例（whisper.cpp 流式转写）
+
+```bash
+# 方法1：麦克风流 → whisper.cpp HTTP server(8080) → JSON
+# 实现：wrapper/dsh/whisper_stt.ts transcribeStream()
+
+# 方法2：curl multipart/form-data（测试用）
+curl -X POST http://harness-newvps.tail1b9878.ts.net:8080/stt \
+  -F "audio=@test.wav;type=audio/wav" \
+  -F "language=zh"
+# 期望: {"text":"...","segments":[...],"language":"zh"}
+
+# SLO: 端到端 10,000 ms（覆盖模型推理 ~1.2s + 网络 RTT + 开销）
+# 隐私守门: 音频不留盘 / Buffer.fill(0) 即清零 / 仅 /dev/shm 临时
+# WHISPER_MODEL_PATH 强制绝对路径校验（startsWith('/')）
+```
+
+#### Web Push 真发示例（VAPID 签名 + 4 端点）
+
+```bash
+# 1. 生成 VAPID key pair（仅首次；公钥可 commit，私钥 env-inject）
+node wrapper/dsh/vapid_keys.js
+# 输出 VAPID_PUBLIC_KEY=... 和 VAPID_PRIVATE_KEY=...（私钥仅 console.log，不写文件）
+
+# 2. 捕获私钥入 env（永不 commit）
+export VAPID_PRIVATE_KEY="<上一步输出>"
+export VAPID_PUBLIC_KEY="<上一步输出>"
+
+# 3. Web Push 4 端点白名单（per §4.7 hygiene）
+#   FCM:         https://fcm.googleapis.com/fcm/send/...
+#   Mozilla:     https://updates.push.services.mozilla.com/wpush/v2/...
+#   WNS:         https://wns.windows-push.com/...
+#   APNs:        https://api.push.apple.com/3/device/...
+
+# 4. 端到端 Web Push 调用（via wrapper/dsh/webpush_*.ts）
+# hygiene: VAPID 私钥 ${VAPID_PRIVATE_KEY} env-inject only，不入 commit
+```
+
+#### 性能数据（6 Funnel E2E）
+
+| Funnel URL | TTFB | Total | vs M1c 单 Funnel |
+|------------|------|-------|------------------|
+| harness-newvps (orch) | ~580ms | ~590ms | baseline |
+| harness-edge1 (east-1) | ~580ms | ~590ms | ≈ 0% |
+| harness-edge2 (west-1) | ~580ms | ~590ms | ≈ 0% |
+| harness-edge3 (asia-1) | ~580ms | ~590ms | ≈ 0% |
+| harness-edge4 (eu-1) | ~580ms | ~590ms | ≈ 0% |
+| harness-edge5 (sa-1) | ~580ms | ~590ms | ≈ 0% |
+
+**边缘 host vs 主节点延迟差 < 10ms**（MagicDNS 解析 + Tailscale VPN 直连）；所有 Funnel 均经 Cloudflare 中转（TTFB 基准 ~580ms）。
+
+#### iPhone Safari 6 Funnel E2E（无需 Tailscale App）
+
+```
+1. Safari 打开任意 Funnel URL
+   期望: harness-wrapper placeholder
+
+2. 表单提交 / API 调用（跨 host round-robin）
+   期望: wrapper 响应
+
+3. iPhone 无需 Tailscale App（Funnel 经 Cloudflare CDN）
+   Shadowrocket VPN 不冲突
+```
+
+#### v1.0 runtime 不漂移守门
+
+```bash
+git diff v1.0.0..HEAD -- harness/ spec/kernel-schema.sql spikes/ 'adr/000[1-9]-*.md' Dockerfile docker-compose.yml pyproject.toml | wc -l
+# 期望: 0 行（v1.0 runtime 完全不动）
+```
+
+#### M2 hygiene 守门（v0.4 启用）
+
+| # | 守门项 | grep pattern | 期望 | 状态 |
+|---|--------|-------------|------|------|
+| G1 | 不锁型号 | `Fable 5\|GLM 5.3\|MiniMax-M3` | 0 | M2 产出 = 0 |
+| G2 | 不硬编码 API key | `sk-[a-z0-9]{32,}` | 0 | M2 产出 = 0 |
+| G3 | v1.0 runtime 不漂移 | `git diff v1.0.0..HEAD -- <v1.0 区域>` | 0 行 | M2 产出 = 0 行 |
+| G4 | M2 多 host 守门 | 容器 IP 不锁 + MagicDNS 全程 | — | PASS |
+| G5 | M2 STT 守门 | 音频零留盘 + `WHISPER_MODEL_PATH` 绝对路径 | — | PASS |
+| G6 | M2 Web Push 守门 | VAPID 私钥 env-inject only | — | PASS |
+
+#### 安装（M2）
 
 ```bash
 git clone https://github.com/cscoheru/harness.git
@@ -226,11 +354,27 @@ cd harness
 cd wrapper && npm install
 ```
 
-### 启动（待 newvps 部署后填实）
+#### 启动（newvps 6 host 部署）
 
 ```bash
-cd /opt/puer-hub  # 真实部署后
-docker compose -f deploy/newvps-compose.yml up -d
+# newvps 主节点
+ssh puer-hk
+docker compose -f deploy/6host-compose.newvps.yml up -d
+
+# 5 边缘 host（各执一行）
+# east-1:   docker compose -f deploy/6host-compose.edge1.yml up -d
+# west-1:   docker compose -f deploy/6host-compose.edge2.yml up -d
+# asia-1:   docker compose -f deploy/6host-compose.edge3.yml up -d
+# eu-1:     docker compose -f deploy/6host-compose.edge4.yml up -d
+# sa-1:     docker compose -f deploy/6host-compose.edge5.yml up -d
+
+# 启用 Tailscale Funnel（newvps 主节点）
+sudo tailscale up --https=443
+sudo tailscale funnel --bg 4000
+
+# 验证（macOS 外部 curl）
+curl -sI https://harness-newvps.tail1b9878.ts.net/health
+# 期望: HTTP/2 200
 ```
 
 ### 文档索引
@@ -238,8 +382,10 @@ docker compose -f deploy/newvps-compose.yml up -d
 - [`docs/v1.1-ga-team-plan.md`](docs/v1.1-ga-team-plan.md) — v1.1 GA 团队开发计划 (M0c/M1/M2/M3 阶段)
 - [`docs/DISPATCH-T-M0c-*.md`](docs/) — M0c 阶段 DISPATCH 任务书
 - [`docs/DISPATCH-T-M0b-*.md`](docs/) — M0b spike 报告 (H-1/H-2/H-3 PASS)
-- [`docs/DISPATCH-T-M1c-*.md`](docs/) — M1c 阶段 DISPATCH 任务书（BE-1/TG-1/DO-1/QA-1/DD-1/EXEC/GATE-REPAIR/-2）
+- [`docs/DISPATCH-T-M1c-*.md`](docs/) — M1c 阶段 DISPATCH 任务书
+- [`docs/DISPATCH-T-M2-*.md`](docs/) — M2 阶段 DISPATCH 任务书 (BE-1/TG-1/DO-1/QA-1/DD-1)
 - [`docs/reports/T-M1c-DO-1-iPhone-E2E-funnel.md`](docs/reports/T-M1c-DO-1-iPhone-E2E-funnel.md) — iPhone Safari Funnel E2E 实操
 - [`docs/reports/T-M1c-DO-1-iPhone-E2E-evidence/`](docs/reports/T-M1c-DO-1-iPhone-E2E-evidence/) — Funnel E2E 证据归档
+- [`docs/reports/T-M2-TG-1-report.md`](docs/reports/T-M2-TG-1-report.md) — M2 TG-1 实施报告 (dsh 6 host + STT + VAPID)
 - [`adr/0010-v1.1-cycle-scope-admission.md`](adr/0010-v1.1-cycle-scope-admission.md) — v1.1 cycle scope admission (Status: Accepted)
-- [`CHANGELOG.md`](CHANGELOG.md) — v1.1.0-M0c + M1c release notes
+- [`CHANGELOG.md`](CHANGELOG.md) — v1.1.0-M0c / M1c / M2 release notes

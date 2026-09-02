@@ -1,0 +1,69 @@
+# deploy/tailscale-funnel-6host.yaml — fish-harness v1.1 M2 (T-M2-DO-1)
+#
+# 6 Funnel entries: expose HTTPS endpoints for newvps + 5 edge hosts
+# Each Funnel maps a MagicDNS name → local HTTP service
+#
+# Funnel enables HTTPS without certificates (Tailscale handles TLS)
+# Auth: Tailscale identity (no Basic Auth; PRD-v1.1 §4.1)
+#
+# Setup on each host:
+#   tailscale funnel 443
+#   tailscale serve --yaml=tailscale-funnel-6host.yaml
+#   tailscale funnel status
+#
+# Teardown:
+#   tailscale funnel reset
+#
+# M2 6 host Funnel entries:
+#   harness-newvps.tail1b9878.ts.net → 127.0.0.1:4000  (orchestrator)
+#   harness-edge1.tail1b9878.ts.net  → 127.0.0.1:4001  (east-1)
+#   harness-edge2.tail1b9878.ts.net  → 127.0.0.1:4001  (west-1)
+#   harness-edge3.tail1b9878.ts.net  → 127.0.0.1:4001  (asia-1)
+#   harness-edge4.tail1b9878.ts.net  → 127.0.0.1:4001  (eu-1)
+#   harness-edge5.tail1b9878.ts.net  → 127.0.0.1:4001  (sa-1)
+#
+# 6 Funnel HTTPS URLs (MagicDNS -> local port):
+#   https://harness-newvps.tail1b9878.ts.net/  -> newvps orchestrator :4000
+#   https://harness-edge1.tail1b9878.ts.net/   -> edge1 wrapper :4001
+#   https://harness-edge2.tail1b9878.ts.net/   -> edge2 wrapper :4001
+#   https://harness-edge3.tail1b9878.ts.net/   -> edge3 wrapper :4001
+#   https://harness-edge4.tail1b9878.ts.net/   -> edge4 wrapper :4001
+#   https://harness-edge5.tail1b9878.ts.net/   -> edge5 wrapper :4001
+#
+# References:
+#   - PRD-v1.1 §4.1: Tailscale-only
+#   - M1c DO-1 Funnel experience (T-M1c-DO-1-iPhone-E2E-funnel.md)
+#   - codex-audit-scope §4.5: MagicDNS (no pinned IP)
+# Co-Authored-By: Claude Code <noreply@anthropic.com>
+
+https: true
+
+routes:
+  # ── newvps main node (orchestrator port 4000) ───────────────────────────────
+  # Wrapper orchestrator: routes to harness kernel + coordinates workers
+  harness-newvps.tail1b9878.ts.net:
+    to: http://127.0.0.1:4000
+
+  # ── edge1 east-1 (wrapper port 4001) ───────────────────────────────────────
+  # HTTP reverse proxy: routes to newvps kernel via MagicDNS
+  harness-edge1.tail1b9878.ts.net:
+    to: http://127.0.0.1:4001
+
+  # ── edge2 west-1 (wrapper port 4001) ───────────────────────────────────────
+  harness-edge2.tail1b9878.ts.net:
+    to: http://127.0.0.1:4001
+
+  # ── edge3 asia-1 (wrapper port 4001) ────────────────────────────────────────
+  harness-edge3.tail1b9878.ts.net:
+    to: http://127.0.0.1:4001
+
+  # ── edge4 eu-1 (wrapper port 4001) ─────────────────────────────────────────
+  harness-edge4.tail1b9878.ts.net:
+    to: http://127.0.0.1:4001
+
+  # ── edge5 sa-1 (wrapper port 4001) ─────────────────────────────────────────
+  harness-edge5.tail1b9878.ts.net:
+    to: http://127.0.0.1:4001
+
+# Auth: handled by Tailscale identity (who you are in the tailnet).
+# ACL in tailscale-acl-6host.yaml restricts which identities can reach each route.

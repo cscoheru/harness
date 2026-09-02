@@ -1,0 +1,48 @@
+# deploy/6host-compose.edge2.yml — fish-harness v1.1 M2 (T-M2-DO-1)
+#
+# Topology: west-1 edge host — wrapper orchestrator HTTP reverse proxy only
+# Security:  Tailscale Funnel HTTPS (443) → wrapper:4001
+# Role:      M2 边缘 host (west-1 region)
+#
+# M2 edge hosts (铁律):
+#   - No STT worker (whisper.cpp 仅在 newvps)
+#   - No Web Push gateway (VAPID 私钥仅在 newvps 集中管理)
+#   - Container inter-connect: use container_name (no pinned IP)
+#   - Cross-host routing: Tailscale MagicDNS (harness-newvps.tail1b9878.ts.net)
+#   - Port 4001 exposed via Tailscale Funnel
+#
+# References:
+#   - PRD-v1.1 §3 M2: 6 host distributed
+#   - codex-audit-scope §4.5: container IP 不锁; MagicDNS 跨 host
+# Co-Authored-By: Claude Code <noreply@anthropic.com>
+
+services:
+  # ── edge wrapper orchestrator (west-1) ─────────────────────────────────────
+  edge-wrapper:
+    container_name: harness-edge2-wrapper
+    image: node:22-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ../wrapper:/app/wrapper:ro
+    env_file:
+      - env/edge-host.env.example
+    environment:
+      HARNESS_API_URL: "http://harness-newvps.tail1b9878.ts.net:8000"
+      WRAPPER_PORT: "4001"
+      WORKER_ID: "${WORKER_ID:-edge2-wrapper}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
+      ORCHESTRATOR_CLASS: "orchestrator"
+      DSH_PROFILE: "headless"
+      EDGE_REGION: "west-1"
+    networks:
+      - harness_net
+    ports:
+      - "4001:4001"
+    command: ["sh", "-c", "echo 'edge2-wrapper (west-1): region=$EDGE_REGION, harness=$HARNESS_API_URL, DSH_PROFILE=$DSH_PROFILE' && sleep infinity"]
+    mem_limit: 512m
+    memswap_limit: 512m
+
+networks:
+  harness_net:
+    driver: bridge

@@ -1,0 +1,119 @@
+# deploy/tailscale-acl-6host.yaml — Tailscale ACL for M2 6 host (T-M2-DO-1)
+#
+# Scope:     6 host distributed M2 (newvps + 5 edge hosts)
+# Policy:    least-privilege; explicit allow; default deny
+# Devices:   owner device + newvps host + 5 edge hosts + iPhone Safari
+#
+# M2 扩 (vs M1c tailscale-acl.yaml):
+#   - 加 5 edge host MagicDNS names (harness-edge1-5.tail1b9878.ts.net)
+#   - 加 port 4001 (edge wrapper)
+#   - 加 port 8080 (newvps STT worker)
+#   - 加 port 8081 (newvps Web Push gateway)
+#   - 加 tag:edge for 5 edge hosts
+#   - 收紧: iPhone Safari 仅可达 Funnel 443 (不可达内部端口)
+#
+# Device tags (assigned via `tailscale set --advertise-tags` on each host):
+#   tag:harness  — newvps host (kernel + STT + Push + wrapper)
+#   tag:edge     — 5 edge hosts (wrapper only)
+#   tag:admin    — owner device (full access)
+#
+# ACL structure:
+#   - tag:admin + cscoheru: full access to everything
+#   - tag:harness: full internal access (kernel + STT + Push + 3 wrappers)
+#   - tag:edge: HTTP to newvps kernel (port 8000) + local wrapper (4001)
+#   - iPhone Safari device: Funnel 443 only (no internal port access)
+#   - Explicit deny all other traffic
+#
+# 6 Funnel HTTPS URLs (MagicDNS → local port):
+#   https://harness-newvps.tail1b9878.ts.net/  → newvps :4000
+#   https://harness-edge1.tail1b9878.ts.net/   → edge1 :4001
+#   https://harness-edge2.tail1b9878.ts.net/   → edge2 :4001
+#   https://harness-edge3.tail1b9878.ts.net/   → edge3 :4001
+#   https://harness-edge4.tail1b9878.ts.net/   → edge4 :4001
+#   https://harness-edge5.tail1b9878.ts.net/   → edge5 :4001
+#
+# PRD-v1.1 §4.1: Tailscale-only — no Basic Auth, no public HTTPS.
+# NORTH-STAR §7: Tailscale identity replaces Basic Auth.
+# Co-Authored-By: Claude Code <noreply@anthropic.com>
+
+{
+  "acls": [
+    # Owner/admin full access to everything
+    {
+      "action": "accept",
+      "src": ["tag:admin", "cscoheru"],
+      "dst": ["*:443,8000,8080,8081,4000,4001,4002,*"]
+    },
+
+    # Owner SSH to any harness/edge host
+    {
+      "action": "accept",
+      "src": ["tag:admin", "cscoheru"],
+      "dst": ["tag:harness", "tag:edge"]
+    },
+
+    # newvps host (tag:harness) internal full access
+    {
+      "action": "accept",
+      "src": ["harness-newvps", "tag:harness"],
+      "dst": ["*:443,8000,8080,8081,4000,4001,4002,*"]
+    },
+
+    # newvps internal services (kernel ↔ STT ↔ Push ↔ wrappers)
+    {
+      "action": "accept",
+      "src": ["tag:harness"],
+      "dst": ["tag:harness:*,*"]
+    },
+
+    # Edge hosts (tag:edge) can reach newvps kernel HTTP (port 8000)
+    # Edge hosts can serve local wrapper (port 4001) for Funnel
+    {
+      "action": "accept",
+      "src": ["tag:edge"],
+      "dst": ["harness-newvps:8000,443"]
+    },
+
+    # Edge hosts can talk to each other on local wrapper port 4001
+    {
+      "action": "accept",
+      "src": ["tag:edge"],
+      "dst": ["tag:edge:4001,*"]
+    },
+
+    # iPhone Safari device: Funnel 443 only (no internal port access)
+    # Replace "iphone-safari-device-id" with actual Tailscale device ID
+    # Get via: tailscale status | grep iPhone
+    {
+      "action": "accept",
+      "src": ["tag:admin"],
+      "dst": ["tag:harness:443,*", "tag:edge:443,*"]
+    },
+
+    # Explicit deny all other traffic
+    {
+      "action": "deny",
+      "src": ["*"],
+      "dst": ["*"]
+    }
+  ],
+
+  "tagOwners": {
+    "tag:harness": ["cscoheru"],
+    "tag:edge":    ["cscoheru"],
+    "tag:admin":  ["cscoheru"]
+  },
+
+  "ssh": [
+    {
+      "action": "accept",
+      "src": ["tag:admin", "cscoheru"],
+      "dst": ["tag:harness", "tag:edge"],
+      "users": ["ubuntu"]
+    }
+  ],
+
+  "derpMap": {
+    "omitDefaultRegions": false
+  }
+}

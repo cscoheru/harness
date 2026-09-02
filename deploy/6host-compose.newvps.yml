@@ -1,0 +1,211 @@
+# deploy/6host-compose.newvps.yml — fish-harness v1.1 M2 Stage (T-M2-DO-1)
+#
+# Topology: newvps co-located — kernel + STT worker + Web Push gateway + 3 wrapper profiles
+# Security:  Tailscale-only; no public ports except Tailscale Funnel HTTPS (443)
+# Runtime:   v1.0 harness kernel container is FROZEN — image tag = 1.0.0
+#
+# M2 扩 (vs M1c newvps-compose.yml):
+#   - 加 stt-worker: whisper.cpp audio→text (仅 newvps; 边缘 host 无 STT)
+#   - 加 web-push-gateway: Web Push VAPID gateway (仅 newvps; VAPID 私钥集中)
+#   - wrapper 拆为 3 profiles: orchestrator(:4000) / commander(:4001) / frontend(:4002)
+#   - ports: 8000(kernel) / 8080(stt) / 8081(push) / 4000+4001+4002(wrapper)
+#
+# References:
+#   - PRD-v1.1 §3 M2: 6 host distributed (1 newvps + 5 edge)
+#   - PRD-v1.1 §4.1: Tailscale-only
+#   - ADR 0010 Decision (d): v1.0 runtime 0-diff gate
+#   - DISPATCH-T-M2-DO-1 §3: 6 host compose
+#   - codex-audit-scope §4.5: container IP 不锁; MagicDNS 跨 host
+#   - codex-audit-scope §4.6: STT 守门 (WHISPER_MODEL_PATH 绝对路径; /dev/shm only)
+#   - codex-audit-scope §4.7: Web Push VAPID 私钥 env-inject only
+#
+# Constraints (铁律):
+#   - No hard-coded API keys (env-inject only)
+#   - Do NOT edit v1.0 harness kernel image / Dockerfile
+#   - Do NOT pin specific model SKU (use class fields)
+#   - VAPID_PRIVATE_KEY: env-inject only (do NOT commit real key)
+#   - WHISPER_MODEL_PATH: absolute path only
+#   - Container inter-connect: use container_name (no pinned IP)
+#   - STT worker: newvps only (no whisper on edge hosts)
+#   - Web Push gateway: newvps only (VAPID private key centralized)
+# Co-Authored-By: Claude Code <noreply@anthropic.com>
+
+services:
+  # ── v1.0 runtime kernel (FROZEN) ───────────────────────────────────────────
+  harness-kernel:
+    image: ghcr.io/cscoheru/fish-harness:1.0.0
+    container_name: harness-kernel
+    restart: unless-stopped
+    volumes:
+      - harness_db:/data
+    env_file:
+      - env/newvps.env.example
+    environment:
+      HARNESS_PORT: "8000"
+    networks:
+      - harness_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sqlite3; c=sqlite3.connect('/data/harness.db'); c.close(); print('ok')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    mem_limit: 512m
+    memswap_limit: 512m
+    # No host ports: internal only via compose network
+
+  # ── STT worker (M2 newvps only; whisper.cpp audio→text) ─────────────────────
+  stt-worker:
+    container_name: harness-stt-worker
+    image: node:22-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ../wrapper:/app/wrapper:ro
+      - whisper_model:/models
+    env_file:
+      - env/newvps.env.example
+    environment:
+      HARNESS_API_URL: "http://harness-kernel:8000"
+      WRAPPER_API_URL: "http://wrapper-orchestrator:4000"
+      WORKER_ID: "${WORKER_ID:-stt-worker-001}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
+      STT_CLASS: "stt-worker"
+      DSH_PROFILE: "headless"
+      # whisper.cpp model: absolute path only (hygiene §4.6)
+      # Default uses /opt/whisper-models/ (set by env WHISPER_MODEL_PATH at deploy time)
+      WHISPER_MODEL_PATH: "${WHISPER_MODEL_PATH}"
+      # Audio stream: /dev/shm only (hygiene §4.6 — no disk persistence)
+      AUDIO_TEMP_DIR: "/dev/shm/audio"
+    networks:
+      - harness_net
+    depends_on:
+      harness-kernel:
+        condition: service_healthy
+    command: ["sh", "-c", "echo 'stt-worker: model=$WHISPER_MODEL_PATH, audio_temp=$AUDIO_TEMP_DIR' && sleep infinity"]
+    mem_limit: 1024m
+    memswap_limit: 1024m
+    # whisper.cpp CPU-bound; no host ports needed
+
+  # ── Web Push gateway (M2 newvps only; VAPID private key centralized) ─────────
+  web-push-gateway:
+    container_name: harness-web-push
+    image: node:22-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ../wrapper:/app/wrapper:ro
+    env_file:
+      - env/newvps.env.example
+    environment:
+      HARNESS_API_URL: "http://harness-kernel:8000"
+      PUSH_PORT: "8081"
+      VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY:-placeholder}"
+      # VAPID_PRIVATE_KEY: env-inject only (hygiene §4.7 — never commit real key)
+      VAPID_PRIVATE_KEY: "${VAPID_PRIVATE_KEY}"
+      VAPID_MAILTO: "${VAPID_MAILTO:-mailto:admin@rana.asia}"
+    networks:
+      - harness_net
+    depends_on:
+      harness-kernel:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    command: ["sh", "-c", "echo 'web-push-gateway: VAPID private key injected=$VAPID_PRIVATE_KEY' && sleep infinity"]
+    mem_limit: 256m
+    memswap_limit: 256m
+
+  # ── wrapper orchestrator (port 4000) ─────────────────────────────────────────
+  wrapper-orchestrator:
+    container_name: harness-wrapper-orch
+    image: node:22-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ../wrapper:/app/wrapper:ro
+    env_file:
+      - env/newvps.env.example
+    environment:
+      HARNESS_API_URL: "http://harness-kernel:8000"
+      WRAPPER_PORT: "4000"
+      WORKER_ID: "${WORKER_ID:-wrapper-orchestrator}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
+      ORCHESTRATOR_CLASS: "orchestrator"
+      DSH_PROFILE: "headless"
+    networks:
+      - harness_net
+    depends_on:
+      harness-kernel:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+    command: ["sh", "-c", "echo 'wrapper-orchestrator: port=$WRAPPER_PORT, DSH_PROFILE=$DSH_PROFILE' && sleep infinity"]
+    mem_limit: 512m
+    memswap_limit: 512m
+
+  # ── wrapper commander (port 4001) ─────────────────────────────────────────────
+  wrapper-commander:
+    container_name: harness-wrapper-commander
+    image: node:22-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ../wrapper:/app/wrapper:ro
+    env_file:
+      - env/newvps.env.example
+    environment:
+      HARNESS_API_URL: "http://harness-kernel:8000"
+      WRAPPER_PORT: "4001"
+      WORKER_ID: "${WORKER_ID:-wrapper-commander}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
+      ORCHESTRATOR_CLASS: "commander"
+      DSH_PROFILE: "headless"
+    networks:
+      - harness_net
+    depends_on:
+      harness-kernel:
+        condition: service_healthy
+    ports:
+      - "4001:4001"
+    command: ["sh", "-c", "echo 'wrapper-commander: port=$WRAPPER_PORT, DSH_PROFILE=$DSH_PROFILE' && sleep infinity"]
+    mem_limit: 512m
+    memswap_limit: 512m
+
+  # ── wrapper frontend/PWA (port 4002) ────────────────────────────────────────
+  wrapper-frontend:
+    container_name: harness-wrapper-frontend
+    image: node:22-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ../wrapper:/app/wrapper:ro
+    env_file:
+      - env/newvps.env.example
+    environment:
+      HARNESS_API_URL: "http://harness-kernel:8000"
+      WRAPPER_PORT: "4002"
+      WORKER_ID: "${WORKER_ID:-wrapper-frontend}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
+      ORCHESTRATOR_CLASS: "frontend"
+      DSH_PROFILE: "headless"
+    networks:
+      - harness_net
+    depends_on:
+      harness-kernel:
+        condition: service_healthy
+    ports:
+      - "4002:4002"
+    command: ["sh", "-c", "echo 'wrapper-frontend: port=$WRAPPER_PORT, DSH_PROFILE=$DSH_PROFILE' && sleep infinity"]
+    mem_limit: 512m
+    memswap_limit: 512m
+
+networks:
+  harness_net:
+    driver: bridge
+    # No external exposure; Tailscale Funnel provides HTTPS entrypoint
+
+volumes:
+  harness_db:
+    # ADR 0009: SQLite WAL is single-host only (newvps only; not shared)
+  whisper_model:
+    # whisper.cpp GGML model files (absolute path; shared read-only)
