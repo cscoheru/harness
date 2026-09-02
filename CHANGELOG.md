@@ -63,6 +63,50 @@ Cross-ref: [ADR 0010](adr/0010-v1.1-cycle-scope-admission.md) (Accepted) + [note
 
 ---
 
+## [1.1.0] - 2026-09-02
+
+v1.1 cycle closure — 单 host newvps v1.1.0 GA tag 准备就绪 + 5 edge host 缺口挂账 user 真实 provision.
+
+Cross-ref: [ADR 0011](adr/0011-v1.1-cycle-closure.md) (Accepted, commit pending v0.5) + [notes/codex-audit-scope-v1.1-m0c-v0.5-precommit.md](notes/codex-audit-scope-v1.1-m0c-v0.5-precommit.md) (§4.5.5 单 host 现实注记 + §2.4 server-side env-inject 合规守门 + §3.3 ADR 0011 closure 合规) + [docs/DISPATCH-T-M3-DISPATCH.md](docs/DISPATCH-T-M3-DISPATCH.md) (§3 M3 路径选择 A 单 host 推荐 / B 6 host 备选).
+
+### Added
+
+- **ADR 0011 closure** (`adr/0011-v1.1-cycle-closure.md`, Status=Accepted): 单 host newvps v1.1.0 GA 门槛 + 5 edge host 缺口挂账 user 真实 provision + v0.5 audit-scope 守门机制落地（5 条 hard rule + 引用式纪律）
+- **CHANGELOG [1.1.0] GA 段 + README v1.1 final 段** — v1.1 周期 closure 文档化
+- **v1.1 GA plan v0.3 → v0.4** — M3 GA final 收口 + 5 edge host 缺口挂账 user + §10.4 v1.1 GA tag 升级门槛
+- **v0.5 audit-scope + prompt** (`notes/codex-audit-scope-v1.1-m0c-v0.5-{precommit,precommit-prompt}.md`) — 8 文件改动 hygiene 自检表 + 引用式纪律 + 自引入预演入列
+- **DISPATCH-T-M3-DISPATCH** (`docs/DISPATCH-T-M3-DISPATCH.md`) — M3 GA final 任务书 + 单 host 现实注记 + 路径 A vs B 决策框架
+
+### Changed
+
+- v1.1 周期 21 commits 链（M0b 11 + v0.4 8 + v0.5 准备 2）锚定 closure
+- v1.1 M3 阶段路径 = 路径 A 单 host v1.1 GA（推荐）+ 路径 B 6 host v1.1 GA（备选，等 user 真实 provision）
+
+### Gates Passed
+
+- v0.4 Codex formal PASS 0C/0M/0m（commit `a1f8e82`，§7 177 行五轮结构）
+- v0.5 audit-scope 8 文件改动 hygiene 自检表 PASS（pending Codex 复审 PASS）
+- v1.0 runtime 0 行 diff 守门 PASS（commit `ab8749a` 后 harness/spec/spikes/9 ADR body/Dockerfile/docker-compose.yml/pyproject.toml 0 漂移）
+- ADR ≥ 0010 immutable 守门 PASS（ADR 0011 是新 ADR ≥ 0010 非冻结对象）
+- §4.5.5 单 host 现实注记落地 PASS（5 edge host 缺口挂账 user 真实 provision）
+
+### Hygiene
+
+- 不锁型号（NORTH-STAR A-4 等价类）：v0.5 升级前向交付物按 §1 等价类 grep pattern 实测 = 0 行
+- 不硬编码 API key：grep `sk-[a-z0-9]{32,}` = 0 行（DEEPSEEK_API_KEY env-inject only）
+- VAPID 私钥不入 commit：grep `VAPID_PRIVATE\s*[:=]` = 0 行
+- tracked 锚定 post-v0.5 起草 = 引用式 `audit-scope §1.5 主表合计`（per Codex v0.4 §7.3 ② 引用式纪律）
+
+### Notes
+
+- **单 host v1.1 GA tag 准备就绪** — fish-harness on newvps 已 production-ready（容器 Up + Funnel `harness-newvps.tail1b9878.ts.net` 在线 + 11 commits 链 + v0.4 Codex formal PASS）
+- **5 edge host 缺口挂账 user 真实 provision** — `tailscale status` 实测仅 2 节点（`harness-newvps` 100.103.132.72 + `fish-harness-newvps` 100.99.5.90），east-1/west-1/asia-1/eu-1/sa-1 非真实机器；session 内 autonomous agent 无能力 provision VPS + 无 Tailscale auth key + 无 env vars
+- **v0.5 hard rule 5 条内化（per Codex §7.3 ② 升级）**：先行起草 / commit 后立即复审 / 自引入预演入列 / commit message 附实测数 / 引用式纪律（防漂移回归）
+- **v1.1.0 GA tag** = user 亲提 `git tag -a v1.1.0 -m "v1.1.0 GA: 单 host newvps + M2 三守门启用"`，push via Clash proxy
+- M2 实施包 + v0.4 升级链 + v0.5 升级准备 = 21 commits 总（per ADR 0011 Cross-ref）
+
+---
+
 ## [1.1.0-M2] - 2026-09-02
 
 M2 阶段 — 6 host 分布式部署 + STT whisper.cpp 集成 + Web Push VAPID gateway + 6 Funnel E2E 实测通过。
@@ -448,6 +492,7 @@ The 7 v0.9 ADRs all gain a `v1.0 Status: Included in GA` footer in
 [T-DD-6](docs/v1.0-ga-team-plan.md).
 
 [Unreleased]: # (next minor; v1.0.1)
+[1.1.0]: # (2026-09-02)
 [1.1.0-M2]: # (2026-09-02)
 [1.1.0-M1c]: # (2026-09-02)
 [1.1.0-M0c]: # (2026-09-02)

@@ -377,6 +377,66 @@ curl -sI https://harness-newvps.tail1b9878.ts.net/health
 # 期望: HTTP/2 200
 ```
 
+### v1.1 final（2026-09-02 — 单 host v1.1 GA tag 准备就绪）
+
+v1.1 周期 closure：单 host newvps v1.1.0 GA tag 准备就绪 + 5 edge host 缺口挂账 user 真实 provision。
+
+Cross-ref: [ADR 0011](adr/0011-v1.1-cycle-closure.md) (Accepted) + [docs/DISPATCH-T-M3-DISPATCH.md](docs/DISPATCH-T-M3-DISPATCH.md) (§3 M3 路径选择 A 单 host 推荐 / B 6 host 备选).
+
+#### 单 host v1.1 GA 部署现状（per ADR 0011 Decision 1）
+
+fish-harness on newvps 已 production-ready：
+
+- **newvps 主节点**（207.57.134.99:16921 via `ssh puer-hk`）：`harness-kernel/wrapper/worker` 三容器 Up
+- **Tailscale Funnel HTTPS 入口**：[`https://harness-newvps.tail1b9878.ts.net/`](https://harness-newvps.tail1b9878.ts.net/) → proxy http://127.0.0.1:4000
+- **11 commits 链**（`9f5ef4b` → ... → `5b3d263`）+ **v0.4 升级链**（`794060e` → ... → `a1f8e82`）+ **v0.5 升级准备** = 21 commits 总
+- **v0.4 Codex formal PASS** 0C/0M/0m（commit `a1f8e82`，§7 177 行五轮结构）
+- **ADR 0011 closure Status=Accepted**（单 host v1.1 GA + 5 edge host 缺口挂账 user 真实 provision）
+
+#### 5 edge host 缺口挂账 user 真实 provision（per ADR 0011 Decision 2）
+
+M2 设计 6 host 拓扑（1 newvps + 5 edge east-1/west-1/asia-1/eu-1/sa-1），但 `tailscale status` 实测仅 2 节点：
+
+| Tailscale 节点 | IP | 状态 |
+|----------------|-----|------|
+| `harness-newvps` | 100.103.132.72 | ✅ real machine |
+| `fish-harness-newvps` | 100.99.5.90 | ✅ real machine |
+| `harness-edge1` (east-1) | — | ❌ 非真实机器（`deploy/6host-compose.edge1.yml` 仅配置）|
+| `harness-edge2` (west-1) | — | ❌ 非真实机器 |
+| `harness-edge3` (asia-1) | — | ❌ 非真实机器 |
+| `harness-edge4` (eu-1) | — | ❌ 非真实机器 |
+| `harness-edge5` (sa-1) | — | ❌ 非真实机器 |
+
+session 内 autonomous agent 无能力 provision VPS + 不持有 Tailscale auth key + 无 DEEPSEEK_API_KEY/VAPID_PRIVATE_KEY。**5 edge host 缺口 = 结构性不可达**，挂账 user 真实 provision（VPS 采购 + Tailscale 节点加入 + Funnel 配置 + Docker Compose 部署）。
+
+列入 v1.1+ 周期 roadmap（per ADR 0011 Consequences Positive）。
+
+#### v1.1.0 GA tag 路径选择（per `docs/DISPATCH-T-M3-DISPATCH.md` §3）
+
+| 路径 | 描述 | 状态 |
+|------|------|------|
+| **路径 A（推荐）** | 单 host v1.1 GA：fish-harness on newvps 已 production-ready → **v1.1.0 GA tag 可立即执行** | 5 edge host 缺口挂账 user |
+| 路径 B（备选）| 6 host v1.1 GA：等 user 真实 provision 5 edge host 后再 tag | M3 GA final 暂停至 provision 完成 |
+
+**推荐路径 A**：ADR 0010 Decision (b) v1.1+ 周期「GA final ≠ all features shipped」原则；6 host 拓扑是 v1.1 architecture target 而非 v1.1 release blocker。
+
+#### v0.5 audit-scope 守门机制（per ADR 0011 Decision 3）
+
+- (a) 先行起草 — audit-scope §1/§1.5/§4.5/§6 在 commit 任何 audit-scope 引用文件之前
+- (b) commit 后立即复审 — commit 后 24h 内必跑 §2 验收命令矩阵
+- (c) 自引入预演入列 — 执行书/报告含 grep 字面时 commit 前必在 audit-scope §1.5 主表预演 #N+1 行
+- (d) commit message 附实测数 — 必含 §1 锚定实测数
+- (e) 引用式纪律（per Codex v0.4 §7.3 ② 升级）— prompt/报告凡引用锚定数字必走「audit-scope §1.5 主表唯一权威源」引用式，不复制绝对数字（防漂移回归）
+
+#### v1.1.0 GA tag（user 亲提 + push）
+
+```bash
+# user 亲提：
+git tag -a v1.1.0 -m "v1.1.0 GA: 单 host newvps + M2 三守门启用 + 5 edge host 缺口挂账 user"
+# push via Clash proxy：
+git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin v1.1.0
+```
+
 ### 文档索引
 
 - [`docs/v1.1-ga-team-plan.md`](docs/v1.1-ga-team-plan.md) — v1.1 GA 团队开发计划 (M0c/M1/M2/M3 阶段)
