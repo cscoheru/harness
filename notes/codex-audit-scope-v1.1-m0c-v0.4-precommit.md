@@ -73,17 +73,17 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.4-prec
 - ✅ #45 T-M2-QA-1 test-plan 2 行（§Author 尾注 + §不锁型号守门描述）
 - ✅ #46 T-M2-V0.4-GATE-CALIB 执行书 4 行（v0.4 GATE-CALIB 修复 commit 277cdf8 自引入：§3 验收命令 grep pattern 字面 ×4；per v0.3 #39 即时入主表先例补列；Codex formal 报告 §5.2 F-1 第八次锚定漂移教训）
 - ✅ #47 T-M2-V0.4-HYGIENE-FIX-2 执行书 2 行（v0.4 HYGIENE-FIX-2 commit `ed36bd7` 自引入预演 2 行实测：§2 验收命令 grep pattern 字面 ×2；FIX-2 修复 commit 自带执行书 pattern 字面，按 v0.3 #39 / v0.4 #46 即时入主表先例补列）
-- 🆕 #48 T-M2-V0.4-PROMPT-SYNC 执行书 3 行预演（PROMPT-SYNC commit 自带执行书 pattern 字面预计命中：§2 验收 (a) `grep -cE "Fable 5..."` ×1 + (b) `grep -rE "Fable 5..." ` ×1 + (c) `grep -rE "Fable 5..." CHANGELOG.md README.md` ×1（H1 收窄后命令同步）；per v0.5 hard rule (c) commit 前预演入列；commit 后以实测为准 → 终态 103 + 3 = 106 / 47 文件）
-- 总计：**46 文件 103 行（FIX-2 实测 / 2026-09-02 + #48 PROMPT-SYNC 预演 3 行待实测）/ 终态预估 106 / 47 文件（PROMPT-SYNC commit 后）**
+- 🆕 #48 T-M2-V0.4-PROMPT-SYNC 执行书 4 行实测（PROMPT-SYNC commit 59ccce0 实测命中 4 行：§2 验收 (a) `grep -cE "Fable 5..."` ×1 + (b) `grep -rE "Fable 5..."` ×1 + (c) `grep -rE "Fable 5..." CHANGELOG.md README.md` ×1（H1 收窄命令同步）+ (d) prompt §3#4 新增 `grep -rE "Fable 5..." CHANGELOG.md README.md` ×1；per v0.5 hard rule (c) commit 前预演入列 + (b) commit 后立即复审；预演 3 行实测 4 行 +1 漂移已修）
+- 总计：**47 文件 107 行（FIX-2 实测 / 2026-09-02 + #48 PROMPT-SYNC 实测 4 行）/ commit 后实测 107 / 47 文件**
 
 **tracked 重锚 post-M2 实测公式**（2026-09-02 FIX-2 后重测）：
 - v0.3 post-stage: 85（37 文件 docs/adr/spec/capabilities + 2 文件 notes 自伤 = 39 文件 85 行；M2 5 DISPATCH 起草 6 行已含入 85，不重复计）
 - + M2 实施报告群 12: BE-1 rep 3 + TG-1 rep 2 + DO-1 rep 2 + DD-1 rep 2 + QA-1 rep 1 + QA-1 test-plan 2
 - + #46 GATE-CALIB exec 自引入 4（per v0.3 #39 即时入列先例；Codex formal 报告 §5.2 F-1 复审确认）
 - + #47 HYGIENE-FIX-2 exec 自引入 2（per v0.3 #39 / v0.4 #46 即时入列先例；FIX-2 commit `ed36bd7` 自带执行书 pattern 字面实测）
-- + #48 PROMPT-SYNC exec 自引入预演 3（per v0.5 hard rule (c) commit 前预演入列；PROMPT-SYNC commit 后实测以终态 103 + 3 = 106 为准）
+- + #48 PROMPT-SYNC exec 自引入预演 3（per v0.5 hard rule (c) commit 前预演入列；PROMPT-SYNC commit 后实测以终态 103 + 4 = 107 为准，预演 3 实测 4 +1 漂移已修）
 - + v0.4 audit-scope/prompt 自伤 ~3（notes 自伤豁免，不入主合同）
-- **实测 post-commit: 85 + 12 + 4 + 2 = 103 行（45 文件）→ 终态预估 103 + 3 = 106 行（47 文件）PROMPT-SYNC commit 后**
+- **实测 post-commit: 85 + 12 + 4 + 2 = 103 行（45 文件）→ 实测终态 103 + 4 = 107 行（47 文件）PROMPT-SYNC commit 59ccce0 后**
 - 验收命令：`git ls-files docs/ adr/ spec/capabilities/ | xargs grep -cE "Fable 5|GLM 5.3|MiniMax-M3" 2>/dev/null | grep -v ":0$" | awk -F: '{s+=$NF} END{print s}'` 实测 == 103
 
 **豁免口径不变**（per M0b plan §3 L89 C2 裁定 + v0.3 §1.5 末段）：**不清洗历史文档**（考古记录 + git 尾注 + DISPATCH §4 验证命令字面均保留）。
@@ -236,7 +236,7 @@ grep -rE "https://fcm\.googleapis\.com|https://updates\.push\.services\.mozilla\
 - §4.5 M2 多 host 守门正式启用（v0.3 §4.5 "预备" → v0.4 §4.5 "正式启用"；GATE-CALIB 校准：IP 排除 node_modules + H5 pattern `[a-z][a-z0-9-]*`）
 - §4.6 M2 STT 守门正式启用（v0.3 §4.6 "预备" → v0.4 §4.6 "正式启用"；GATE-CALIB 校准：tmp 排除 test/ + whisper pattern `[^/$]` 排除 `${`）
 - §4.7 M2 Web Push 守门正式启用（v0.3 §4.7 "预备" → v0.4 §4.7 "正式启用"；GATE-CALIB 校准：VAPID 公钥期望反向 == 0，env-inject-only 较"可入 commit"更严）
-- 历史文档豁免口径锚定（tracked 重锚 post-M2 = 103，实测 45 文件 103 行 / 2026-09-02 FIX-2 后重测；演进链：91 预估 → 97 CALIB → 101/103 FIX-2；v0.3 85 + M2 实施报告群 12 + GATE-CALIB exec 4 + FIX-2 exec 2 = 103；M2 起草 6 已在 85 内含不重复计；PROMPT-SYNC #48 自引入预演 3 行待实测）
+- 历史文档豁免口径锚定（tracked 重锚 post-M2 = 103，实测 45 文件 103 行 / 2026-09-02 FIX-2 后重测；演进链：91 预估 → 97 CALIB → 101/103 FIX-2 → 107 PROMPT-SYNC 实测；v0.3 85 + M2 实施报告群 12 + GATE-CALIB exec 4 + FIX-2 exec 2 + PROMPT-SYNC exec 4 = 107；47 文件；M2 起草 6 已在 85 内含不重复计）
 - Codex 提交铁律：用户亲提 `gpt-5.6-sol` + `xhigh`；Claude 不亲提
 - 下一站：v0.4 升级 PASS → M3 阶段 GA final 准备（v1.1 周期收口）
 
@@ -260,6 +260,6 @@ grep -rE "https://fcm\.googleapis\.com|https://updates\.push\.services\.mozilla\
 
 ---
 
-*hygiene audit-scope — v0.4 升级 6 文件改动守门 by-design（grep 字面移到 notes/；范围限定前向交付物口径 CHANGELOG.md + README.md + docs/reports/T-M2-DD-1-report.md）；启用 §4.5/§4.6/§4.7 M2 三守门从"预备"到"正式"（v0.3 起草时 M2 未实施，v0.4 启用时 M2 5 DISPATCH 均已 commit）；继承 v0.3 §1.5 历史文档豁免清单 37 文件 85 行 + tracked 重锚 post-M2 实测 103（v0.4 FIX-2 commit `ed36bd7` 后实测）/ 预估 106（v0.4 PROMPT-SYNC 后实测为准，#48 自引入预演 3 行）+ §4.5 IP 白名单注记 + §7 教训记档（第八次锚定事故）+ §1.5 #46/#47 即时入列先例*
+*hygiene audit-scope — v0.4 升级 6 文件改动守门 by-design（grep 字面移到 notes/；范围限定前向交付物口径 CHANGELOG.md + README.md + docs/reports/T-M2-DD-1-report.md）；启用 §4.5/§4.6/§4.7 M2 三守门从"预备"到"正式"（v0.3 起草时 M2 未实施，v0.4 启用时 M2 5 DISPATCH 均已 commit）；继承 v0.3 §1.5 历史文档豁免清单 37 文件 85 行 + tracked 重锚 post-M2 实测 107（v0.4 PROMPT-SYNC commit `59ccce0` 后实测 47 文件 / 预演 3 实测 4 +1 漂移已修）+ §4.5 IP 白名单注记 + §7 教训记档（第八次锚定事故）+ §1.5 #46/#47/#48 即时入列先例*
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>
