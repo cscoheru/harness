@@ -2,8 +2,8 @@
 // M0c 阶段 1 骨架轮 - mock dsh，不真调 dsh CLI
 import { describe, it, expect, vi } from 'vitest';
 
-// Mock dsh CLI (不真调)
-vi.mock('../src/dsh_client', () => ({
+// Mock dsh CLI (不真调; vi.mock 路径需要 .ts 后缀以匹配 moduleResolution=node16)
+vi.mock('../../dsh/dsh_client.ts', () => ({
   dshInvoke: vi.fn().mockResolvedValue({
     stdout: '{"status":"ok","trace_id":"mock-trace-001"}',
     stderr: '',
@@ -11,8 +11,6 @@ vi.mock('../src/dsh_client', () => ({
   }),
   dshHealth: vi.fn().mockResolvedValue({ status: 'ok' }),
 }));
-
-import { dshInvoke, dshHealth } from '../../src/dsh_client';
 
 describe('dsh_client (integration, mock)', () => {
   it('health returns 200', async () => {
