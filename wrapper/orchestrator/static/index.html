@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fish Harness — PWA Dispatch</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --border: #334155;
+      --accent: #38bdf8;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --success: #4ade80;
+      --error: #f87171;
+      --warn: #fbbf24;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2rem;
+      width: 100%;
+      max-width: 520px;
+    }
+
+    h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+      color: var(--accent);
+    }
+
+    .subtitle {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 1.5rem;
+    }
+
+    label {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 0.4rem;
+    }
+
+    select {
+      width: 100%;
+      padding: 0.6rem 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.9rem;
+      margin-bottom: 1rem;
+      appearance: none;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 120px;
+      padding: 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.9rem;
+      resize: vertical;
+      font-family: inherit;
+    }
+
+    textarea:focus {
+      outline: 2px solid var(--accent);
+      border-color: var(--accent);
+    }
+
+    button {
+      width: 100%;
+      padding: 0.75rem;
+      background: var(--accent);
+      color: #0f172a;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 1rem;
+      transition: opacity 0.15s;
+    }
+
+    button:hover { opacity: 0.85; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    #taskId {
+      margin-top: 1rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      word-break: break-all;
+    }
+
+    #statusBox {
+      margin-top: 1rem;
+      padding: 0.75rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      display: none;
+    }
+
+    #statusBox.pending  { display: block; background: #1e293b; border: 1px solid var(--border); }
+    #statusBox.running  { display: block; background: #1c2a1c; border: 1px solid #4ade80; color: var(--success); }
+    #statusBox.completed { display: block; background: #0f2a1c; border: 1px solid #4ade80; }
+    #statusBox.failed   { display: block; background: #2a1c1c; border: 1px solid var(--error); color: var(--error); }
+
+    #resultBox {
+      margin-top: 0.75rem;
+      padding: 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+      display: none;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid #0f172a;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 0.4rem;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Fish Harness Dispatch</h1>
+    <p class="subtitle">iPhone 文字派工 — 24h 内完成</p>
+
+    <label for="classSelect">能力档位</label>
+    <select id="classSelect">
+      <option value="orch">Orch — 调研分析</option>
+      <option value="commander">Commander — 改代码</option>
+      <option value="worker">Worker — 摘要执行</option>
+    </select>
+
+    <label for="promptInput">任务描述（中文 / 英文均可）</label>
+    <textarea id="promptInput" placeholder="调研 React 19 新特性，或：帮我找 xxx bug 的根因…"></textarea>
+
+    <button id="submitBtn" onclick="handleSubmit()">提交任务</button>
+
+    <p id="taskId"></p>
+
+    <div id="statusBox"></div>
+    <div id="resultBox"></div>
+  </div>
+
+  <script>
+    const API_BASE = window.location.origin;
+    let pollTimer = null;
+    let currentTaskId = null;
+
+    async function handleSubmit() {
+      const btn = document.getElementById('submitBtn');
+      const prompt = document.getElementById('promptInput').value.trim();
+      const cls = document.getElementById('classSelect').value;
+
+      if (!prompt) {
+        showStatus('failed', '请输入任务描述');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = '提交中…';
+      clearInterval(pollTimer);
+      document.getElementById('resultBox').style.display = 'none';
+      document.getElementById('resultBox').textContent = '';
+      document.getElementById('taskId').textContent = '';
+
+      try {
+        const res = await fetch(`${API_BASE}/api/pwa/dispatch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, class: cls }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          showStatus('failed', `错误: ${data.error ?? res.statusText}`);
+          btn.disabled = false;
+          btn.textContent = '提交任务';
+          return;
+        }
+
+        currentTaskId = data.task_id;
+        document.getElementById('taskId').textContent = `任务 ID: ${currentTaskId}`;
+        showStatus('pending', '任务已提交，等待调度…');
+        pollStatus(currentTaskId);
+      } catch (err) {
+        showStatus('failed', `网络错误: ${err.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '提交任务';
+      }
+    }
+
+    async function pollStatus(taskId) {
+      pollTimer = setInterval(async () => {
+        try {
+          const res = await fetch(`${API_BASE}/api/pwa/status/${encodeURIComponent(taskId)}`);
+          if (!res.ok) return;
+
+          const data = await res.json();
+          showStatus(data.status, statusLabel(data.status));
+
+          if (data.status === 'completed') {
+            clearInterval(pollTimer);
+            showResult(data.result, data.wallMs);
+          } else if (data.status === 'failed') {
+            clearInterval(pollTimer);
+            showResult(null, null, data.error);
+          }
+        } catch {
+          // ignore poll errors
+        }
+      }, 3000);
+    }
+
+    function showStatus(status, label) {
+      const box = document.getElementById('statusBox');
+      box.className = status;
+      box.textContent = status === 'pending' || status === 'running'
+        ? '⏳ ' + label
+        : label;
+    }
+
+    function showResult(result, wallMs, error) {
+      const box = document.getElementById('resultBox');
+      box.style.display = 'block';
+      // Prefer explicit error param; fall back to result text if it looks like an error
+      const displayError = error || (result && result.startsWith('\n') ? result.trim() : null);
+      if (displayError) {
+        box.style.color = 'var(--error)';
+        box.textContent = `执行失败: ${displayError}`;
+      } else {
+        box.style.color = 'var(--text)';
+        const ms = wallMs ? ` (耗时 ${(wallMs / 1000).toFixed(1)}s)` : '';
+        box.textContent = result
+          ? `[完成]${ms}\n${result.slice(0, 2000)}${result.length > 2000 ? '\n…(截断)' : ''}`
+          : `[完成]${ms}\n(无文本输出)`;
+      }
+    }
+
+    function statusLabel(s) {
+      return {
+        pending: '任务已提交',
+        running: '执行中…',
+        completed: '✅ 完成',
+        failed: '❌ 失败',
+        cancelled: '已取消',
+      }[s] ?? s;
+    }
+  </script>
+</body>
+</html>

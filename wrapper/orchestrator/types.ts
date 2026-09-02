@@ -378,3 +378,30 @@ export interface OrchestrationResult {
   output: Record<string, unknown> | null;
   error: string | null;
 }
+
+// ─── PWA Dispatch Contract ─────────────────────────────────────────────────────
+
+/** PWA form → orchestrator: POST /api/pwa/dispatch */
+export interface DispatchRequest {
+  /** User's free-text prompt */
+  prompt: string;
+  /** Capability class: "orch" | "commander" | "worker". Defaults to "orch". */
+  class?: string;
+  /** Optional workflow pack name */
+  workflowPack?: string;
+}
+
+/** PWA form ← orchestrator: POST /api/pwa/dispatch response */
+export interface DispatchResponse {
+  task_id: string;
+  status: TaskStatus;
+}
+
+/** PWA status polling: GET /api/pwa/status/{task_id} response */
+export interface StatusResponse {
+  task_id: string;
+  status: TaskStatus;
+  result?: string;
+  error?: string;
+  wallMs?: number;
+}
