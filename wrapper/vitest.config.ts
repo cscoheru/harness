@@ -1,14 +1,35 @@
-// T-M0c-QA-1: vitest minimal config
-// match: wrapper/test/**/*.test.ts
+// T-M1c-QA-1: vitest config with coverage + integration filter
+// match: wrapper/test/**/*.test.ts (unit + integration)
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    // match all test files under wrapper/test/
-    include: ['test/**/*.test.ts'],
-    // minimal config — vitest requires zero config by default
+    // match unit + integration test files under wrapper/test/
+    // Exclude e2e/ — Playwright runs separately via npm run test:e2e:smoke
+    include: ['test/unit/**/*.test.ts', 'test/integration/**/*.test.ts'],
+    // passWithNoTests: allow empty test files
     passWithNoTests: true,
-    // allow test.todo() to count as passing
+    // allowOnly: allow test.todo() to count as passing
     allowOnly: true,
+    // Coverage thresholds (M1c QA-1 gate: ≥ 80%)
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      include: [
+        'orchestrator/**/*.ts',
+        'dsh/**/*.ts',
+      ],
+      exclude: [
+        '**/*.test.ts',
+        '**/*.d.ts',
+        'vitest.config.ts',
+      ],
+      thresholds: {
+        lines: 80,
+        functions: 80,
+        branches: 80,
+        statements: 80,
+      },
+    },
   },
 });
