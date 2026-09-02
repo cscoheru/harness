@@ -26,8 +26,15 @@ import {
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Absolute path to the project root (three levels up from build/dsh/). */
-const PROJECT_ROOT = resolve(import.meta.dirname, '..', '..', '..');
+/**
+ * Absolute path to the project root.
+ *
+ * Resolution: `process.cwd()` is the wrapper/ directory (vitest default + npm run build),
+ * so one `..` reaches the fish-harness project root containing docs/m0b/.
+ *
+ * This avoids `import.meta.dirname` ambiguity between src (wrapper/dsh/) and build (wrapper/build/dsh/).
+ */
+const PROJECT_ROOT = resolve(process.cwd(), '..');
 
 /** dsh base profile override — enables A-class tools. */
 export const BASE_PATCH_PATH = resolve(PROJECT_ROOT, 'docs', 'm0b', 'profile-override-base.yaml');

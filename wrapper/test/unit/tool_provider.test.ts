@@ -88,43 +88,43 @@ describe('tool_provider unit', () => {
   // ── invoke() ─────────────────────────────────────────────────────────────
 
   describe('invoke()', () => {
-    it('returns ToolInvokeResult with correct capabilityId', () => {
+    it('returns ToolInvokeResult with correct capabilityId', async () => {
       const provider = new DshToolProvider({ capabilityId: 'test.capability' });
       const req = makeRequest({ capabilityId: 'test.capability' });
-      const result = provider.invoke(req);
+      const result = await provider.invoke(req);
       expect(result.capabilityId).toBe('test.capability');
     });
 
-    it('returns result object with stub=true', () => {
+    it('returns result object with stub=true', async () => {
       const provider = new DshToolProvider();
-      const result = provider.invoke(makeRequest());
+      const result = await provider.invoke(makeRequest());
       expect(isToolInvokeResult(result)).toBe(true);
       expect(result.result).toBeDefined();
     });
 
-    it('result includes attemptId from request', () => {
+    it('result includes attemptId from request', async () => {
       const provider = new DshToolProvider();
       const req = makeRequest({ attemptId: 'my-attempt-999' });
-      const result = provider.invoke(req);
+      const result = await provider.invoke(req);
       expect((result.result as Record<string, unknown>).attemptId).toBe('my-attempt-999');
     });
 
-    it('result includes taskId from request', () => {
+    it('result includes taskId from request', async () => {
       const provider = new DshToolProvider();
       const req = makeRequest({ taskId: 'my-task-xyz' });
-      const result = provider.invoke(req);
+      const result = await provider.invoke(req);
       expect((result.result as Record<string, unknown>).taskId).toBe('my-task-xyz');
     });
 
-    it('returns undefined denialReason (stub allows all)', () => {
+    it('returns undefined denialReason (stub allows all)', async () => {
       const provider = new DshToolProvider();
-      const result = provider.invoke(makeRequest());
+      const result = await provider.invoke(makeRequest());
       expect(result.denialReason).toBeUndefined();
     });
 
-    it('returns undefined artifactId (stub)', () => {
+    it('returns undefined artifactId (stub)', async () => {
       const provider = new DshToolProvider();
-      const result = provider.invoke(makeRequest());
+      const result = await provider.invoke(makeRequest());
       expect(result.artifactId).toBeUndefined();
     });
 
