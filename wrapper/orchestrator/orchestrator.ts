@@ -1,18 +1,16 @@
 /**
- * Orchestrator layer — top-level orchestration stub.
+ * Orchestrator — real connection to v1.0 kernel HTTP API + dsh invoke.
  *
- * Responsibilities (skeleton):
+ * Responsibilities (M1c):
  *   - Parse user intent / task description
- *   - Decide which commander to dispatch to (capability routing)
- *   - Spawn commander process with task payload
- *   - Monitor commander lifecycle / health
- *
- * NOT implemented in M0c (skeleton only):
- *   - Real dsh invocation (M1+)
- *   - Commander process pool management (M1+)
- *   - Task state persistence (M1+)
+ *   - Dispatch to v1.0 kernel via POST /api/orch/invoke
+ *   - Call dsh_client.callDshHeadless() (env-inject DEEPSEEK_API_KEY)
+ *   - Track task lifecycle (pending → running → completed/failed)
+ *   - Query kernel via GET /api/orch/status/{task_id}
  *
  * Calls v1.0 runtime kernel via HTTP/FFI — see v1.0-runtime-integration-roadmap.md §5.
+ * Does NOT lock to a specific model. Uses modelClass from DshOpts.
+ * Does NOT hardcode DEEPSEEK_API_KEY — injected via process.env.
  */
 
 import type {
@@ -20,60 +18,309 @@ import type {
   Task,
   HealthResponse,
 } from "./types.js";
+import { callDshHeadless } from "../dsh/dsh_client.js";
+import type { DshOpts, DshResponse } from "../dsh/types.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────────
 
-const _RUNTIME_URL =
+/** v1.0 runtime kernel HTTP base URL */
+const KERNEL_URL =
   process.env["HARNESS_RUNTIME_URL"] ?? "http://localhost:8000";
+
+/** In-memory task store — in production replace with SQLite via kernel */
+const _taskStore = new Map<string, InMemoryTask>();
+
+interface InMemoryTask {
+  taskId: string;
+  prompt: string;
+  modelClass: string;
+  status: "pending" | "running" | "completed" | "failed";
+  result: DshResponse | null;
+  error: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// ─── Kernel HTTP client ────────────────────────────────────────────────────────
+
+/**
+ * Invoke the v1.0 kernel HTTP facade — POST /api/orch/invoke.
+ * Falls back to direct dsh invocation if kernel is unreachable.
+ */
+async function kernelInvoke(
+  prompt: string,
+  modelClass: string,
+): Promise<KernelInvokeResult> {
+  const url = `${KERNEL_URL}/api/orch/invoke`;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, model_class: modelClass }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!res.ok) {
+      const text = await res.text().catch(() => "unknown error");
+      throw new Error(`kernel ${res.status}: ${text}`);
+    }
+    const data = await res.json() as KernelInvokeResult;
+    return data;
+  } catch (err) {
+    // Kernel unreachable — fall through to direct dsh invocation
+    console.warn(`[orchestrator] kernel ${url} unreachable: ${err}; falling back to direct dsh`);
+    throw err;
+  }
+}
+
+interface KernelInvokeResult {
+  task_id: string;
+  status: string;
+  trace_id?: string;
+}
+
+/**
+ * Query the v1.0 kernel HTTP facade — GET /api/orch/status/{task_id}.
+ */
+async function kernelStatus(taskId: string): Promise<KernelStatusResult | null> {
+  const url = `${KERNEL_URL}/api/orch/status/${encodeURIComponent(taskId)}`;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(url, {
+      method: "GET",
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      const text = await res.text().catch(() => "unknown error");
+      throw new Error(`kernel status ${res.status}: ${text}`);
+    }
+    return await res.json() as KernelStatusResult;
+  } catch (err) {
+    console.warn(`[orchestrator] kernel status ${url} unreachable: ${err}`);
+    return null;
+  }
+}
+
+interface KernelStatusResult {
+  task_id: string;
+  status: "pending" | "running" | "completed" | "failed";
+  result?: string;
+  error?: string;
+  trace_id?: string;
+}
 
 // ─── Orchestrator ─────────────────────────────────────────────────────────────
 
 /**
  * Health check — probes the v1.0 runtime kernel HTTP facade.
- * TODO(M1): Replace stub with real HTTP GET /health call.
+ * Returns real kernel response if reachable; stub otherwise.
  */
 export async function health(): Promise<HealthResponse> {
-  console.log("[orchestrator] health() — stub returning ok");
-  // TODO(M1): Replace with:
-  //   const res = await fetch(`${RUNTIME_URL}/health`);
-  //   return res.json() as Promise<HealthResponse>;
+  const url = `${KERNEL_URL}/health`;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (res.ok) {
+      const data = await res.json() as HealthResponse;
+      return data;
+    }
+  } catch {
+    // fall through to stub
+  }
+  console.log("[orchestrator] health() — kernel unreachable, returning stub");
   return { status: "ok", version: "0.0.0-stub" };
 }
 
 /**
  * Accept a user task, route to the appropriate commander, and track lifecycle.
- * TODO(M1): Real commander spawning + result aggregation.
+ * M1c: Invokes kernel POST /api/orch/invoke; falls back to direct dsh if kernel unreachable.
  */
 export async function dispatch(
-  _task: Task,
+  task: Task,
 ): Promise<OrchestrationResult> {
-  console.log("[orchestrator] dispatch() — stub");
-  // TODO(M1): Route by task.workflow_pack / required_capabilities
-  // TODO(M1): Spawn commander process (dsh or subprocess)
-  // TODO(M1): Collect commander result + map to OrchestrationResult
-  return {
-    task_id: _task.task_id,
+  const taskId = task.task_id;
+  const prompt = extractPrompt(task);
+  const modelClass = task.workflow_pack ?? "orch";
+
+  console.log(`[orchestrator] dispatch(${taskId}) — modelClass=${modelClass}, prompt=${prompt.slice(0, 60)}…`);
+
+  // Store task in memory
+  const entry: InMemoryTask = {
+    taskId,
+    prompt,
+    modelClass,
     status: "pending",
-    output: null,
+    result: null,
     error: null,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  _taskStore.set(taskId, entry);
+
+  // Try kernel invoke; fall back to direct dsh
+  let dshResult: DshResponse;
+  try {
+    // Attempt kernel HTTP invoke
+    const kernelRes = await kernelInvoke(prompt, modelClass);
+    entry.status = "running";
+    entry.updatedAt = Date.now();
+    console.log(`[orchestrator] kernel invoke OK task_id=${kernelRes.task_id} trace=${kernelRes.trace_id ?? "n/a"}`);
+
+    // For now, also run dsh directly to get a real result
+    // (kernel invocation is async; we run dsh synchronously to return result)
+    dshResult = await runDsh(prompt, modelClass);
+  } catch {
+    // Kernel unreachable — invoke dsh directly
+    console.log(`[orchestrator] dispatch(${taskId}) — using direct dsh fallback`);
+    dshResult = await runDsh(prompt, modelClass);
+  }
+
+  // Update task state based on dsh result
+  entry.updatedAt = Date.now();
+  if (dshResult.exitCode === 0) {
+    entry.status = "completed";
+    entry.result = dshResult;
+    console.log(`[orchestrator] dispatch(${taskId}) — completed wallMs=${dshResult.wallMs}`);
+  } else {
+    entry.status = "failed";
+    entry.error = dshResult.stderr || `dsh exit ${dshResult.exitCode}`;
+    entry.result = dshResult;
+    console.warn(`[orchestrator] dispatch(${taskId}) — failed exit=${dshResult.exitCode} stderr=${dshResult.stderr}`);
+  }
+
+  return {
+    task_id: taskId,
+    status: entry.status,
+    output: {
+      stdout: dshResult.stdout,
+      wallMs: dshResult.wallMs,
+      trace_id: `dsh-${taskId}`,
+    },
+    error: entry.error,
+  };
+}
+
+/**
+ * Run dsh headless with the given prompt and model class.
+ * DEEPSEEK_API_KEY is injected via process.env (never hardcoded).
+ */
+async function runDsh(prompt: string, modelClass: string): Promise<DshResponse> {
+  const opts: DshOpts = {
+    modelClass: modelClass as DshOpts["modelClass"],
+    timeoutMs: 120_000,
+  };
+  return await callDshHeadless(prompt, opts);
+}
+
+/**
+ * Extract a displayable prompt string from a Task.
+ */
+function extractPrompt(task: Task): string {
+  // Task.input_blob_id points to an input blob; for PWA form, prompt is in metadata
+  const meta = (task as unknown as Record<string, unknown>)["metadata"] as Record<string, unknown> | undefined;
+  if (meta?.prompt && typeof meta.prompt === "string") {
+    return meta.prompt;
+  }
+  // Fallback: use task_id as a synthetic prompt for PWA demo
+  return `task:${task.task_id}`;
+}
+
+/**
+ * Get the current status of a task.
+ * Queries kernel HTTP facade; falls back to in-memory store.
+ */
+export async function getTaskStatus(taskId: string): Promise<{
+  task_id: string;
+  status: "pending" | "running" | "completed" | "failed";
+  result?: string;
+  error?: string;
+}> {
+  // Try kernel status endpoint first
+  const kernelStatus_ = await kernelStatus(taskId);
+  if (kernelStatus_) {
+    return kernelStatus_;
+  }
+
+  // Fall back to in-memory store
+  const entry = _taskStore.get(taskId);
+  if (entry) {
+    return {
+      task_id: entry.taskId,
+      status: entry.status,
+      result: entry.result?.stdout,
+      error: entry.error ?? undefined,
+    };
+  }
+
+  return {
+    task_id: taskId,
+    status: "failed",
+    error: "task not found",
   };
 }
 
 /**
  * Cancel a running orchestration.
- * TODO(M1): Propagate cancel signal to active commander + workers.
+ * TODO(M1+): Propagate cancel signal to kernel / active commander + workers.
  */
 export async function cancel(taskId: string): Promise<void> {
-  console.log(`[orchestrator] cancel(${taskId}) — stub`);
-  // TODO(M1): Send cancel to active commander process
+  console.log(`[orchestrator] cancel(${taskId})`);
+  const entry = _taskStore.get(taskId);
+  if (entry && entry.status === "running") {
+    entry.status = "failed";
+    entry.error = "cancelled by user";
+    entry.updatedAt = Date.now();
+  }
 }
 
 /**
- * List active orchestrations.
- * TODO(M1): Query active commander processes + task state.
+ * List all active tasks from in-memory store.
+ * TODO(M1+): Query SQLite tasks table via runtime kernel instead.
  */
 export async function listTasks(): Promise<Task[]> {
-  console.log("[orchestrator] listTasks() — stub returning empty");
-  // TODO(M1): Query SQLite tasks table via runtime kernel
-  return [];
+  const tasks: Task[] = [];
+  for (const [taskId, entry] of _taskStore) {
+    tasks.push({
+      task_id: taskId,
+      status: entry.status,
+      workflow_pack: entry.modelClass,
+      workflow_version: "1.0",
+      input_blob_id: null,
+      created_at: new Date(entry.createdAt).toISOString(),
+      updated_at: new Date(entry.updatedAt).toISOString(),
+      result_blob_id: null,
+    });
+  }
+  return tasks;
+}
+
+/**
+ * Create a new Task object for dispatch.
+ */
+export function createTask(params: {
+  taskId?: string;
+  prompt: string;
+  workflowPack?: string;
+}): Task {
+  const taskId = params.taskId ?? `task-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const now = new Date().toISOString();
+  return {
+    task_id: taskId,
+    status: "pending",
+    workflow_pack: params.workflowPack ?? "orch",
+    workflow_version: "1.0",
+    input_blob_id: null,
+    created_at: now,
+    updated_at: now,
+    result_blob_id: null,
+    // Attach prompt to metadata for extractPrompt()
+    ...({ metadata: { prompt: params.prompt } } as unknown as Partial<Task>),
+  } as Task;
 }

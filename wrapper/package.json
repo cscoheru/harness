@@ -12,10 +12,13 @@
     "check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.config.integration.ts",
     "build": "tsc"
   },
   "devDependencies": {
+    "@types/express": "^5.0.0",
     "@types/node": "^22.20.0",
+    "express": "^5.0.1",
     "typescript": "^5.9.3",
     "vitest": "^3.2.7"
   }
