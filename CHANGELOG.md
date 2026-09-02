@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.0-M1c] - 2026-09-02
+
+M1c 阶段 — TypeScript wrapper 三档 profile 收口 + vitest 稳定化 + Codex formal PASS + iPhone Safari Funnel E2E 实测.
+
+Cross-ref: [ADR 0010](adr/0010-v1.1-cycle-scope-admission.md) (Accepted) + [notes/codex-review-v1.1-m0c-v0.2-formal-report.md](notes/codex-review-v1.1-m0c-v0.2-formal-report.md) (Codex formal PASS 0C/0M/1m F1 顺手清).
+
+### Added
+
+- **TypeScript wrapper 三档 profile 收口** (per `wrapper/orchestrator/{orchestrator,commander,worker,types}.ts`):
+  - `orch` (high-cap) — 编排 + 多步任务规划 (wall 19x baseline)
+  - `commander` (medium-cap) — 中等复杂度任务 (wall 7x baseline)
+  - `worker` (low-cap) — 单步快速任务 (wall 1x baseline)
+- **dsh wrapper TS client + tool provider** (per `wrapper/dsh/{dsh_client,tool_provider,types}.ts`):
+  - dsh CLI/HTTP 客户端 (`--profile headless`, NOT `web`)
+  - tool provider Protocol TS 实现（不 1:1 复制 Python，类型对位简化）
+- **vitest 集成测试** (per `wrapper/test/{unit,integration,e2e}`):
+  - 单元 + 集成 + E2E 三层
+  - vitest.config `testTimeout: 30000` + dsh_real skip 双 guard (`RUN_DSH_REAL=1` AND `DEEPSEEK_API_KEY`) + denial 词表补 `can't`/`won't`/`i can't help`/`sorry`
+  - 连跑 2 次稳定 94 passed / 5 skipped / 0 failed
+- **newvps 真部署** (per `deploy/{newvps-compose.yml,tailscale-serve-harness.yaml,tailscale-acl.yaml,env/newvps.env.example}`):
+  - Tailscale Serve HTTPS（harness.rana.asia）+ Tailscale ACL（仅 tailnet 内 + iPhone Safari 设备可达）
+  - newvps 共址部署 6 大坑已实战（docker-proxy zombie / nginx 抢 443 / sites-enabled .bak.* / node:22-alpine 无 python3 / package.json type:module / tailscale serve 不支持 --yaml）
+- **iPhone Safari Funnel E2E 实测** (per `docs/reports/T-M1c-DO-1-iPhone-E2E-funnel.md`):
+  - Tailscale Funnel 启用：`https://harness-newvps.tail1b9878.ts.net/` → proxy `http://127.0.0.1:4000`
+  - macOS 外部 curl 验证：HTTP/2 200 + wrapper placeholder (TTFB 582ms / Total 583ms / Size 105B)
+  - iPhone Safari 截屏已归档至 `docs/reports/T-M1c-DO-1-iPhone-E2E-evidence/01-iphone-safari.png`
+- **ADR 0010 v1.1 cycle scope admission Accepted** (commit `2b0953a`)
+- **capability JSON 4 SKU 落地** (`spec/capabilities/{orch,commander,worker,newvps_ram}.json`)
+
+### Changed
+
+- `docs/v1.1-ga-team-plan.md` v0.0 → v0.1 (M0c 任务书细化) → v0.2 (M1c 实施收口)
+- `notes/codex-audit-scope-v1.1-m0c-v0.2-precommit.md` v0.1 → v0.2 (hygiene 守门升级：tracked-only 锚定 + docs/notes 拆分)
+- README v1.1 M1 段 fill in (Funnel URL + newvps 部署 + 三档 profile)
+
+### Gates Passed
+
+- **M0b spike** — 5 subagent 全 PASS + 11 commits 链 + H-1/H-2/H-3 全 PASS（dsh 覆盖 ≥ 80%、三层等价类有差异记录、wrapper LOC 4800-8500 估算落地）
+- **M0c 5 subagent** — TypeScript wrapper skeleton + dsh_client + newvps 共址部署 + 集成测试 + CHANGELOG/README 全 PASS
+- **M1c GATE-REPAIR-2** — 0C/3M/2m → G1-G4 全 PASS（audit-scope 自洽 + tracked 重锚 71 + vitest 双绿 + 4 文件归档）
+- **Codex formal 终审** — 0C/0M/1m F1 顺手清（八组验收全绿：tsc 0 / vitest 95p4s0f / 锚定四源同值 68 / 前向 0 / 双零 / 归档齐）
+
+### Hygiene
+
+- **v1.0 runtime 不漂移守门**: `git diff v1.0.0..HEAD -- harness/ spec/kernel-schema.sql spikes/ 9 ADR body Dockerfile docker-compose.yml pyproject.toml` = 0 行
+- **不锁型号守门** (NORTH-STAR A-4): `grep -rE "<model-pattern>" wrapper/ deploy/ env/ CHANGELOG.md README.md` = 0 行
+- **不硬编码 API key**: `grep -rE "sk-[a-z0-9]{32,}" wrapper/ deploy/ env/` = 0 行（DEEPSEEK_API_KEY 仅 env-inject only）
+
+### Notes
+
+- v0.2 → v0.3 升级门槛见 `notes/codex-audit-scope-v1.1-m0c-v0.3-precommit.md` §6
+- M2 阶段准备 5 DISPATCH 起草待 DD-1 通过后启动（M2 = 6 host + STT + Web Push）
+- Funnel 延迟 582ms（经 Cloudflare 中转），生产 iOS App 应改 Tailscale VPN 直连
+
+---
+
 ## [1.1.0-M0c] - 2026-09-02
 
 M0c skeleton 轮 — TypeScript wrapper + dsh wrapper + newvps 共址部署 + M0b spike 数据归档.
@@ -322,6 +378,8 @@ The 7 v0.9 ADRs all gain a `v1.0 Status: Included in GA` footer in
 [T-DD-6](docs/v1.0-ga-team-plan.md).
 
 [Unreleased]: # (next minor; v1.0.1)
+[1.1.0-M1c]: # (2026-09-02)
+[1.1.0-M0c]: # (2026-09-02)
 [1.0.0]: # (2026-09-01)
 [v1.0.0a1]: # (2026-09-01)
 [v1.0.0a0]: # (2026-09-01)

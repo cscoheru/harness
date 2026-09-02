@@ -132,6 +132,92 @@ phone-based task dispatch via PWA + Tailscale, with dsh integration and
 newvps co-location deployment. See
 [`docs/v1.1-ga-team-plan.md`](docs/v1.1-ga-team-plan.md) for the full GA ladder.
 
+### M1c 阶段（2026-09-02 完成）
+
+TypeScript wrapper 三档 profile 收口 + vitest 稳定化 + iPhone Safari Funnel E2E 实测通过。
+
+#### 快速部署（newvps 真部署 + Funnel 启用，6 大坑已实战）
+
+```bash
+# 1. SSH 到 newvps（永远用 ssh puer-hk，不是 ssh aliyun -p 16921！那是 mail.rana.asia）
+ssh puer-hk
+
+# 2. 启动 harness 容器
+docker compose -f deploy/newvps-compose.yml up -d
+
+# 3. 启用 Tailscale HTTPS（Funnel 必须 443）
+sudo tailscale up --https=443
+
+# 4. 启用 Tailscale Funnel（公网 HTTPS 入口）
+sudo tailscale funnel --bg 4000
+# 期望: https://harness-newvps.tail1b9878.ts.net/ → proxy http://127.0.0.1:4000
+# Tailscale 自动签 Let's Encrypt cert（首次 30-60s）
+
+# 5. 验证（macOS 本机外部 curl）
+curl -sI https://harness-newvps.tail1b9878.ts.net/health
+# 期望: HTTP/2 200 + content-type: text/plain
+```
+
+#### iPhone Safari 真机 E2E（无需装 Tailscale App）
+
+```
+1. Safari 打开 https://harness-newvps.tail1b9878.ts.net/
+   期望: harness-wrapper placeholder（"fish-harness wrapper placeholder\nWRAPPER_PORT=4000\n..."）
+
+2. 表单提交 / API 调用
+   期望: wrapper 响应（POST /api/echo 等按 wrapper 实现）
+
+3. 24h 完成（异步任务，可选）
+   期望: pending → completed（如 wrapper 有异步任务）
+
+4. 完成态可见
+   期望: 列表含新条目
+```
+
+iPhone 完全不需要 Tailscale App（Funnel 经 Cloudflare CDN 中转，国内可达）；Shadowrocket VPN 不冲突。
+
+#### 三档 Profile（orch / commander / worker）
+
+| Profile | modelClass | 用途 | wall time 基准 |
+|---------|-----------|------|----------------|
+| `orch` | high-cap | 编排 + 多步任务规划 | 19x baseline |
+| `commander` | medium-cap | 中等复杂度任务 | 7x baseline |
+| `worker` | low-cap | 单步快速任务 | 1x baseline |
+
+调用方式：`dsh --profile headless --modelClass <orch|commander|worker> -- "<prompt>"`
+
+#### 测试（94 passed / 5 skipped / 0 failed）
+
+```bash
+cd wrapper
+npm install
+npx vitest run --reporter=basic
+# 默认跳过 dsh_real 真调（保护 gate 稳定）
+# 真调 = RUN_DSH_REAL=1 + DEEPSEEK_API_KEY=<your-key> npx vitest run
+```
+
+测试覆盖：
+- 单元（orchestrator/commander/worker 三档）
+- 集成（dsh_client + harness kernel mock）
+- E2E（skeleton 真调 1 次）
+- denial 处理（cannot / can't / sorry / won't / i can't help 5 类措辞）
+
+#### v1.0 runtime 不漂移守门
+
+```bash
+git diff v1.0.0..HEAD -- harness/ spec/kernel-schema.sql spikes/ 'adr/000[1-9]-*.md' Dockerfile docker-compose.yml pyproject.toml | wc -l
+# 期望: 0 行（v1.0 runtime 完全不动）
+```
+
+#### Funnel vs 直连延迟
+
+| 入口 | TTFB | 适用 |
+|------|------|------|
+| Tailscale Funnel | ~580ms（经 Cloudflare）| iPhone Safari 真机 E2E 验证 |
+| Tailscale VPN 直连 | ~50ms | 生产 iOS App / 长期方案 |
+
+当前 E2E 验证用 Funnel；生产 iOS App 建议改 Tailscale VPN 直连。
+
 ### 安装（待 M1 阶段填实）
 
 ```bash
@@ -152,5 +238,8 @@ docker compose -f deploy/newvps-compose.yml up -d
 - [`docs/v1.1-ga-team-plan.md`](docs/v1.1-ga-team-plan.md) — v1.1 GA 团队开发计划 (M0c/M1/M2/M3 阶段)
 - [`docs/DISPATCH-T-M0c-*.md`](docs/) — M0c 阶段 DISPATCH 任务书
 - [`docs/DISPATCH-T-M0b-*.md`](docs/) — M0b spike 报告 (H-1/H-2/H-3 PASS)
+- [`docs/DISPATCH-T-M1c-*.md`](docs/) — M1c 阶段 DISPATCH 任务书（BE-1/TG-1/DO-1/QA-1/DD-1/EXEC/GATE-REPAIR/-2）
+- [`docs/reports/T-M1c-DO-1-iPhone-E2E-funnel.md`](docs/reports/T-M1c-DO-1-iPhone-E2E-funnel.md) — iPhone Safari Funnel E2E 实操
+- [`docs/reports/T-M1c-DO-1-iPhone-E2E-evidence/`](docs/reports/T-M1c-DO-1-iPhone-E2E-evidence/) — Funnel E2E 证据归档
 - [`adr/0010-v1.1-cycle-scope-admission.md`](adr/0010-v1.1-cycle-scope-admission.md) — v1.1 cycle scope admission (Status: Accepted)
-- [`CHANGELOG.md`](CHANGELOG.md) — v1.1.0-M0c release notes
+- [`CHANGELOG.md`](CHANGELOG.md) — v1.1.0-M0c + M1c release notes

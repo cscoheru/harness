@@ -1,6 +1,6 @@
 # iPhone Safari E2E 证据 — server-side Funnel 启用（2026-09-02）
 
-> 本文件由 Claude Fable 5 自动归档（user 授权「你来执行1-2-3」）。
+> 本文件由 Claude Code 自动归档（user 授权「你来执行1-2-3」）。
 
 ## §1 commit + push
 - Commit: `3a3157f` (13 files +1054/-166)
