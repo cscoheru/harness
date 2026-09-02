@@ -1,0 +1,17 @@
+{
+  "class": "orch",
+  "provider": "deepseek",
+  "model_id": "deepseek-reasoner",
+  "tier": "high-reasoning",
+  "cost_per_1k_input_tokens_usd": 0.014,
+  "cost_per_1k_output_tokens_usd": 0.28,
+  "max_context_tokens": 64000,
+  "m0b_evidence": {
+    "task_id": "T-M0b-BE-1",
+    "report": "docs/DISPATCH-T-M0b-BE-1.md",
+    "median_wall_seconds": 213.22,
+    "median_input_tokens": 91933,
+    "median_output_tokens": 16092,
+    "quality_score_1to5": 4
+  }
+}
