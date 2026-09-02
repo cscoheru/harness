@@ -15,7 +15,7 @@
 
 | # | 文件 | 行数 | 改动概述 |
 ||---|------|------|----------|
-| 1 | `docs/v1.1-ga-team-plan.md` | ~30 处 patch | Header Status `🟢 v0.1 (实施中)` → `🟢 v0.2 (M1 实施中)`；Date 2026-09-02（不变）；M0b PASS 证据 + M0c 5 subagent PASS 证据 + §10.4 v0.2 准备清单 7/8 ✅（#8 newvps 真部署待 user）；新增 §11 v0.2→v1.0 升级门槛（M1/M2/M3 全部通过后）|
+| 1 | `docs/v1.1-ga-team-plan.md` | ~30 处 patch | Header Status `🟢 v0.1 (实施中)` → `🟢 v0.2 (M1 实施中)`；Date 2026-09-02（不变）；M0b PASS 证据 + M0c 5 subagent PASS 证据 + §10.4 v0.2 准备清单 7/8 ✅（#3 newvps 真部署待 user）；新增 §11 v0.2→v1.0 升级门槛（M1/M2/M3 全部通过后）|
 | 2 | `docs/poll/cc-ready.json` | task_id `T-M0c-DISPATCH` → `T-M1c-DISPATCH`；status M1 任务书细化完成；files_modified 8 文件清单；notes M1 派发状态 + M0c 5 subagent 收口 |
 
 ### 1.2 新增文件 (A)
@@ -46,7 +46,7 @@
 
 ### (A) v0.2 升级完整性（plan v0.1 → v0.2）
 
-- ✅ §10.4 v0.2 准备清单 7/8 [x]（#8 newvps 真部署待 user 上 newvps 后勾）
+- ✅ §10.4 v0.2 准备清单 7/8 [x]（#3 newvps 真部署待 user 上 newvps 后勾）
 - ✅ Header Status v0.1 → v0.2 (M1 实施中)
 - ✅ §11 v0.2→v1.0 升级门槛新增（M1c/M2/M3 全部通过后）
 - ✅ M0c 5 subagent PASS 证据落地（5 merge commits + fix commit）
@@ -55,7 +55,7 @@
 
 - ✅ 5 DISPATCH 文件存在 + 含 §1 任务定义 / §2 输入 / §3 产出 / §4 验证命令 / §5 估时 / §6 报告模板 / §7 cross-ref / §8 禁止
 - ✅ 总估时（per PRD-v1.1 §5 M1 范围 = 2 周 = 10 工作日）
-- ✅ 不锁型号守门（5 DISPATCH 全部用 audit-scope §1 引用，无字面 grep pattern）
+- ✅ 不锁型号守门（5 DISPATCH §4 各含 1 行守门字面（per §1.5 #16-20 豁免））
 - ✅ 不硬编码 API key（env-inject only；DEEPSEEK_API_KEY 通过环境变量 + inline prefix）
 - ✅ 不动 v1.0 runtime（HTTP/FFI 调 `/health` 端点；kernel 不改）
 - ✅ TypeScript Protocol ↔ Python Protocol 类型对位（不 fork schema；不 1:1）
@@ -94,7 +94,7 @@
 - G4 §6.2 M1c PR8-PR11 是否与 §2 5 角色任务书产出对齐
 - G5 §9 修订日志 v0.2 行是否引用足够证据（M0c 5 subagent + 12 commits 链 + H-1/H-2/H-3 + ADR 0010）
 - G6 §7.3 M0c 5 模板清单是否含 spike 实跑数据落地（commit b768097/d168217/23f976e/6ea2fae/7a94ade/3efe7dc 引用）
-- G7 §11 cross-ref 是否新增 M1c 相关引用（5 DISPATCH-T-M1c-*.md + wrapper/ + spec/capabilities/）
+- G7 §11 cross-ref 是否新增 M1c 相关引用（5 DISPATCH-T-M1c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md + wrapper/ + spec/capabilities/）
 
 ---
 
@@ -120,20 +120,20 @@ for f in docs/DISPATCH-T-M1c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md; do
 done
 
 # === C. M1c 5 DISPATCH §1 任务定义存在 ===
-for f in docs/DISPATCH-T-M1c-*.md; do
+for f in docs/DISPATCH-T-M1c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md; do
   grep -c "^## §1 任务定义" "$f"  # 期望: ≥ 1
 done
 
 # === D. 不锁型号守门（v0.2 升级 8 文件范围）===
-grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/v1.1-ga-team-plan.md docs/DISPATCH-T-M1c-*.md docs/poll/cc-ready.json | wc -l
+grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/v1.1-ga-team-plan.md docs/DISPATCH-T-M1c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md docs/poll/cc-ready.json | wc -l
 # 期望: 0
 
 # v0.2 升级前向交付物口径守门（不含历史文档，详见 audit-scope §1）：
-grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/m0b/ spec/capabilities/ adr/ docs/poll/ docs/v1.1-ga-team-plan.md docs/DISPATCH-T-M1c-*.md | wc -l
+grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/m0b/ spec/capabilities/ adr/ docs/poll/ docs/v1.1-ga-team-plan.md docs/DISPATCH-T-M1c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md | wc -l
 # 期望: 0（实测 == 0；M0b plan L89 C2 裁定口径）
 
 # === E. DEEPSEEK_API_KEY 不泄漏 ===
-grep -rE "sk-[a-z0-9]{32,}" docs/v1.1-ga-team-plan.md docs/DISPATCH-T-M1c-*.md docs/poll/cc-ready.json | wc -l
+grep -rE "sk-[a-z0-9]{32,}" docs/v1.1-ga-team-plan.md docs/DISPATCH-T-M1c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md docs/poll/cc-ready.json | wc -l
 # 期望: 0
 
 # === F. v1.0 runtime 0 行 diff 守门 ===
@@ -211,10 +211,10 @@ git add docs/v1.1-ga-team-plan.md \
 git commit -m "feat(v1.1): v0.2 升级 + M1c 任务书 5 DISPATCH
 
 - v1.1-ga-team-plan.md v0.1 → v0.2 (M1 实施中)
-- §10.4 v0.2 准备清单 7/8 [x]（#8 newvps 真部署待 user）
+- §10.4 v0.2 准备清单 7/8 [x]（#3 newvps 真部署待 user）
 - 新增 §11 v0.2→v1.0 升级门槛（M1c/M2/M3 全部通过后）
 - §9 修订日志 v0.2 行（M0c 5 subagent PASS + 12 commits 链 + H-1/H-2/H-3 PASS + ADR 0010）
-- 5 DISPATCH-T-M1c-*.md NEW: BE-1 wrapper 实接 + TG-1 dsh 真调 + DO-1 newvps 真部署 + QA-1 真机 E2E + DD-1 CHANGELOG/README M1c 段
+- 5 DISPATCH-T-M1c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md NEW: BE-1 wrapper 实接 + TG-1 dsh 真调 + DO-1 newvps 真部署 + QA-1 真机 E2E + DD-1 CHANGELOG/README M1c 段
 - cc-ready.json task_id → T-M1c-DISPATCH + notes 9 项 v0.2 升级说明
 
 守门:

@@ -210,10 +210,18 @@ export async function dispatch(
 /**
  * Run dsh headless with the given prompt and model class.
  * DEEPSEEK_API_KEY is injected via process.env (never hardcoded).
+ *
+ * Coerces unknown modelClass strings to 'orch' (default) so the call stays within
+ * the documented ModelClass union; task.workflow_pack can be any string from the API
+ * but PROFILE_YAML_MAP only has 3 keys (orch/commander/worker).
  */
 async function runDsh(prompt: string, modelClass: string): Promise<DshResponse> {
+  const validClass: DshOpts["modelClass"] =
+    modelClass === "orch" || modelClass === "commander" || modelClass === "worker"
+      ? modelClass
+      : "orch";
   const opts: DshOpts = {
-    modelClass: modelClass as DshOpts["modelClass"],
+    modelClass: validClass,
     timeoutMs: 120_000,
   };
   return await callDshHeadless(prompt, opts);

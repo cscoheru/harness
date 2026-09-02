@@ -2,7 +2,7 @@
 
 > **Date**: 2026-09-02
 > **Purpose**: v0.1 升级 8 文件改动 hygiene 守门集合（不锁型号 / 不硬编码 API key / v1.0 runtime 0 行 diff）
-> **Why**: v0.1 升级前向交付物（v1.1-ga-team-plan.md + 5 DISPATCH-T-M0c-*.md + cc-ready.json）若直接包含字面 grep pattern（`Fable 5|GLM 5.3|MiniMax-M3`），守门 grep 会自伤（grep pattern 字面命中自身）。本 audit-scope 把守门 grep 字面从 v0.1 升级前向交付物移到本 notes/ 下，且 grep 范围限定到**前向交付物口径**（不含历史文档），避免自伤且不冒犯历史考古记录。
+> **Why**: v0.1 升级前向交付物（v1.1-ga-team-plan.md + 5 DISPATCH-T-M0c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md + cc-ready.json）若直接包含字面 grep pattern（`Fable 5|GLM 5.3|MiniMax-M3`），守门 grep 会自伤（grep pattern 字面命中自身）。本 audit-scope 把守门 grep 字面从 v0.1 升级前向交付物移到本 notes/ 下，且 grep 范围限定到**前向交付物口径**（不含历史文档），避免自伤且不冒犯历史考古记录。
 > **How to apply**: v0.1 升级前向交付物守门命令统一引用本 §1-3；本文件保留字面 grep pattern 用作后续 Codex 复审的 hygiene anchor。
 
 ---
@@ -11,7 +11,7 @@
 
 ```bash
 # v0.1 升级前向交付物不锁型号（实测 == 0）：
-grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/m0b/ spec/capabilities/ adr/ docs/poll/ docs/v1.1-ga-team-plan.md docs/DISPATCH-T-M0c-*.md | wc -l
+grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/m0b/ spec/capabilities/ adr/ docs/poll/ docs/v1.1-ga-team-plan.md docs/DISPATCH-T-M0c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md | wc -l
 # 期望: 0 行
 
 # 历史文档豁免口径锚定（含守门字面自伤 + 叙述性引用 + 署名尾注，详见 §1.5 豁免清单，实测 == 42）：
@@ -98,4 +98,4 @@ git diff v1.0.0..HEAD -- docs/v1.0-ga-team-plan.md 'adr/000[1-9]-*.md' | wc -l
 
 ---
 
-*hygiene audit-scope — v0.1 升级 8 文件改动守门 by-design（grep 字面移到 notes/，grep 范围限定前向交付物口径 docs/m0b/ spec/capabilities/ adr/ docs/poll/ docs/v1.1-ga-team-plan.md docs/DISPATCH-T-M0c-*.md；历史文档豁免 §1.5 清单 13 文件 42 处三类定性不清洗）*
+*hygiene audit-scope — v0.1 升级 8 文件改动守门 by-design（grep 字面移到 notes/，grep 范围限定前向交付物口径 docs/m0b/ spec/capabilities/ adr/ docs/poll/ docs/v1.1-ga-team-plan.md docs/DISPATCH-T-M0c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md；历史文档豁免 §1.5 清单 13 文件 42 处三类定性不清洗）*

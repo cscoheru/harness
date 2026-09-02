@@ -1,9 +1,9 @@
 {
-  "task_id": "T-M1c-DISPATCH",
-  "commit": "v0.2 升级 commit 待生成（含 plan v0.2 + 5 DISPATCH-T-M1c-*.md + cc-ready.json 翻牌 + 归档 audit-scope notes/；按 prompt §5.1 方案 A 单 commit 7 文件 + 归档 commit + Clash proxy push）",
+  "task_id": "T-M1c-GATE-REPAIR",
+  "commit": "T-M1c-GATE-REPAIR 单 commit (R1 tsc/vitest 双绿 + R2 豁免锚定 55 + R3 glob brace + R4 prompt/状态/M0c-DONE; wrapper/ 修复 + 2 audit-scope + prompt + plan header + cc-ready + 2 NEW 报告 → Clash proxy push)",
   "created_at": "2026-09-02T19:00:00Z",
   "branch": "main",
-  "status": "T-M1c-DISPATCH（v0.2 升级 commit 已 ready，等 push 落地；M0c 5 subagent PASS 收口 + M1c 5 角色任务书细化完成；hygiene audit-scope + Codex 复审 prompt 落 notes/）。继前: v1.1 GA plan v0.1 → v0.2 升级 GO 完成（user 2026-09-02 「1. v0.2 升级授权」+ 「2. M1 阶段实施派发」+ 「3. 走 v0.1升级复审流水线，加一轮 Codex 复审」三信号合并）; M0c 6 commits 链 PASS (b768097 BE-1 / d168217 TG-1 / 23f976e QA-1 / 6ea2fae DO-1 / 7a94ade DD-1 / 3efe7dc fix) 已写入 v1.1-ga-team-plan.md header M0c PASS 证据; M1c 5 角色任务书细化完成（DISPATCH-T-M1c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md 5 文件 NEW，估时 7+5+3+5+2 = 22 工作日并行 = 4-5 周; 与 PRD-v1.1 §5 M1 2 周 + 实施 buffer 对齐）; §10.4 v0.2 准备清单 7/8 [x] (#3 newvps 真部署待 user 上 newvps 后勾); 当前 pending = user 「Start v1.1 M1」 启动 M1c 真实工程师实施 (per PRD-v1.1 §4.6 第 3 条); 7 文件改动: 1 v1.1-ga-team-plan.md 大修 + 5 DISPATCH NEW + 1 cc-ready.json; 不自动派发实施 (等 user 裁断); Codex 复审三段式 pipeline 待 user 亲提 Codex CLI 复审",
+  "status": "T-M1c-GATE-REPAIR 完成 (R1 wrapper tsc exit 0 + vitest 94 passed / 5 skipped / 0 failed; R2 豁免锚定 18 文件 47 处 → 25 文件 55 处 + audit-scope 自伤 6 行 = §1 锚定 == 61; R3 glob brace 双 audit-scope 清零; R4 prompt #3 + 状态刷新 + M0c-DONE 补建). 当前 pending = user 亲提 Codex CLI 走 formal 轮 (notes/codex-review-v1.1-m0c-v0.2-formal-report.md) → PASS → user 上 newvps 真部署 + iPhone Safari 真机 E2E → 派 T-M1c-DD-1-EXEC → v0.3 升级. 不自动派发 (等 user 裁断)",
   "files_modified": [
     "docs/v1.1-ga-team-plan.md (v0.1 → v0.2 升级；Header Status v0.1 → v0.2 (M1c 实施中) + Date v0.2 升级日 + M0c PASS 证据新增 6 commits 链 (b768097/d168217/23f976e/6ea2fae/7a94ade/3efe7dc) + M1c 任务书细化完成; §10.2 标题修订 (user 授权 7/8 PASS + Codex 复审三段式); §10.4 v0.2 准备清单 7/8 [x]; §9 修订日志 v0.2 行 (M0c 6 commits PASS + M1c 任务书细化 + hygiene audit-scope))",
     "docs/DISPATCH-T-M1c-BE-1.md (NEW ~120 行 — TypeScript wrapper 实接 v1.0 kernel HTTP API + dsh invoke + PWA server 任务书; 估时 7 工作日)",

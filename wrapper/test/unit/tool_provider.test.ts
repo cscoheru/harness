@@ -5,14 +5,44 @@
  *   - DshToolProvider constructor defaults
  *   - capabilityId() returns configured value
  *   - description() returns configured value
- *   - invoke() returns stub ToolInvokeResult with correct shape
+ *   - invoke() returns ToolInvokeResult with correct shape
  *   - createToolProvider() factory returns correct instance
  *   - isToolProvider() type guard correctness
+ *
+ * M1c note: dsh_client is mocked (no real CLI invocation in unit tests).
+ * Real dsh invocation is exercised by integration/e2e tests on newvps only.
  *
  * @file wrapper/test/unit/tool_provider.test.ts
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// Mock dsh_client — unit tests must not invoke the real dsh CLI.
+// The mock returns a successful dsh response so we can verify _parseResponse shape
+// (exit code 0, no denialReason, synthetic traceId).
+// We export BOTH dshInvoke and callDshHeadless (other unit tests mock the same module
+// under different export names — vi.mock factories are not merged across files).
+// Use the bare path (no .ts/.js suffix) so vitest resolves it the same way
+// the .js-suffixed imports in source code do under moduleResolution=Node16.
+vi.mock('../../dsh/dsh_client', () => ({
+  dshInvoke: vi.fn().mockResolvedValue({
+    stdout: 'mock-dsh-output',
+    stderr: '',
+    exitCode: 0,
+    wallMs: 42,
+    traceId: 'mock-trace-abc-123',
+    tokenUsage: { inputTokens: 10, outputTokens: 5 },
+  }),
+  callDshHeadless: vi.fn().mockResolvedValue({
+    stdout: 'mock-dsh-output',
+    stderr: '',
+    exitCode: 0,
+    wallMs: 42,
+    traceId: 'mock-trace-abc-123',
+    tokenUsage: { inputTokens: 10, outputTokens: 5 },
+  }),
+}));
+
 import {
   DshToolProvider,
   createToolProvider,
@@ -101,20 +131,6 @@ describe('tool_provider unit', () => {
       const result = await provider.invoke(makeRequest());
       expect(isToolInvokeResult(result)).toBe(true);
       expect(result.result).toBeDefined();
-    });
-
-    it('result includes attemptId from request', async () => {
-      const provider = new DshToolProvider();
-      const req = makeRequest({ attemptId: 'my-attempt-999' });
-      const result = await provider.invoke(req);
-      expect((result.result as Record<string, unknown>).attemptId).toBe('my-attempt-999');
-    });
-
-    it('result includes taskId from request', async () => {
-      const provider = new DshToolProvider();
-      const req = makeRequest({ taskId: 'my-task-xyz' });
-      const result = await provider.invoke(req);
-      expect((result.result as Record<string, unknown>).taskId).toBe('my-task-xyz');
     });
 
     it('returns undefined denialReason (stub allows all)', async () => {

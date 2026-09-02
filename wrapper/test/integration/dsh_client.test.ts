@@ -3,8 +3,16 @@
 import { describe, it, expect, vi } from 'vitest';
 
 // Mock dsh CLI (不真调; vi.mock 路径需要 .ts 后缀以匹配 moduleResolution=node16)
+// Export both callDshHeadless + dshInvoke + dshHealth so that vitest's mock factory
+// (which is not merged across files) remains compatible with other test files that
+// import the same module under a different export name.
 vi.mock('../../dsh/dsh_client.ts', () => ({
   dshInvoke: vi.fn().mockResolvedValue({
+    stdout: '{"status":"ok","trace_id":"mock-trace-001"}',
+    stderr: '',
+    exitCode: 0,
+  }),
+  callDshHeadless: vi.fn().mockResolvedValue({
     stdout: '{"status":"ok","trace_id":"mock-trace-001"}',
     stderr: '',
     exitCode: 0,

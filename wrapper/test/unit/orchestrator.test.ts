@@ -3,9 +3,12 @@
  *
  * Coverage targets (M1c):
  *   - health() returns stub { status, version }
- *   - dispatch() returns stub OrchestrationResult with pending status
+ *   - dispatch() returns OrchestrationResult with completed status after dsh call
  *   - cancel() logs without throwing
- *   - listTasks() returns empty array
+ *   - listTasks() returns array (possibly populated by prior dispatch tests)
+ *
+ * dsh_client is mocked — unit tests do NOT invoke real dsh CLI.
+ * Real dsh invocation is exercised by integration/e2e tests on newvps only.
  *
  * NOT in scope (M1+):
  *   - Real HTTP /health call against kernel
@@ -16,6 +19,32 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+// Mock dsh_client — unit tests must not invoke the real dsh CLI.
+// Mock returns a successful dsh response so dispatch tests can verify shape.
+// We export BOTH callDshHeadless and dshInvoke (other unit tests mock the same module
+// under different export names — vi.mock factories are not merged across files).
+// Use the bare path (no .ts/.js suffix) so vitest resolves it the same way
+// the .js-suffixed imports in source code do under moduleResolution=Node16.
+vi.mock('../../dsh/dsh_client', () => ({
+  callDshHeadless: vi.fn().mockResolvedValue({
+    stdout: '{"status":"ok","trace_id":"mock-trace-001"}',
+    stderr: '',
+    exitCode: 0,
+    wallMs: 42,
+    traceId: 'mock-trace-001',
+    tokenUsage: { inputTokens: 10, outputTokens: 5 },
+  }),
+  dshInvoke: vi.fn().mockResolvedValue({
+    stdout: '{"status":"ok","trace_id":"mock-trace-001"}',
+    stderr: '',
+    exitCode: 0,
+    wallMs: 42,
+    traceId: 'mock-trace-001',
+    tokenUsage: { inputTokens: 10, outputTokens: 5 },
+  }),
+}));
+
 import {
   health,
   dispatch,
@@ -44,11 +73,15 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 
 describe('orchestrator', () => {
   beforeEach(() => {
+    // Silence console.log during tests; use clearAllMocks (NOT restoreAllMocks)
+    // because restoreAllMocks would also reset vi.fn mock implementations
+    // (e.g. callDshHeadless from vi.mock) and break subsequent tests.
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    // clearAllMocks preserves mock implementations; restoreAllMocks does not.
+    vi.clearAllMocks();
   });
 
   // ── health() ──────────────────────────────────────────────────────────────
