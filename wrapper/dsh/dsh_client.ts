@@ -201,7 +201,9 @@ export async function callDshHeadless(
   );
 
   if (process.env['DEBUG_DSH_SPAWN']) {
-    console.log(`[dsh_client] exit=${rawExitCode} stdout=${stdout.trim().slice(0, 100)} stderr=${stderr.trim().slice(0, 200)}`);
+    console.log(`[dsh_client] exit=${rawExitCode}`);
+    console.log(`[dsh_client] stdout_full=${JSON.stringify(stdout)}`);
+    console.log(`[dsh_client] stderr_full=${JSON.stringify(stderr)}`);
   }
 
   const wallMs = Date.now() - startMs;
