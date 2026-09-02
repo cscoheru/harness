@@ -1,7 +1,7 @@
 # DISPATCH-T-M0b-DD-1 — Role DD — M0b 总报告 + ADR 0010 v1.1 cycle scope admission
 
 > **Task ID**: T-M0b-DD-1
-> **Status**: 🟡 pending（派发中，等 T-M0b-QA-1 完成后执行）
+> **Status**: 🟢 done (2026-09-02, subagent executed)
 > **Date**: 2026-09-01
 > **Author**: 架构师（v1.1 GA plan v0.0 DRAFT §2.5 派发）
 > **Receiving Agent**: Role DD — ADR & 文档 & 报告 工程师（v1.1+）
@@ -372,11 +372,11 @@ grep -c "鱼之重新定义" docs/DISPATCH-T-M0b-DONE.md
 
 ### §6.1 M0b 总报告摘要
 
-- **§1 H-1 判定**：__
-- **§2 H-2 判定**：__
-- **§3 H-3 LOC 范围**：__
-- **§4 capability JSON 落地**：4/4 ✅
-- **§5 M0b 总判定**：__（PASS / FAIL / PARTIAL）
+- **§1 H-1 判定**：**PASS**（BE-1=4 + TG-1=4 + DO-1=4 / 中位数 4 ≥ 4 阈值）
+- **§2 H-2 判定**：**PASS**（wall 19x/7x/1x 阶梯；任务适配边界清晰）
+- **§3 H-3 LOC 范围**：4800-8500 行（orch 1500-2500 + commander 2000-3500 + worker 800-1500 + 共用 500-1000）
+- **§4 capability JSON 落地**：4/4 ✅（orch / commander / worker / newvps_ram 全落地 spec/capabilities/）
+- **§5 M0b 总判定**：**PASS**（H-1 + H-2 + H-3 全部 PASS）
 
 ### §6.2 ADR 0010 完成摘要
 
@@ -384,20 +384,20 @@ grep -c "鱼之重新定义" docs/DISPATCH-T-M0b-DONE.md
 - **Decision 段 4 子项**：(a) scope admission ✅ (b) M0b 设计 ✅ (c) capability 守门 ✅ (d) v1.0 不漂移 ✅
 - **Alternatives 4 个**：A1/A2/A3/A4 ❌ 全部拒绝 + 理由
 - **Consequences 3 项**：✅ scope / ⏸ Start 门 / ⚠️ 鱼之重新定义
-- **Cross-ref 6+ 引用**：v1.1 GA plan + PRD-v1.1 §4 + DOCS-REVIEW + NORTH-STAR + v1.0 GA plan + tag ab8749a + T-DD-6
+- **Cross-ref 7 引用**：v1.1 GA plan + PRD-v1.1 §4 + DOCS-REVIEW §3 + NORTH-STAR §18/§24-32/§105-106/§215-236/§327/§351-381 + v1.0 GA plan + tag ab8749a + T-DD-6
 
 ### §6.3 git commit 证据
 
-- **commit SHA**：__
-- **commit message**：`feat(m0b): T-M0b-DD-1 M0b 总报告 + ADR 0010 ...`
-- **files changed**：__ files / +__ / -__
+- **commit SHA**：__（待 commit 后回填）
+- **commit message**：`feat(m0b): T-M0b-DD-1 M0b 总报告 + ADR 0010 v1.1 cycle scope admission`
+- **files changed**：3 files（docs/DISPATCH-T-M0b-DONE.md NEW + adr/0010-v1.1-cycle-scope-admission.md NEW + docs/DISPATCH-T-M0b-DD-1.md 修改 §6）
 
 ### §6.4 路径选择
 
-- **路径 1（H-1/H-2/H-3 全 PASS）**：__（是 / 否）
-- **路径 2（H-1 FAIL）**：__（是 / 否）
-- **路径 3（PARTIAL）**：__（是 / 否）
-- **通知架构师**：__（是 / 否）
+- **路径 1（H-1/H-2/H-3 全 PASS）**：**是**（M0b 总判定 PASS，v0.1 升级路径）
+- **路径 2（H-1 FAIL）**：否
+- **路径 3（PARTIAL）**：否
+- **通知架构师**：**是**（架构师裁断 v0.1 升级 or 「鱼之重新定义」）
 
 ---
 
