@@ -348,7 +348,7 @@ CONTAINER ID   NAME              CPU %     MEM USAGE / LIMIT     MEM %     NET I
 
 **跑命令**：
 ```bash
-time dsh --profile web \
+time dsh --profile headless \
   --patch docs/m0b/profile-override-base.yaml \
   --patch docs/m0b/profile-override-worker.yaml \
   -- "<§1.4 三选一摘要 A 任务 prompt>"

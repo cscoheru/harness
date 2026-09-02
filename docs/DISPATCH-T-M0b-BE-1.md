@@ -295,7 +295,7 @@ orch 档（high-reasoning）适配调研类任务 4/5。不需改档，但 orch 
 
 **跑命令**：
 ```bash
-time dsh --profile web \
+time dsh --profile headless \
   --patch docs/m0b/profile-override-base.yaml \
   --patch docs/m0b/profile-override-orch.yaml \
   -- "<§1.4 三选一调研 A 任务 prompt>"

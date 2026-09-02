@@ -315,7 +315,7 @@ grep -cE "中位数|median" docs/DISPATCH-T-M0b-TG-1.md
 **跑命令**（必须在 `tmp/m0b-tg-1/` 沙箱内执行）：
 ```bash
 cd tmp/m0b-tg-1
-time dsh --profile web \
+time dsh --profile headless \
   --patch docs/m0b/profile-override-base.yaml \
   --patch docs/m0b/profile-override-commander.yaml \
   -- "<§1.4 三选一改代码 A 任务 prompt>"
