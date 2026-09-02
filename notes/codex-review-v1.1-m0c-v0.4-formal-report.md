@@ -98,6 +98,36 @@
 
 - 首审 **0C/4M/3m 维持**（全部成立）；GATE-CALIB C1-C6 **修复确认全绿**；复审追加 **F-1 (1M) + F-2 (1m)** → 当前累计 **CHANGES REQUIRED（0C/1M/1m）**，签发 `T-M2-V0.4-HYGIENE-FIX-2`（纯锚定/注记文本收尾）→ 修完即 **v0.4 终态 PASS**，M3 GA final 放行
 
+## §6 prompt 复审轮（2026-09-02，对 `notes/codex-audit-scope-v1.1-m0c-v0.4-precommit-prompt.md` 本体 + FIX-2 `ed36bd7` 后状态的 verbatim 审验）
+
+> 状态基线：HEAD = `ed36bd7`（FIX-2 PASS），树净，remote 同步，cc-ready = `T-M2-V0.4-HYGIENE-FIX-2-PASS`（pending 三信号：v0.4 终态 PASS 归档 / 6 host 真部署 E2E / Start M3）。**锚定实测 = 103 / 45 文件**（101 + FIX-2 执行书自引入 2，#47 预演命中）。
+
+### §6.1 FIX-2 回验 — F-1/F-2/F-3 全部修复确认
+
+| ID | 修复 | 复测 | 裁定 |
+|----|------|------|------|
+| F-1 | 主表 #46（GATE-CALIB 执行书 4）+ #47（FIX-2 预演 2）+ §1 期望 97→101 | #46/#47 落位 ✓；commit message 附 post-commit 实测 103 ✓；cc-ready status 记 103 ✓ | ✅（唯 §1 期望行最后一公里见 P-5） |
+| F-2 | §4.5 IP 白名单注记落合同 | §4.5 注记 ✓（RFC1918 说明文案豁免，业务源码 0 + 白名单 1） | ✅ |
+| F-3 | §7 教训 + v0.5 hard rule 4 条（先行起草/commit 后立即复审/自引入预演入列/message 附实测） | ✓ 且 FIX-2 自身已按新规执行（预演 + 实测数入 message） | ✅ |
+
+### §6.2 prompt 本体 findings（CHANGES REQUIRED 0C/2M/2m）
+
+**P-1 (major) prompt 锚定数字三时点并存 + H1 命令范围矛盾 — 复审合同失去可执行性**
+- L70/L135/L137 = **97**（GATE-CALIB 时点）；L96 (G5)/L219/§8-checklist(L369) = **91**（原始预估）——现行真值 **103（45 文件）**；§8 checklist (C)「tracked 锚定 == 91（预估）」照单执行必 FAIL
+- §3 验证 #4 与 §6 H1 命令仍含 `docs/reports/T-M2-DD-1-report.md` 期望 == 0，实测该文件 2 命中（首审 M-A 已定性 §1.5 #43 豁免）——**命令与 L131-133 自身注记（「不入前向范围」）矛盾**，GATE-CALIB 修了 audit-scope/README 漏改 prompt 命令行
+- 修法：prompt 全量同步 == **103**（演进链注记：91 预估 → 97 CALIB → 101 自引入 → 103 FIX-2 #47）+ §3#4/§6 H1 命令收窄 `CHANGELOG.md README.md`（期望 0；DD-1 报告 2 处注记 #43 豁免）
+
+**P-2 (major) C5「placeholder 已回填」声明失实（先跑后写铁律第三次失守）**
+- GATE-CALIB commit message C5 声明「prompt §5 placeholder 回填」；实测 L295/L301 仍 `[TBD: GATE-CALIB commit hash 待本轮提交后回填]` ×2——且 hash 现已知（`277cdf8` / FIX-2 `ed36bd7`），可填未填。前科：`f666e47`（grep=0 实测 4）→ v0.4 首审 M-C（「期望值经验证」）→ 本轮 P-2
+- 修法：L295/L301 回填真实 hash + 演进链（277cdf8 GATE-CALIB → ed36bd7 FIX-2）+ audit-scope §7 教训追加「commit message 的『已回填/已验证』声明必须附行号证据」
+
+**P-4 (minor) §8 checklist 9 项全未勾 + 判定栏/findings 表空**——复审结论实际由本 formal 报告承载，prompt 应补勾稽或注明「结论见 formal 报告 §5/§6」，避免流程断链
+**P-5 (minor) audit-scope §1 期望 101 vs 实测 103 最后一公里**——#47 行有「commit 后以实测为准」预演兜底 + cc-ready 已记 103，但铁律「命令==清单==期望」未闭合（L20/L34/L48/L76/L236 仍 101/44 文件）→ 随 P-1 一并同步 == 103 / 45 文件
+
+### §6.3 prompt 复审轮判定
+
+- FIX-2 三项修复**全部确认**（§6.1）；prompt 本体累计 **0C/2M/2m** → 当前 **CHANGES REQUIRED（0C/2M/2m）**，签发 `T-M2-V0.4-PROMPT-SYNC`（纯文本同步轮：prompt 103 全量 + H1 收窄 + hash 回填 + checklist 勾稽 + audit-scope 103 收口）→ 修完 **v0.4 终态 PASS 归档**（cc-ready pending 信号 #1 兑现）→ M3 放行等 user「Start v1.1 M3」
+
 ---
 
-*codex review done — v0.4 复审轮：首审 0C/4M/3m 全部成立并经 GATE-CALIB（`277cdf8`）修复复测全绿（README 引用式/锚定 97 当轮/五处 pattern 校准 IP=1 白名单·tmp 0·whisper 0·VAPID 0/README 6 host/tsc 0·vitest 95p-69s-0f 亲手本地 bin 收口）；复审追加 F-1 锚定 97→101 执行书自引入 4 未入列（第八次）+ F-2 IP 白名单注记缺口 → 累计 0C/1M/1m，签发 T-M2-V0.4-HYGIENE-FIX-2 收尾即终态 PASS。*
+*codex review done — v0.4 prompt 复审轮：FIX-2 F-1/F-2/F-3 全部修复确认（#46/#47 入列 + 白名单注记 + hard rule 4 条并自践行）；prompt 本体 CHANGES REQUIRED 0C/2M/2m（P-1 锚定 91/97/103 三时点并存 + H1 命令矛盾 / P-2 placeholder 声明失实 ×2 / P-4 checklist 未勾稽 / P-5 audit-scope 101→103 最后一公里）；签发 T-M2-V0.4-PROMPT-SYNC，修完即 v0.4 终态 PASS。*
