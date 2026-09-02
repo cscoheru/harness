@@ -19,9 +19,9 @@ git ls-files docs/ adr/ spec/capabilities/ | xargs grep -cE "Fable 5|GLM 5.3|Min
 # 期望: == audit-scope §1.5 主表合计（唯一权威源引用式；2026-09-02 v0.5 实测 tracked = 114 / 48 文件；演进链 91 预估 → 97 CALIB → 101 #46 → 103 FIX-2 → 107 #48 PROMPT-SYNC → 108 v0.4 终态实测 → 114 v0.5 实测 = 108 + #49 DISPATCH-T-M3 6 + #52 ADR 0011 0 = 114；公式 108 + 6 + 0 = 114 tracked）
 # 注: M3 实施期无新增 docs 自引入（5 edge host 缺，挂账 user）
 
-# 历史文档豁免口径锚定（disk 口径）：
+# 历史文档豁免口径锚定（disk 口径 == tracked + 本 audit-scope 自伤；本命令明文范围 = docs/ adr/ spec/ + v0.5 audit-scope 单文件）：
 grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/ adr/ spec/capabilities/ notes/codex-audit-scope-v1.1-m0c-v0.5-precommit.md | wc -l
-# 期望: ≥ 128（disk 口径，含本 audit-scope §1/§4.5/§5/§6/§7 自伤字面；实测 = docs/ 114 + adr/ 0 + spec/ 0 + v0.5 audit-scope 8 + v0.5 prompt 6 = 128）
+# 期望: == 124（v0.5 commit + DISK-CALIB git add 后三源同值；公式 = tracked 117（= 114 + DISK-CALIB.md 3 行 git add 后）+ 本 audit-scope 自伤实测 7 = 124；DISK-CALIB.md untracked 时 disk 实测 == 124 命令不区分 tracked/untracked）
 
 # notes/ 范围自伤豁免（本文件含 grep pattern 字面）：
 grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.5-precommit.md | wc -l
@@ -30,9 +30,9 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.5-prec
 
 **含义**：v1.1+ 周期模型决策遵守 NORTH-STAR A-4 等价类约束；v0.5 升级前向交付物（CHANGELOG.md [1.1.0] + README.md v1.1 final + v1.1 GA plan v0.2 + ADR 0011 closure）均不含具体型号字面；ADR 0011 走 §1.5 自伤豁免（与 ADR 0001-0010 同口径）。
 
-### §1.5 历史文档豁免清单（tracked 重锚 v0.5 实测 = 114/48 文件 tracked / 128/51 文件 disk；本主表 = 锚定唯一权威源，prompt/报告一律引用不复制数字）
+### §1.5 历史文档豁免清单（tracked 重锚 v0.5 实测 = 117/49 文件 tracked（git add DISK-CALIB.md 后）/ 124/50 文件 disk 三源同值；本主表 = 锚定唯一权威源，prompt/报告一律引用不复制数字）
 
-继承 v0.4 §1.5 docs 主表 46 文件 107 行 + notes 自伤小节 2 文件；v0.5 升级范围（DISPATCH-T-M3 exec 自引入实测 6 行 + audit-scope/prompt v0.5 自伤实测 7+6 行）= 总锚定 **tracked 重锚 post-v0.5 实测 tracked = 113 行（49 文件）/ 实测 disk = 126 行（51 文件，含 notes/ 自伤豁免）**（107 + 6 + 0 + 0 + 0 = 113 tracked / 113 + 7 + 6 = 126 disk；M2 5 DISPATCH 起草 6 已在 85 内含，不重复计；M3 实施期 5 edge host 缺，挂账 user）。
+继承 v0.4 §1.5 docs 主表 47 文件 107 行 + notes 自伤小节 2 文件；v0.5 升级范围（DISPATCH-T-M3 exec 自引入实测 6 行 + DISK-CALIB.md git add 后自引入 3 行 + audit-scope/prompt v0.5 自伤实测 7+6 行）= 总锚定 **tracked 重锚 post-v0.5 实测 tracked = 117 行（49 文件，git add DISK-CALIB.md 后）/ disk 三源同值 = 124 行（50 文件）**（tracked = 107 + 6 + 1 + 3 + 0 + 0 + 0 = 117 = 107 v0.4 终态实测（a1f8e82 post-commit Codex 实测）+ #49 DISPATCH-T-M3 自引入 6 + cc-ready flip status 引入 1 行 + #53 DISK-CALIB.md 自引入 3 行；disk = 117 + audit-scope 自伤 7 = 124；M2 5 DISPATCH 起草 6 已在 85 内含，不重复计；M3 实施期 5 edge host 缺，挂账 user）。
 
 **v0.5 升级范围**（8 文件）：
 
@@ -47,24 +47,28 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.5-prec
 | 7 | `notes/codex-audit-scope-v1.1-m0c-v0.5-precommit-prompt.md` | NEW（配套 Codex 复审 prompt）| **4**（§3 验证命令矩阵 4 处 grep + §6 hygiene 8 项）| notes/ 不入主合同 |
 | 8 | `docs/poll/cc-ready.json` | Edit（task_id → T-M3-DISPATCH-PASS + status 翻牌 + 8 文件清单）| 0 | grep 字面 0 行 |
 
-**docs 主表**（继承 v0.4 §1.5 #1-#48 47 文件 107 行 + #49 DISPATCH-T-M3 6 + #50 audit-scope 自伤 3 + #51 prompt 自伤 4 + #52 ADR 0011 0 = **48 文件 114 行 tracked / 51 文件 128 行 disk**）：
+**docs 主表**（继承 v0.4 §1.5 #1-#48 47 文件 107 行 + #49 DISPATCH-T-M3 6 + cc-ready flip 1（flip 引入行归 #49 批次） + #50 audit-scope 自伤 7 + #51 prompt 自伤 6 + #52 ADR 0011 0 + #53 DISK-CALIB.md 自引入 3 = **49 文件 117 行 tracked（git add DISK-CALIB.md 后）/ 50 文件 124 行 disk 三源同值**）：
 
-- ✅ #1-#48 继承 v0.4 47 文件 108 行（per `notes/codex-audit-scope-v1.1-m0c-v0.4-precommit.md` §1.5；v0.4 终态实测 108 行 = 107 起草 + 1 行历史漂移 = 47 文件 108 行）
-- 🆕 #49 `docs/DISPATCH-T-M3-DISPATCH.md` 6 行（v0.5 实测：§2 验收 (a)(b)(c)(d) 4 处 grep 字面 + §4 hygiene #1 grep pattern 字面 ×1 + §6 自引入预演 (a)(b)(c) 字面 ×1 + §3 tracked 锚定 grep 字面 ×1 = 6 行；per v0.5 hard rule (c) commit 前预演入列 + (b) commit 后立即复审）
-- 🆕 #50 `notes/codex-audit-scope-v1.1-m0c-v0.5-precommit.md` 8 行（本文件自伤：§1 grep 命令字面 ×3 + §4.5 IP 守门字面 ×1 + §4.5.5 单 host 现实字面 ×1 + §5 自检表字面 ×1 + §6 演进链字面 ×1 + §7 教训字面 ×1 = 8 行实测；notes/ 自伤豁免不入 tracked）
-- 🆕 #51 `notes/codex-audit-scope-v1.1-m0c-v0.5-precommit-prompt.md` 6 行（§3 验证命令矩阵 grep ×1 + §6 hygiene checklist 8 项 grep ×1 + §4 自引入预演字面 ×1 + §7 教训字面 ×1 + §3#4 H1 收窄字面 ×1 + §5.3 修订日志字面 ×1 = 6 行实测；notes/ 自伤豁免不入 tracked）
+- ✅ #1-#48 继承 v0.4 47 文件 107 行（per `notes/codex-audit-scope-v1.1-m0c-v0.4-precommit.md` §1.5；v0.4 终态 = 107 行 = a1f8e82 post-commit Codex 实测）
+- 🆕 #49 `docs/DISPATCH-T-M3-DISPATCH.md` 6 行 + cc-ready flip status 引入 1 行（v0.5 实测：DISPATCH §2 验收 (a)(b)(c)(d) 4 处 grep 字面 + §4 hygiene #1 grep pattern 字面 ×1 + §6 自引入预演 (a)(b)(c) 字面 ×1 + §3 tracked 锚定 grep 字面 ×1 = 6 行 DISPATCH 自伤；cc-ready flip 引入 1 行归 #49 批次；per v0.5 hard rule (c) commit 前预演入列 + (b) commit 后立即复审）
+- 🆕 #50 `notes/codex-audit-scope-v1.1-m0c-v0.5-precommit.md` 7 行（本文件自伤实测：§1 grep 命令字面 ×4 + §1.5 tracked+disk 验收命令字面 ×2 + §6 v0.5 升级前向交付物 grep 字面 ×1 = 7 行实测，DISK-CALIB 后实测；notes/ 自伤豁免不入 tracked + 仅本文件计入 disk 范围）
+- 🆕 #51 `notes/codex-audit-scope-v1.1-m0c-v0.5-precommit-prompt.md` 6 行（§3 验证命令矩阵 grep ×1 + §6 hygiene checklist 8 项 grep ×1 + §4 自引入预演字面 ×1 + §7 教训字面 ×1 + §3#4 H1 收窄字面 ×1 + §5.3 修订日志字面 ×1 = 6 行实测；notes/ 自伤豁免不入 tracked + 不在 disk §1 命令范围不计）
 - #52 `adr/0011-v1.1-cycle-closure.md` 0 行（v0.5 实测；ADR 0011 是 v1.1+ 周期新 ADR ≥ 0010，非冻结对象）
-- 总计：**48 文件 114 行 tracked（v0.5 实测）/ 51 文件 128 行 disk 含 notes/ 自伤豁免（v0.5 实测）**
+- 🆕 #53 `docs/DISPATCH-T-M3-V0.5-DISK-CALIB.md` 3 行（DISK-CALIB 实测：§2 验收 (1) disk 命令字面 + (3) tracked 命令字面 + (4) CHANGELOG/README 命令字面 = 3 行；git add 后入 tracked；DISK-CALIB.md 在 docs/ 下被 §1 命令范围包含，故计入 disk；DISPATCH 走 §1.5 自伤豁免）
+- 总计：**49 文件 117 行 tracked（git add DISK-CALIB.md 后实测）/ 50 文件 124 行 disk 三源同值（v0.5 + DISK-CALIB 实测，disk = tracked 117 + audit-scope 自伤 7）**
 
 **tracked 重锚 post-v0.5 实测公式**（2026-09-02 v0.5 实测，commit 后）：
-- v0.4 post-stage 实测: 108 行 / 47 文件（v0.4 主表合计 107 起草 + 1 行历史漂移 = 47 文件 108 行实测）
+- v0.4 post-stage 实测: **107 行 / 47 文件**（v0.4 终态 = a1f8e82 post-commit Codex 实测；不再记为「108 含 1 行历史漂移」——演进链归属按 V-B 修正）
 - + #49 DISPATCH-T-M3 exec 自引入 实测 6（起草预测 4，+2 over：§2 验收命令 (a)(b)(c)(d) 4 处 + §3 tracked 锚定命令 1 处 + §4 hygiene #1 1 处 + §6 自引入预演 (a)(b)(c) 3 处 = 11 字面，去重 6 行实测）
-- + #50 v0.5 audit-scope 自伤 实测 8（起草预测 3，+5 over：§1 grep 命令字面 ×3 + §4.5 IP 守门字面 ×1 + §4.5.5 单 host 现实字面 ×1 + §5 自检表字面 ×1 + §6 演进链字面 ×1 + §7 教训字面 ×1 = 8 行实测；notes/ 自伤豁免不入 tracked）
-- + #51 v0.5 prompt 自伤 实测 6（起草预测 4，+2 over：§3 验证命令矩阵 + §6 hygiene 8 项 + §4 自引入预演 + §7 教训 + §3#4 H1 收窄 + §5.3 修订日志 = 6 行实测；notes/ 自伤豁免不入 tracked）
+- + cc-ready flip 1 行（status 引入 pattern 字面；归 #49 批次）
+- + #50 v0.5 audit-scope 自伤 实测 7（Codex 报告时 6 漏数 §6 :207 一行；DISK-CALIB 实测 7 = §1 grep 命令字面 ×4 + §1.5 tracked+disk 验收命令字面 ×2 + §6 v0.5 升级前向交付物 grep 字面 ×1；notes/ 自伤豁免不入 tracked + 仅本文件计入 disk 范围）
+- + #51 v0.5 prompt 自伤 实测 6（起草预测 4，+2 over：§3 验证命令矩阵 + §6 hygiene 8 项 + §4 自引入预演 + §7 教训 + §3#4 H1 收窄 + §5.3 修订日志 = 6 行实测；notes/ 自伤豁免不入 tracked + 不在 disk §1 命令范围）
 - + #52 ADR 0011 实测 0（v0.5 NEW ADR ≥ 0010；与 v0.5 起草预测 0 一致）
-- **实测 tracked (git add 后): 108 + 6 + 0 + 0 + 0 = 114 行 / 48 文件（46 v0.4 + DISPATCH-T-M3 + ADR 0011）**
-- **实测 disk (含 notes/ 自伤豁免): 114 + 8 + 6 = 128 行 / 51 文件（disk 实测 docs/ 114 + adr/ 0 + spec/ 0 + audit-scope 8 + prompt 6 = 128）**
-- 验收命令 tracked：`git ls-files docs/ adr/ spec/capabilities/ | xargs grep -cE "Fable 5|GLM 5.3|MiniMax-M3" 2>/dev/null | grep -v ":0$" | awk -F: '{s+=$NF} END{print s}'` 实测 tracked == 114（commit 后）
+- + #53 DISK-CALIB.md 实测 3（DISK-CALIB 自引入：§2 验收 9 项 verbatim 中 (1) disk 命令 + (3) tracked 命令 + (4) CHANGELOG/README 命令各含 grep pattern 字面 1 行 = 3 行；git add 后入 tracked；DISK-CALIB.md 在 docs/ 下被 §1 命令范围包含）
+- **实测 tracked (DISK-CALIB.md git add 后): 107 + 6 + 1 + 0 + 0 + 0 + 3 = 117 行 / 49 文件（47 v0.4 + DISPATCH-T-M3 + ADR 0011 + DISK-CALIB.md）**
+- **实测 disk 三源同值 (per §1 disk 命令): 117 + 7 = 124 行 / 50 文件（49 tracked 文件 + 本 audit-scope 单文件）**
+- 验收命令 tracked：`git ls-files docs/ adr/ spec/capabilities/ | xargs grep -cE "Fable 5|GLM 5.3|MiniMax-M3" 2>/dev/null | grep -v ":0$" | awk -F: '{s+=$NF} END{print s}'` 实测 tracked == 117（DISK-CALIB.md git add 后；DISK-CALIB.md 未 add 时 == 114）
+- 验收命令 disk：`grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/ adr/ spec/capabilities/ notes/codex-audit-scope-v1.1-m0c-v0.5-precommit.md | wc -l` 实测 disk == 124（DISK-CALIB.md git add 后三源同值；公式 = tracked 117 + 本 audit-scope 自伤 7）
 
 **豁免口径不变**（per M0b plan §3 L89 C2 裁定 + v0.4 §1.5 末段）：**不清洗历史文档**（考古记录 + git 尾注 + DISPATCH §2/§4 验证命令字面均保留）。
 
@@ -232,6 +236,13 @@ grep -rE "https://fcm\.googleapis\.com|https://updates\.push\.services\.mozilla\
    - DEEPSEEK_API_KEY / VAPID_PRIVATE_KEY → user 真实部署前填入 server `/opt/puer-hub/.env`
    - TAILSCALE_AUTH_KEY → user 真实 provision edge host 时持有
    - 5 edge host (east-1/west-1/asia-1/eu-1/sa-1) → user 真实 VPS 采购 + Tailscale 节点 + Docker Compose 部署
+
+4. **disk 口径首用四方裂（第十次锚定事故·disk 变体 — DISK-CALIB 2026-09-02 立）**：
+   - **病灶**：v0.5 commit 时 §1 disk 命令实测 **121**（Codex 报告时漏数 §6 一行实测 120）vs 期望 ≥**128**（公式把范围外 prompt 6 越界计入）vs 主表「51 文件 128」vs message「126」——四方四数（121 / 公理应 122 / 126 / 128）；并发病灶 #50 自伤声称 6（Codex 实测漏数 §6）vs 实测 7
+   - **修法（per `docs/DISPATCH-T-M3-V0.5-DISK-CALIB.md`）**：disk 期望改 **== 124**（实测为准；范围即 §1 命令明文 docs/ adr/ spec/ + 本 audit-scope 单文件；公式 tracked 117（git add DISK-CALIB.md 后 = 114 + 3）+ 本文件自伤实测 7 = 124；DISK-CALIB.md 在 docs/ 下被 §1 命令范围包含故计入 disk；prompt 不在命令范围不计）；主表 disk 行改「50 文件 124 行 disk 三源同值」= 49 tracked + audit-scope 单文件 7 自伤实测；#50 行 6 → 7 并注 §6 漏数修正；message 126 记档不改写
+   - **机制条款（NEW v0.5 立）**：disk 口径与 tracked 同走「命令 == 期望 == 主表」三源同值 + 权威源单点维护（v0.4 §7.3 ② 延伸至 disk）；**新口径启用前必须先跑命令再写期望，且公式只计命令范围内文件（prompt 越界计入是本轮病灶之一）+ 全文 grep pattern 字面实测去重要跨节（不只算单节）**；主表 disk 行固定锚定 §1 命令实测，禁止双口径并行手算
+   - **演进链归属（V-B 顺带收口）**：v0.4 终态 = **107**（`a1f8e82` post-commit Codex 实测）；+1 实为 `3d24eeb` 自身 cc-ready 翻牌 status 引入的 pattern 字面（flip 归 #49 批次）——数学殊途同归（107+1+6 = 114）但叙事错一行；DISK-CALIB 演进链改 `107 v0.4 终态实测 → 114 v0.5 = 107 + #49 DISPATCH-T-M3 6 + cc-ready flip 1`
+   - **提示（V-C 借鉴）**：prompt/DISPATCH 引用演进链终值时**只引用 audit-scope §1.5 主表唯一权威源**，不复制绝对数字（v0.5 引用式纪律实测 5 处 PASS + DISPATCH §3 路径选择 ×1 权威源标注 = 6 处落地）；后续演进链数字仅在 audit-scope 一处维护
 
 ---
 
