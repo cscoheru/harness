@@ -67,7 +67,7 @@
 
 - ✅ 前向交付物 `CHANGELOG.md + README.md + M2 DD-1 报告` grep `Fable 5|GLM 5.3|MiniMax-M3` = **0**（实测）
 - ✅ DD-1 报告 4 处（§Author/§Co-Authored-By/守门描述/命令字面）走 §1.5 自伤豁免
-- ✅ tracked 重锚 post-M2 实测 = **103**（演进链：91 预估 → 97 CALIB → 101 FIX-2 自引入 → 103 FIX-2 实测；45 文件；M2 5 DISPATCH 起草 6 已在 85 内含不重复计；v0.4 HYGIENE-FIX-2 commit `ed36bd7` 后实测）
+- ✅ tracked 重锚 post-M2 = **audit-scope §1.5 主表合计（唯一权威源；2026-09-02 终态 107 / 46 文件，演进链：91 预估 → 97 CALIB → 101 #46 → 103 FIX-2 实测 → 107 #48 PROMPT-SYNC 实测 4）**（引用式；prompt 不复制绝对数字，防第九次漂移回归）
 
 ### (D) v1.0 runtime 不漂移守门（5 文件改动范围）
 
@@ -132,9 +132,9 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" CHANGELOG.md README.md | wc -l
 # 期望: 0（前向交付物不含 grep 字面）
 # 注: M2 DD-1 报告 4 处（§Author 尾注 / §不锁型号守门描述 / §verbatim 命令字面 / §Co-Authored-By 反向引用）走 audit-scope §1.5 #43 自伤豁免，不入前向范围；本命令收窄为 `CHANGELOG.md README.md` 与 §1.(C) 注记自洽
 
-# tracked 锚定 == 103（实测 / 2026-09-02 FIX-2 commit `ed36bd7` 后重测；演进链：91 预估 → 97 CALIB → 101 FIX-2 自引入 → 103 FIX-2 实测；45 文件；M2 5 DISPATCH 起草 6 已在 85 内含不重复计）：
+# tracked 锚定 == audit-scope §1.5 主表合计（唯一权威源引用式；2026-09-02 终态 107 / 46 文件；演进链：91 预估 → 97 CALIB → 101 #46 → 103 FIX-2 实测 → 107 #48 PROMPT-SYNC 实测 4；M2 5 DISPATCH 起草 6 已在 85 内含不重复计）：
 git ls-files docs/ adr/ spec/capabilities/ | xargs grep -cE "Fable 5|GLM 5.3|MiniMax-M3" 2>/dev/null | grep -v ":0$" | awk -F: '{s+=$NF} END{print s}'
-# 期望: == 103（实测 / FIX-2 重测；45 文件；M2 实施报告群 #40-#45 + FIX-2 自引入 #47 详 §1.5 表）
+# 期望: == audit-scope §1.5 主表合计（唯一权威源引用式；2026-09-02 终态 107 / 46 文件；演进链 91 → 97 → 101 → 103 → 107；M2 实施报告群 #40-#45 + #46/#47/#48 详 §1.5 表）
 
 # === 5. DEEPSEEK_API_KEY + VAPID 私钥不泄漏 ===
 grep -rE "sk-[a-z0-9]{32,}" CHANGELOG.md README.md docs/reports/ | wc -l
@@ -292,19 +292,19 @@ codex -m gpt-5.6-sol -c model_reasoning_effort=xhigh \
 
 ### 5.3 修订日志格式
 
-v0.4 升级 commit hash 回填：`277cdf8` (T-M2-V0.4-GATE-CALIB) → `ed36bd7` (T-M2-V0.4-HYGIENE-FIX-2) → `[TBD: PROMPT-SYNC commit hash]` (本轮提交后回填)
+v0.4 升级 commit hash 回填：`277cdf8` (T-M2-V0.4-GATE-CALIB) → `ed36bd7` (T-M2-V0.4-HYGIENE-FIX-2) → `59ccce0` (T-M2-V0.4-PROMPT-SYNC) → `fb976fb` (cc-ready flip + #48 漂移修正) —— hash 链全回填，占位符零残留（per S2 验收）
 
 Codex formal report 落点：`notes/codex-review-v1.1-m0c-v0.4-formal-report.md`（已落 — 首审 0C/4M/3m CHANGES REQUIRED → §5 复审轮 0C/1M/1m → §6 prompt 复审轮 0C/2M/2m → T-M2-V0.4-PROMPT-SYNC 修完即终态 PASS）
 
 v0.4 升级沉淀记录：
 ```
-v0.4 升级 | 277cdf8 (GATE-CALIB) → ed36bd7 (FIX-2) → [TBD: PROMPT-SYNC] | 2026-09-02 | §4.5/§4.6/§4.7 M2 三守门正式启用（GATE-CALIB 校准：IP 排除 node_modules / tmp 排除 test/ / whisper 排除 `${` / VAPID 公钥期望反向 == 0 / H5 pattern `[a-z][a-z0-9-]*`）| Codex formal: CHANGES REQUIRED (0C/4M/3m) → GATE-CALIB fix 轮 (0C/1M/1m) → PROMPT-SYNC 收口 (本轮) → 终态 PASS 待覆写
+v0.4 升级 | 277cdf8 (GATE-CALIB) → ed36bd7 (FIX-2) → 59ccce0 (PROMPT-SYNC) → fb976fb (flip) | 2026-09-02 | §4.5/§4.6/§4.7 M2 三守门正式启用（GATE-CALIB 校准：IP 排除 node_modules / tmp 排除 test/ / whisper 排除 `${` / VAPID 公钥期望反向 == 0 / H5 pattern `[a-z][a-z0-9-]*`）| Codex formal: CHANGES REQUIRED (0C/4M/3m) → GATE-CALIB fix 轮 (0C/1M/1m) → PROMPT-SYNC 收口 → **终态 PASS 0C/0M/0m（formal 报告 §7）**
 ```
 
 **先跑后写铁律第三次失守教训（2026-09-02 立，per §6 P-2）**：commit message / report 声明「已回填 / 已验证 / 已实测」类必须附**行号证据**（如「L295/L301 已回填 277cdf8/ed36bd7」+ grep `277cdf8 file` ≥ 1 实测），否则被 Codex 复审检出。前科三次同型失守：
 - (a) `f666e47` commit message 声明「grep=0」实测 4 命中（v0.3 DD-1）
 - (b) M-C 「启用前期望值经验证」声明失实（v0.4 GATE-CALIB）
-- (c) C5「placeholder 已回填」声明失实，本 §5.3 L295/L301 仍 `[TBD]` ×2（v0.4 PROMPT-SYNC）
+- (c) C5「placeholder 已回填」声明失实，本 §5.3 L295/L301 当时仍占位符 ×2（v0.4 PROMPT-SYNC 轮回填）
 
 **修法**：commit message + audit-scope/report 声明「已 X」类必走 (i) 实测 grep 命中行号 + (ii) 三源同值（命令==清单==期望），任一未跑即不得 commit。
 
@@ -373,7 +373,7 @@ grep -rE "https://fcm\.googleapis\.com|https://updates\.push\.services\.mozilla\
 
 - [x] (A) v0.4 升级完整性 — CHANGELOG 5 子段 + README M2 5 子段
 - [x] (B) M2 DD-1 实施报告 6 段齐全
-- [x] (C) 不锁型号守门 — §3 验证 #4 + tracked 锚定 == 103（实测 / FIX-2 重测）
+- [x] (C) 不锁型号守门 — §3 验证 #4 + tracked 锚定 == audit-scope §1.5 主表合计（唯一权威源引用式，终态 107 / 46 文件）
 - [x] (D) v1.0 runtime 不漂移守门 — §3 验证 #6
 - [x] (E) DEEPSEEK_API_KEY + VAPID 私钥不泄漏 — §3 验证 #5
 - [x] (F) M2 三守门正式启用 — §3 验证 #7（§4.5/§4.6/§4.7 三项全部 PASS）

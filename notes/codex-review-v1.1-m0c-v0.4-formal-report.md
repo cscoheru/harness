@@ -128,6 +128,47 @@
 
 - FIX-2 三项修复**全部确认**（§6.1）；prompt 本体累计 **0C/2M/2m** → 当前 **CHANGES REQUIRED（0C/2M/2m）**，签发 `T-M2-V0.4-PROMPT-SYNC`（纯文本同步轮：prompt 103 全量 + H1 收窄 + hash 回填 + checklist 勾稽 + audit-scope 103 收口）→ 修完 **v0.4 终态 PASS 归档**（cc-ready pending 信号 #1 兑现）→ M3 放行等 user「Start v1.1 M3」
 
+## §7 终审轮（2026-09-02，`59ccce0` PROMPT-SYNC + `fb976fb` flip 后回看——三段 findings 成立性 + 修复性终验）
+
+> 基线：HEAD = `fb976fb`，修复链 5 commits = `277cdf8` GATE-CALIB → `ed36bd7` HYGIENE-FIX-2 → `9eb35f5`（v0.3 HYGIENE-FIX 归档，前段链）→ `59ccce0` PROMPT-SYNC → `fb976fb` flip；本终审轮同步完成最后收口（见 §7.3）后 commit 归档。
+
+### §7.1 三段 findings 成立性 + 修复性回看总表
+
+| 段 | Finding | 成立? | 修复 commit | 终验（verbatim） | 修复? |
+|----|---------|-------|------------|------------------|-------|
+| §2 首审 | M-A 前向字面 README:342 | ✅ | `277cdf8` C1 | CHANGELOG+README = **0** | ✅ |
+| §2 首审 | M-B 锚定 97/91/89 三数互斥 + 重复计数 | ✅ | `277cdf8` C2（当轮 97）| 终态 **107/46 三源同值**（§7.3 收口后） | ✅ |
+| §2 首审 | M-C 三守门「已验证」失实 ×4 | ✅ | `277cdf8` C3 | IP=1 白名单落注 / tmp=0 / whisper=0 / 公钥=0 | ✅ |
+| §2 首审 | M-D README 缺 5 边缘 Funnel URL | ✅ | `277cdf8` C4 | unique host = **6** | ✅ |
+| §2 首审 | m1-3（DD-1 口径/26 项/placeholder） | ✅ | `277cdf8` C5 | 首审项落位（placeholder 终态见 P-2 链） | ✅ |
+| §5.2 复审 | F-1 锚定 97→101 自引入未入列（第八次） | ✅ | `ed36bd7` F1 | #46/#47 入列 + message 附实测 | ✅ |
+| §5.2 复审 | F-2 IP 白名单未落合同 | ✅ | `ed36bd7` F2 | §4.5 注记 ✓ | ✅ |
+| §6.2 prompt | P-1 锚定三时点 + H1 命令矛盾 | ✅ | `59ccce0` S1 | 91/97 清零 + H1 收窄；终态引用式（§7.3） | ✅ |
+| §6.2 prompt | P-2 placeholder 声明失实 ×2 | ✅ | `59ccce0` S2（回填 2/4）| **终态 4/4 全回填**（§7.3：L295/L301 + cc-ready 5 处 → TBD=0） | ✅ |
+| §6.2 prompt | P-4 checklist 未勾稽 | ✅ | `59ccce0` S3 | `[x]` ×9 + 判定 ☑ + findings 表 | ✅ |
+| §6.2 prompt | P-5 audit-scope 101→103 最后一公里 | ✅ | `59ccce0` S4 | §7.3 终态 107 收口（103 又被 #48 推进——见下） | ✅ |
+
+**结论：三段 11 项 findings 全部成立、全部修复。**
+
+### §7.2 修复链期间的声明失实事件（已全部收口，记档不改写）
+
+`f666e47`（v0.3 grep=0 实测 4）→ v0.4 首审 M-C（「期望值经验证」×4）→ C5（placeholder「已回填」实测 0/2）→ `59ccce0`（S2 验收「TBD==0」实测 3：给自己留新 TBD + cc-ready 5 处时点占位；S1「prompt 103 全量」在 PROMPT-SYNC commit 后又被 #48 实测 4 推至 107——第九次漂移苗头）。**全部在本终审轮收口**，教训链完整记入 audit-scope §7。
+
+### §7.3 终审轮最后收口（本轮 Codex 直改，4 项）
+
+1. **锚定终态 107/46 三源同值**：audit-scope §1 期望/§1.5 标题/主表标题/总计行 == **107（46 文件）**（公式 85+12+4+2+4=107；演进链 91→97→101→103→107）——修正 `fb976fb` 留下的「47 文件」笔误与 103 悬空
+2. **prompt 绝对数字改引用式**（根治第九次漂移回归）：prompt L70/L135/L137/L376 → 「== audit-scope §1.5 主表合计（唯一权威源）」——prompt/报告不再复制锚定绝对数字
+3. **placeholder 终态清零**：prompt L295/L301 hash 链四段全回填（`277cdf8`→`ed36bd7`→`59ccce0`→`fb976fb`）+ cc-ready 全字段 5 处 TBD 回填（递归替换，JSON valid 复验）
+4. **自指/考古字面清理**：prompt「无 TBD 残留」自指文字、教训段 `[TBD]` 引文 → 占位符表述（机械验收 TBD==0 可过）
+
+### §7.4 终审验收（verbatim，本报告 §7.5 同步勾稽）
+
+锚定命令 == 107 == 主表合计 107/46 == prompt 引用式 ✓；CHANGELOG+README = 0；DD-1 报告 2（#43 豁免）；tsc（本地 bin）exit 0；vitest 0 failed（95p/69s）；v1.0 runtime diff = 0；IP=1 白名单 / tmp=0 / whisper=0 / VAPID 公私钥=0；TBD 全仓 = 0；cc-ready JSON valid / `T-M2-V0.4-PROMPT-SYNC-PASS`
+
+### §7.5 终态判定
+
+**v0.4 升级 + M2 实施收口 终态 PASS（0C/0M/0m）**。三段 findings 11 项全部成立 + 全部修复；修复链 5+ commits 声明失实 4 起全部收口并记档；锚定机制以「§1.5 主表唯一权威源 + 引用式」根治数字复制回归（九次漂移史封账）。**M3 阶段 GA final 放行**（等 user「Start v1.1 M3」+ 6 host 真部署 E2E 两 pending 信号）。
+
 ---
 
-*codex review done — v0.4 prompt 复审轮：FIX-2 F-1/F-2/F-3 全部修复确认（#46/#47 入列 + 白名单注记 + hard rule 4 条并自践行）；prompt 本体 CHANGES REQUIRED 0C/2M/2m（P-1 锚定 91/97/103 三时点并存 + H1 命令矛盾 / P-2 placeholder 声明失实 ×2 / P-4 checklist 未勾稽 / P-5 audit-scope 101→103 最后一公里）；签发 T-M2-V0.4-PROMPT-SYNC，修完即 v0.4 终态 PASS。*
+*codex review done — v0.4 终审轮 **PASS（0C/0M/0m）**：三段 findings（§2 首审 4M/3m + §5.2 F-1/F-2 + §6.2 P-1/P-2/P-4/P-5）11 项全部成立、全部修复；修复链 4 起声明失实全部收口记档；终审轮 4 项收口（锚定 107/46 三源同值 + prompt 引用式根治 + placeholder 全仓清零 + 自指字面清理）；tsc 0 / vitest 0f；v0.4 终态 PASS，M3 放行。*

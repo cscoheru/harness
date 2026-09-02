@@ -17,7 +17,7 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" CHANGELOG.md README.md docs/reports/T-M2-D
 
 # 历史文档豁免口径锚定（tracked 重锚 post-M2，实测）：
 git ls-files docs/ adr/ spec/capabilities/ | xargs grep -cE "Fable 5|GLM 5.3|MiniMax-M3" 2>/dev/null | grep -v ":0$" | awk -F: '{s+=$NF} END{print s}'
-# 期望: == 103（post-commit 演进链：91 预估 → 97 CALIB → 101 FIX-2 自引入 → 103 FIX-2 实测 + PROMPT-SYNC #48 自引入预演 3 = 106；实测 45 文件 103 行 / 2026-09-02 FIX-2 commit ed36bd7 后重测；PROMPT-SYNC commit 后以实测为准）
+# 期望: == 107（终态 / 2026-09-02 PROMPT-SYNC 59ccce0 + flip fb976fb 后实测；演进链：91 预估 → 97 CALIB → 101 #46 自引入 → 103 FIX-2 实测 → 107 #48 PROMPT-SYNC 实测 4；公式 85 + M2 报告群 12 + #46 4 + #47 2 + #48 4 = 107 / 46 文件）
 # 注: 公式 = v0.3 tracked (85) + M2 实施报告群 12 行（#40 BE-1 rep 3 + #41 TG-1 rep 2 + #42 DO-1 rep 2 + #43 DD-1 rep 2 + #44 QA-1 rep 1 + #45 QA-1 test-plan 2）+ #46 GATE-CALIB exec 4 + #47 HYGIENE-FIX-2 exec 自引入 2 = 103
 
 # 历史文档豁免口径锚定（disk 口径）：
@@ -31,7 +31,7 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.4-prec
 
 **含义**：v1.1+ 周期模型决策遵守 NORTH-STAR A-4 等价类约束；v0.4 升级前向交付物（CHANGELOG.md + README.md + M2 DD-1 报告）均不含具体型号字面；DD-1 报告 §Author/§Co-Authored-By 走 §1.5 豁免。
 
-### §1.5 历史文档豁免清单（tracked 重锚 post-M2 = 103，实测 45 文件 103 行 / 2026-09-02 FIX-2 后重测）
+### §1.5 历史文档豁免清单（tracked 重锚 v0.4 终态 = 107，实测 46 文件 107 行 / 2026-09-02 PROMPT-SYNC + flip 后重测；本主表 = 锚定唯一权威源，prompt/报告一律引用不复制数字）
 
 继承 v0.3 §1.5 docs 主表 37 文件 85 行 + notes 自伤小节 2 文件 8 行；v0.4 升级范围（M2 实施报告群 6 文件 12 行 + GATE-CALIB exec 自引入 4 行〔修复 commit 自带执行书 pattern 字面〕+ HYGIENE-FIX-2 exec 自引入 2 行〔修复 commit 自带执行书 pattern 字面，per v0.3 #39 / v0.4 #46 即时入列先例〕+ v0.4 audit-scope/prompt 自伤 ~3 行）= 总锚定 **tracked 重锚 post-M2 实测 = 103**（85 + 12 + 4 + 2 = 103；45 文件；M2 5 DISPATCH 起草 6 已在 85 内含，不重复计；PROMPT-SYNC #48 自引入预演 3 行待 commit 后实测）。
 
@@ -45,7 +45,7 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.4-prec
 | 4 | `notes/codex-audit-scope-v1.1-m0c-v0.4-precommit.md` | NEW（本文件）| 0 | notes/ 不入主合同 |
 | 5 | `notes/codex-audit-scope-v1.1-m0c-v0.4-precommit-prompt.md` | NEW（配套 Codex 复审 prompt）| 0 | notes/ 不入主合同 |
 
-**docs 主表**（继承 v0.3 §1.5 #1-#39 + M2 实施报告群 6 文件 12 行 + GATE-CALIB exec 自引入 4 行 + HYGIENE-FIX-2 exec 自引入 2 行 = **45 文件 103 行，实测 / 2026-09-02 FIX-2 后重测**）：
+**docs 主表**（继承 v0.3 §1.5 #1-#39 + M2 实施报告群 6 文件 12 行 + #46 GATE-CALIB exec 4 + #47 FIX-2 exec 2 + #48 PROMPT-SYNC exec 4 = **46 文件 107 行，实测 == 107 / 2026-09-02 终态**）：
 
 - ✅ #1-13 v0.1 历史档案 13 文件 42 行
 - ✅ #16-20 v0.2 M1c 5 DISPATCH 5 行
@@ -74,7 +74,7 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.4-prec
 - ✅ #46 T-M2-V0.4-GATE-CALIB 执行书 4 行（v0.4 GATE-CALIB 修复 commit 277cdf8 自引入：§3 验收命令 grep pattern 字面 ×4；per v0.3 #39 即时入主表先例补列；Codex formal 报告 §5.2 F-1 第八次锚定漂移教训）
 - ✅ #47 T-M2-V0.4-HYGIENE-FIX-2 执行书 2 行（v0.4 HYGIENE-FIX-2 commit `ed36bd7` 自引入预演 2 行实测：§2 验收命令 grep pattern 字面 ×2；FIX-2 修复 commit 自带执行书 pattern 字面，按 v0.3 #39 / v0.4 #46 即时入主表先例补列）
 - 🆕 #48 T-M2-V0.4-PROMPT-SYNC 执行书 4 行实测（PROMPT-SYNC commit 59ccce0 实测命中 4 行：§2 验收 (a) `grep -cE "Fable 5..."` ×1 + (b) `grep -rE "Fable 5..."` ×1 + (c) `grep -rE "Fable 5..." CHANGELOG.md README.md` ×1（H1 收窄命令同步）+ (d) prompt §3#4 新增 `grep -rE "Fable 5..." CHANGELOG.md README.md` ×1；per v0.5 hard rule (c) commit 前预演入列 + (b) commit 后立即复审；预演 3 行实测 4 行 +1 漂移已修）
-- 总计：**47 文件 107 行（FIX-2 实测 / 2026-09-02 + #48 PROMPT-SYNC 实测 4 行）/ commit 后实测 107 / 47 文件**
+- 总计：**46 文件 107 行（实测 == 107 / 46 文件，终态 2026-09-02；公式 85 + M2 报告群 12 + #46 4 + #47 2 + #48 4 = 107；文件数 46 = 43 + CALIB/FIX-2/PROMPT-SYNC 执行书 3）**
 
 **tracked 重锚 post-M2 实测公式**（2026-09-02 FIX-2 后重测）：
 - v0.3 post-stage: 85（37 文件 docs/adr/spec/capabilities + 2 文件 notes 自伤 = 39 文件 85 行；M2 5 DISPATCH 起草 6 行已含入 85，不重复计）
