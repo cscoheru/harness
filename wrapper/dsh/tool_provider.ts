@@ -179,19 +179,24 @@ export class DshToolProvider implements IToolProvider {
 
   /**
    * Parse dsh CLI response into ToolInvokeResult.
+   *
+   * M1c note: dsh CLI stdout is plain text (not JSON-wrapped), so traceId may
+   * be undefined. We synthesise a fallback traceId from taskId + wall clock
+   * so artifactId is always a non-empty string (useful for audit trail).
    */
   private _parseResponse(
     request: ToolInvokeRequest,
     response: Awaited<ReturnType<typeof dshInvoke>>,
   ): ToolInvokeResult {
     const { stdout, stderr, exitCode, wallMs, traceId, tokenUsage, denialReason } = response;
+    const fallbackTraceId = traceId ?? `dsh-${request.taskId}-${wallMs}-${Math.random().toString(36).slice(2, 8)}`;
 
     if (exitCode !== 0 || denialReason) {
       return {
         capabilityId: request.capabilityId,
         result: { stdout, stderr, wallMs },
         denialReason: denialReason ?? `dsh exit code ${exitCode}`,
-        artifactId: traceId,
+        artifactId: fallbackTraceId,
       };
     }
 
@@ -201,11 +206,11 @@ export class DshToolProvider implements IToolProvider {
         stdout,
         stderr,
         wallMs,
-        traceId,
+        traceId: fallbackTraceId,
         tokenUsage,
       },
       denialReason: undefined,
-      artifactId: traceId,
+      artifactId: fallbackTraceId,
     };
   }
 }
