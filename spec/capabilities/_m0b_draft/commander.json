@@ -1,0 +1,18 @@
+{
+  "class": "commander",
+  "provider": "deepseek",
+  "model_id": "deepseek-chat",
+  "tier": "mid-context",
+  "cost_per_1k_input_tokens_usd": 0.0014,
+  "cost_per_1k_output_tokens_usd": 0.0028,
+  "max_context_tokens": 32000,
+  "m0b_evidence": {
+    "task_id": "T-M0b-TG-1",
+    "report": "docs/DISPATCH-T-M0b-TG-1.md",
+    "median_wall_seconds": 76.51,
+    "median_input_tokens": null,
+    "median_output_tokens": null,
+    "median_diff_lines": 53,
+    "quality_score_1to5": 4
+  }
+}

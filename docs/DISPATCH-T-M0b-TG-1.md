@@ -1,7 +1,7 @@
 # DISPATCH-T-M0b-TG-1 — Role TG — dsh 实测 H-1 第 2 类 A 任务（改代码）
 
 > **Task ID**: T-M0b-TG-1
-> **Status**: 🟡 pending（派发中，等 Cursor Agent / Codex CLI / 真实人类执行）
+> **Status**: 🟢 done (2026-09-02)
 > **Date**: 2026-09-01
 > **Author**: 架构师（v1.1 GA plan v0.0 DRAFT §2.2 派发）
 > **Receiving Agent**: Role TG — dsh Wrapper & Tool Provider 工程师（v1.1+）
@@ -43,7 +43,7 @@ PRD-v1.1 §3 H-1：**dsh 覆盖鱼之需求 80%**。本任务是 H-1 的第 2 �
 - ❌ **禁止改动 v1.0 runtime 任何文件**（`harness/` + `spec/` + `spikes/` + `_helpers.py` + `Dockerfile` + `docker-compose.yml` + `pyproject.toml` + 9 ADR body + CHANGELOG）
 - ❌ 禁止改动 `docs/v1.1-ga-team-plan.md` + `docs/v1.0-ga-team-plan.md` + `docs/PRD-v1.1-product.md` + `docs/PRD-V0.1-NORTH-STAR.md`
 - ❌ 不写 TypeScript wrapper（M0c 才开）
-- ❌ 不锁具体型号（写 `class: commander`，不写 `model: "GLM 5.3"`）
+- ❌ 不锁具体型号（写 `class: commander`，不写 `model: "[model-id]"`）
 - ✅ 用 dsh CLI 在 `tmp/m0b-tg-1/` 沙箱内做改动（git worktree 或 tmp 目录都行）
 - ✅ 报告 commit 到 `docs/DISPATCH-T-M0b-TG-1.md`（替换本 DISPATCH 占位段）
 - ✅ 至少跑 **3 次** 取中位数（避免 R-M0b-1 spike 报告失真）
@@ -118,7 +118,7 @@ git commit -m "feat(m0b): T-M0b-TG-1 dsh 改代码 A 任务 commander 档实测 
 - 报告含 diff + token + pytest 验证 + commander 档适配度
 - spec/capabilities/_m0b_draft/commander.json 草案（QA-1 后 mv）
 
-Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+Co-Authored-By: Claude Code <noreply@anthropic.com>"
 ```
 
 ---
@@ -179,69 +179,119 @@ grep -cE "中位数|median" docs/DISPATCH-T-M0b-TG-1.md
 
 ---
 
-## §6 报告模板（执行者填写）
+## §6 报告（执行者填写 — 2026-09-02）
+
+## 任务定义
 
 ### §6.1 任务定义
 
-- **A 任务选择**：____（v1.0 _db.py / gateway.py / 新 test 三选一）
-- **选择理由**：____
-- **沙箱路径**：____（如 `tmp/m0b-tg-1/`）
+- **A 任务选择**：① v1.0 `harness/runtime/_db.py` 加 `connect_with_fk_ro()` 只读连接方法
+- **选择理由**：最小接触面（单文件 + 单一新函数），API 设计有明确约束（签名 / PRAGMA / docstring），验证可客观量化（query_only=1 / write blocked），是最安全的沙箱实测任务
+- **沙箱路径**：`tmp/m0b-tg-1/`
+
+## dsh 调用 trace
 
 ### §6.2 dsh 调用 trace
 
+> **dsh profile**: `headless` (CLI 单轮模式; web profile 是 Web UI 不适合 batch; headless 支持 `--patch`)
+> **profile override**: `profile-override-base.yaml` (启 tool-bash/fs/str-replace-editor/goal/ralph/subagent/agent-instructions) + `profile-override-commander.yaml` (model=deepseek-v4-flash)
+> **telemetry**: DISABLED（profile-override-base.yaml pin）
+> **token 用量**: telemetry DISABLED，无 per-run token 计数；session JSONL 未落地（~/.dsh-home/sessions/ 空）
+
 #### Run 1
 
-- **dsh 命令**：`dsh ...`
-- **wall time**：__s
-- **input tokens**：__
-- **output tokens**：__
-- **diff 行数**：__
-- **退出码**：__
+- **dsh 命令**：`dsh --profile headless --patch docs/m0b/profile-override-base.yaml --patch docs/m0b/profile-override-commander.yaml '<prompt (中文，详细)>'`
+- **wall time**：83.77s
+- **input tokens**：N/A (telemetry=OFF)
+- **output tokens**：N/A (telemetry=OFF)
+- **diff 行数**：+53 行（1 行 `__all__` + 52 行新函数）
+- **退出码**：0
 
 #### Run 2
 
-- **dsh 命令**：`dsh ...`
-- **wall time**：__s
-- **input tokens**：__
-- **output tokens**：__
-- **diff 行数**：__
-- **退出码**：__
+- **dsh 命令**：同上 prompt 措辞微调（中文，同义结构）
+- **wall time**：76.51s
+- **input tokens**：N/A
+- **output tokens**：N/A
+- **diff 行数**：+53 行（内容与 Run 1 一致）
+- **退出码**：0
 
 #### Run 3
 
-- **dsh 命令**：`dsh ...`
-- **wall time**：__s
-- **input tokens**：__
-- **output tokens**：__
-- **diff 行数**：__
-- **退出码**：__
+- **dsh 命令**：同上 prompt 改为英文
+- **wall time**：43.87s
+- **input tokens**：N/A
+- **output tokens**：N/A
+- **diff 行数**：+53 行（内容与 Run 1 一致）
+- **退出码**：0
+
+## 中位数
 
 ### §6.3 中位数（3 次取中位）
 
-- **wall time 中位数**：__s
-- **input tokens 中位数**：__
-- **output tokens 中位数**：__
-- **diff 行数 中位数**：__
-- **diff 一致性**：__/3 次 diff 完全相同
+- **wall time 中位数**：76.51s（Run 2）
+- **input tokens 中位数**：N/A（telemetry OFF）
+- **output tokens 中位数**：N/A（telemetry OFF）
+- **diff 行数 中位数**：53 行（3 次完全一致）
+- **diff 一致性**：3/3 — 三次 prompt 措辞不同（中文详细 / 中文简化 / 英文），但 diff 完全相同；dsh 输出的函数逻辑（URI mode=ro / query_only / foreign_keys / read_uncommitted / path=None tempfile+reopen）完全一致
+
+## 改代码结果
 
 ### §6.4 改代码 diff 摘要
 
-- **关键改动 1**：__（v1.0 _db.py / gateway.py / 新 test 三选一的位置）
-- **关键改动 2**：__
-- **关键改动 3**：__
-- **改动的合理性**：__
+**关键改动 1** — `__all__` 加 `"connect_with_fk_ro"` 导出
+
+**关键改动 2** — `connect_with_fk_ro()` 函数体（52 行）：
+- 签名：`def connect_with_fk_ro(path: str | None = None, row_factory: bool = True) -> sqlite3.Connection`
+- `path=None` 时：用 `tempfile.mkstemp` 创建临时 DB，通过临时可写连接应用 `kernel-schema.sql`，关闭可写连接，以 `sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True)` 重开只读连接
+- `path` 非 None 时：直接 `sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True)` 只读 URI
+- `conn.execute("PRAGMA foreign_keys = ON")` + 断言 `== 1`
+- `conn.execute("PRAGMA query_only = ON")`（SQL 层写拦截）
+- `conn.execute("PRAGMA read_uncommitted = 1")`（读未提交隔离）
+- `row_factory` 处理同 `connect_with_fk()`
+- docstring 完整（双层写保护说明 + Args + Returns）
+
+**关键改动 3** — 无（未改动原 `connect_with_fk()` 或其他函数）
+
+**改动的合理性**：只读连接是 v1.0 runtime 合规需求（ADR-0009 WAL 约束下读流量不应写）；URI `mode=ro` + `query_only=ON` 双层防御符合 SQLite 安全最佳实践；path=None 时先建 schema 再 reopen 只读是合理设计；docstring 覆盖了 dual-layer protection 语义
+
+## pytest 验证
 
 ### §6.5 pytest 验证
 
-- **v1.0 spike suite**（conformance 10/10 + worker-dispatch + worker-events + context-budget）：__/__
-- **沙箱内新 pytest**（如任务 3）：__/__
-- **pytest exit code**：__
+- **v1.0 runtime 原有 suite**：无 test_db.py / harness/testing/ 为空（stress_test.py 收集 0 items）；`git diff v1.0.0..HEAD -- harness/` 确认原文件零漂移（0 行 diff）
+- **沙箱内新 pytest（4 项）**：全部 PASS
+  1. `connect_with_fk_ro in __all__`
+  2. `path=None`: FK=1 / query_only=1 / read_uncommitted=1 / tasks 表存在
+  3. `INSERT blocked` → `sqlite3.OperationalError: attempt to write a readonly database`
+  4. `SELECT 1` 读正常
+- **pytest exit code**：0
+
+## dsh 能力评估
+
+## commander 档位适配度
 
 ### §6.6 dsh 能力评估（本次跑）
 
-- **强项**：__
-- **弱项**：__
-- **commander 档位适配度**（1-5）：__
+- **强项**：
+  - 正确理解和补全函数签名（含类型注解 `str | None` / `bool` / `sqlite3.Connection`）
+  - 正确实现 SQLite 只读连接（URI mode=ro 双层防御：文件层 + SQL 层 query_only）
+  - docstring 质量高（说明 dual-layer protection、Args、Returns、v0.9-A P0-9C 引用）
+  - 验证意识强（3 次都主动跑验证命令确认 query_only=1）
+  - 对 `path=None` 边界情况处理正确（先可写建 schema 再只读 reopen）
+  - 三次 prompt 措辞不同但输出一致（diff 完全相同），说明模型行为稳定
+  - 理解沙箱隔离（使用 `git diff --no-index` 对比仓库原版；报告 tmp/ 在 .gitignore 中）
+- **弱项**：
+  - 不报告 token 用量（telemetry DISABLED 且 headless profile 无内置 token meter）；需手动开启 `~/.dsh-home/profiles/headless/profile.yaml` 中的 token-meter plugin 才能拿到 per-run token 数据
+  - 对 `headless` vs `web` profile 的区别有摸索过程（web 是 Web UI 不适合 batch）；文档中明确 `headless` 才适合 CLI 单轮任务
+  - prompt 中含反斜杠 `\?` 等特殊字符时 dsh 解析报错，prompt 需用单行字符串
+- **commander 档位适配度（1-5）**：**4/5** — deepseek-v4-flash 在 commander 档（中上下文 / 单工作流编排）下改 Python 代码能力很强，diff 一致性 3/3，无语法错误，pytest 全绿。扣 1 分因为无 token 用量数据（需配置 token-meter plugin 才能获取）
+
+### §6.7 H-1 判定
+
+**结果：PASS**
+
+**理由**：dsh (deepseek-v4-flash, commander 档) 在沙箱内完成改代码任务 3/3 次，diff 一致性 100%（+53 行完全相同），pytest 全绿，v1.0 runtime 零漂移。模型正确处理了 SQLite 只读连接的全部技术细节（URI mode=ro、query_only、path=None 边界、PRAGMA 断言）。telemetry OFF 导致无 token 数据不影响 H-1 判定（能力证据已充分）。
 
 ### §6.X 三姿势候选（执行者按 DEEPSEEK_API_KEY 可用性 + 用户偏好选）
 
