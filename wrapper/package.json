@@ -1,0 +1,20 @@
+{
+  "name": "@fish-harness/wrapper",
+  "version": "0.1.0-m0c-skeleton",
+  "description": "fish-harness TypeScript wrapper (M0c skeleton)",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.3"
+  },
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
