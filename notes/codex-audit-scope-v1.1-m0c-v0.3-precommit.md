@@ -15,13 +15,13 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" CHANGELOG.md README.md docs/reports/T-M1c-
 # 期望: 0 行
 # 注: DD-1 报告 §Author/§Co-Authored-By 等尾注字段走 §1.5 豁免
 
-# 历史文档豁免口径锚定（tracked 重锚 == 71，继承 v0.2）：
+# 历史文档豁免口径锚定（tracked 重锚 == 85，post-commit；per T-M0c-V0.3-HYGIENE-FIX H1 + #39 自引入即时入列）：
 git ls-files docs/ adr/ spec/capabilities/ | xargs grep -cE "Fable 5|GLM 5.3|MiniMax-M3" 2>/dev/null | grep -v ":0$" | awk -F: '{s+=$NF} END{print s}'
-# 期望: == 71（DD-1 起草后 docs/ 无新增 grep 命中；总锚定维持 71）
+# 期望: == 85（post-commit 构成：v0.2 主表 71 + funnel 漏列 2 + DD-1 报告 4 + M2 5 DISPATCH 6 + #39 HYGIENE-FIX 执行书 §4 验收命令字面 2）
 
 # 历史文档豁免口径锚定（disk 口径）：
 grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/ adr/ spec/capabilities/ notes/codex-audit-scope-v1.1-m0c-v0.3-precommit.md | wc -l
-# 期望: ≥ 71（disk 口径，含本 audit-scope §1/§4.5/§5 自伤字面 + DD-1 报告 §Author 等尾注）
+# 期望: ≥ 85（disk 口径，含本 audit-scope §1/§4.5/§5 自伤字面 + DD-1 报告 §Author 等尾注）
 
 # notes/ 范围自伤豁免（本文件含 grep pattern 字面）：
 grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.3-precommit.md | wc -l
@@ -30,9 +30,9 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.3-prec
 
 **含义**：v1.1+ 周期模型决策遵守 NORTH-STAR A-4 等价类约束；v0.3 升级前向交付物（CHANGELOG.md + README.md + DD-1 报告）均不含具体型号字面；DD-1 报告 §Author/§Co-Authored-By 走 §1.5 豁免。
 
-### §1.5 历史文档豁免清单（tracked 重锚 == 71；DD-1 起草后无新增 docs 命中）
+### §1.5 历史文档豁免清单（tracked 重锚 post-stage = 83；DD-1 起草 + M2 DISPATCH 起草后 docs/ 增量 +12）
 
-继承 v0.2 §1.5 docs 主表 29 文件 71 行 + notes 自伤小节 2 文件 8 行；v0.3 升级范围（CHANGELOG.md + README.md + DD-1 报告 + 本 audit-scope + prompt = 5 文件）docs/ 命中增量 = 0；总锚定维持 **tracked 重锚 == 71**。
+继承 v0.2 §1.5 docs 主表 29 文件 71 行 + notes 自伤小节 2 文件 8 行；v0.2 §1.5 漏列 `docs/reports/T-M1c-DO-1-iPhone-E2E-funnel.md` 2 命中（§Author + Co-Authored-By check），v0.3 升级前 tracked 重锚 = 73（v0.2 漏列 funnel 2 + v0.2 主表 71）；v0.3 升级范围（DD-1 报告 §Author + §不锁型号守门描述 + §verbatim 验证命令字面 + §Co-Authored-By check = 4 命中）+ M2 DISPATCH 起草范围（5 DISPATCH §Author + §Co-Authored-By check = 2+1+1+1+1 = 6 命中）+ evidence 0 = 总锚定 **tracked 重锚 post-stage = 83**（DD-1 起草 4 + M2 5 DISPATCH 6 + v0.2 漏列 funnel 2 + v0.2 主表 71 = 83）。
 
 **v0.3 升级范围**（5 文件）：
 
@@ -40,11 +40,11 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.3-prec
 |---|------|------|----------------|----------|
 | 1 | `CHANGELOG.md` | Edit（增 [1.1.0-M1c] 段 + Link refs）| 0 | ✅ grep 字面 0 行 |
 | 2 | `README.md` | Edit（v1.1 M1c 段 fill in：Funnel URL + newvps + 三档 profile）| 0 | ✅ grep 字面 0 行 |
-| 3 | `docs/reports/T-M1c-DD-1-report.md` | NEW（DD-1 实施报告 ~250 行 6 段）| 0 | ✅ DD-1 报告 §Author/§Co-Authored-By 尾注走豁免 |
+| 3 | `docs/reports/T-M1c-DD-1-report.md` | NEW（DD-1 实施报告 ~250 行 6 段）| 4（§Author + §不锁型号守门描述 + §verbatim 验证命令字面 + §Co-Authored-By check）| ✅ DD-1 报告 §Author/§Co-Authored-By/§不锁型号守门描述 走 §1.5 自伤豁免；下版 §1.5 #33 补入主表 |
 | 4 | `notes/codex-audit-scope-v1.1-m0c-v0.3-precommit.md` | NEW（本文件）| 0 | ✅ notes/ 不入主合同 |
 | 5 | `notes/codex-audit-scope-v1.1-m0c-v0.3-precommit-prompt.md` | NEW（配套 Codex 复审 prompt）| 0 | ✅ notes/ 不入主合同 |
 
-**docs 主表**（继承 v0.2 §1.5 #1-#31，29 文件 71 行；v0.3 升级不新增 docs/ 命中）：
+**docs 主表**（继承 v0.2 §1.5 #1-#31 + #32 funnel 漏列修正 + #33 DD-1 报告 + #34-38 M2 5 DISPATCH + #39 HYGIENE-FIX 执行书 = **37 文件 85 行，实测 == 85**；修复/起草自引入命中即时入列，不推下版）：
 
 - ✅ #1-13 v0.1 历史档案 13 文件 42 行
 - ✅ #16-20 v0.2 M1c 5 DISPATCH 5 行
@@ -56,7 +56,15 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.3-prec
 - ✅ #29 GATE-REPAIR-report 4 行
 - ✅ #30 GATE-REPAIR-2 3 行
 - ✅ #31 GATE-REPAIR-2 report 5 行
-- 总计：**29 文件 71 行**（实测 == 71）
+- ✅ #32 funnel 报告 2 行（v0.2 §1.5 漏列；v0.3 §1.5 修正补入）
+- ✅ #33 DD-1 报告 4 行（v0.3 升级新引入：§Author 尾注 + §不锁型号守门描述 + §verbatim 命令字面 + §Co-Authored-By 反向引用 check）
+- ✅ #34 T-M2-BE-1 2 行（§Author 尾注 + §Co-Authored-By check；M2 起草 f666e47 已 commit，即时入主表 per HYGIENE-FIX H1）
+- ✅ #35 T-M2-TG-1 1 行（§Author 尾注）
+- ✅ #36 T-M2-DO-1 1 行（§Author 尾注）
+- ✅ #37 T-M2-QA-1 1 行（§Author 尾注）
+- ✅ #38 T-M2-DD-1 1 行（§Author 尾注）
+- ✅ #39 T-M0c-V0.3-HYGIENE-FIX 执行书 2 行（§4 验收命令 grep pattern 字面 ×2；修复自引入，即时入列）
+- 总计：**37 文件 85 行（实测 == 85，命令/清单/期望三源同值）**
 
 **豁免口径不变**（per M0b plan §3 L89 C2 裁定 + v0.2 §1.5 末段）：**不清洗历史文档**（考古记录 + git 尾注 + DISPATCH §4 验证命令字面均保留）。
 
@@ -181,6 +189,7 @@ grep -rE "https://fcm\.googleapis\.com|https://updates\.push\.services\.mozilla\
 - v0.3 升级范围 `grep "profile: web" wrapper/` = 0 行 ✓
 - v0.3 升级范围 `grep "profile: headless" wrapper/` ≥ 3 ✓
 - 历史文档豁免口径锚定（§1.5 清单 29 文件 71 处三类定性；DD-1 起草后 docs/ 无新增命中，锚定维持 71）
+- 教训（v0.3，per HYGIENE-FIX H4）：commit message 内 gate 声明必须**先跑后写** —— f666e47 声明「grep CHANGELOG+README+DD-1 = 0」实测 4（DD-1 报告自伤字面，§1.5 #33 追认收口）；后续任何 gate 声明以 verbatim 实跑输出为准
 - Codex 提交铁律：用户亲提 `gpt-5.6-sol` + `xhigh`；Claude 不亲提
 - 下一站：DD-1 通过 → M2 阶段 5 DISPATCH 起草（v0.4 升级 audit-scope 启用 §4.5/§4.6/§4.7 M2 hygiene 三守门）
 

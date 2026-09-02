@@ -31,7 +31,8 @@
 ### 1.3 关联不动文件 (Unmodified scope discipline)
 
 - `harness/` + `spec/kernel-schema.sql` + `spikes/` + `_helpers.py` + 9 ADR body + `Dockerfile` + `docker-compose.yml` + `pyproject.toml` + `docs/v1.0-ga-team-plan.md`（ADR 0010 Decision (d) v1.0 runtime 不漂移守门）
-- M1c 实施已 commit + push：b768097 (BE-1) / d168217 (TG-1) / 23f976e (QA-1) / 6ea2fae (DO-1) / 7a94ade (DD-1) / 3efe7dc (fix) / 4cf0ece (DO-1 newvps) / 50d4c29 (QA-1 vitest) / 2b0953a (DD-1 总报告 + ADR 0010) / 5b3d263 (M0b 模板)
+- M0c 5 subagent 收口已 commit + push（per plan header M0c PASS 证据）：b768097 (BE-1) / d168217 (TG-1) / 23f976e (QA-1) / 6ea2fae (DO-1) / 7a94ade (DD-1) / 3efe7dc (fix)；另有 M0b 链 4cf0ece/50d4c29/2b0953a/5b3d263（per HYGIENE-FIX H3 更正原「M1c 实施」误标）
+- M1c 实施已 commit + push：c4a9192 (EXEC) + 200ded1/5171753/cdd8449 (BE-1/TG-1/DO-1 own) + 5543604 (QA-1 own) + 4 merges 39e6e54/b1477dd/b16cb19/19cade6 + GATE-REPAIR 链（cbc0b98…dc4bc33）+ 3a3157f (formal 归档) + 8d99cd5 (Funnel 证据)
 - ADR 0010 v1.1 cycle scope admission Accepted
 - `spec/capabilities/{orch,commander,worker,newvps_ram}.json`（M0b 落地 4 SKU）
 - `wrapper/` 目录（M1c 5 subagent 实跑落地）
@@ -65,11 +66,11 @@
 - ✅ §5 verbatim 验证 6 项
 - ✅ §6 cross-ref + next（M2 阶段 5 DISPATCH 起草）
 
-### (C) 不锁型号守门（v0.3 升级 5 文件范围）
+### (C) 不锁型号守门（v0.3 升级前向交付物口径；per HYGIENE-FIX H1 修正）
 
-- ✅ v0.3 升级前向交付物 grep `Fable 5|GLM 5.3|MiniMax-M3` = 0
-- ✅ DD-1 报告 §Author/§Co-Authored-By 走 §1.5 尾注豁免
-- ✅ tracked 重锚 == 71（DD-1 起草后 docs/ 无新增 grep 命中）
+- ✅ 前向交付物 `CHANGELOG.md + README.md` grep `Fable 5|GLM 5.3|MiniMax-M3` = **0**（实测）
+- ✅ DD-1 报告 4 处（§Author/§Co-Authored-By/守门描述/命令字面）走 §1.5 **#33** 自伤豁免（f666e47 commit 声明 0 vs 实测 4 已追认收口）
+- ✅ tracked 重锚 == **85**（post-commit：v0.2 主表 71 + funnel 漏列 2 + DD-1 4 + M2 5 DISPATCH 6 + #39 HYGIENE-FIX 执行书 2；命令/清单/期望三源同值）
 
 ### (D) v1.0 runtime 不漂移守门（5 文件改动范围）
 
@@ -144,9 +145,10 @@ test -f docs/reports/T-M1c-DD-1-report.md && echo "DD-1 报告 ✅"
 grep -c "^## §" docs/reports/T-M1c-DD-1-report.md
 # 期望: ≥ 6（6 段齐全）
 
-# === D. 不锁型号守门（v0.3 升级 5 文件范围）===
-grep -rE "Fable 5|GLM 5.3|MiniMax-M3" CHANGELOG.md README.md docs/reports/T-M1c-DD-1-report.md | wc -l
-# 期望: 0（前向交付物口径不含 grep 字面）
+# === D. 不锁型号守门（v0.3 升级前向交付物口径；per HYGIENE-FIX H1 收窄）===
+grep -rE "Fable 5|GLM 5.3|MiniMax-M3" CHANGELOG.md README.md | wc -l
+# 期望: 0（前向交付物 CHANGELOG+README 不含 grep 字面）
+# 注: DD-1 报告 4 处（§Author 尾注 / §不锁型号守门描述 / §verbatim 命令字面 / §Co-Authored-By 反向引用）走 audit-scope §1.5 #33 自伤豁免，不入前向范围
 
 # tracked 锚定 == 71（继承 v0.2）：
 git ls-files docs/ adr/ spec/capabilities/ | xargs grep -cE "Fable 5|GLM 5.3|MiniMax-M3" 2>/dev/null | grep -v ":0$" | awk -F: '{s+=$NF} END{print s}'
