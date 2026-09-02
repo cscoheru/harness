@@ -11,6 +11,9 @@ export default defineConfig({
     passWithNoTests: true,
     // allowOnly: allow test.todo() to count as passing
     allowOnly: true,
+    // Load project-root .env.local into process.env before each test
+    // (DEEPSEEK_API_KEY, TS_AUTHKEY, etc.)
+    setupFiles: ['./test/setup.ts'],
     // Coverage thresholds (M1c QA-1 gate: ≥ 80%)
     coverage: {
       provider: 'v8',
