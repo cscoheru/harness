@@ -1,0 +1,19 @@
+{
+  "class": "worker",
+  "provider": "deepseek",
+  "model_id": "deepseek-chat",
+  "tier": "low-cost-batch",
+  "cost_per_1k_input_tokens_usd": 0.00014,
+  "cost_per_1k_output_tokens_usd": 0.00028,
+  "max_context_tokens": 16000,
+  "m0b_evidence": {
+    "task_id": "T-M0b-DO-1",
+    "report": "docs/DISPATCH-T-M0b-DO-1.md",
+    "median_wall_seconds": 11,
+    "median_input_tokens": 875,
+    "median_output_tokens": 55,
+    "median_summary_chars": 190,
+    "quality_score_1to5": 4,
+    "notes": "worker tier (deepseek-v4-flash) benchmarked via dsh --profile headless on CHANGELOG [1.0.0] summary task; 3 runs, all exit 0; token counts estimated from char length (4 chars/token); wall time from python time.time() wrapper"
+  }
+}

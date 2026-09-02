@@ -1,0 +1,25 @@
+{
+  "host": "newvps",
+  "measured_at": "2026-09-02T01:20:00Z",
+  "total_gb": 7.8,
+  "available_gb": 6.0,
+  "used_gb": 1.4,
+  "docker_daemon_overhead_gb": null,
+  "m1_estimates_gb": {
+    "orch": 0.5,
+    "commander": 0.3,
+    "kernel": 0.2,
+    "worker": 0.2,
+    "system_plus_docker": 0.5,
+    "total": 1.7
+  },
+  "containers_running": {
+    "portainer_agent": "10.77MiB",
+    "rana_portal": "117.7MiB",
+    "rana_pg": "36.13MiB",
+    "portainer": "72.62MiB",
+    "total_container_mem": "237.2MiB"
+  },
+  "verdict": "PASS",
+  "verdict_reason": "newvps total RAM 7.8 GB, available 6.0 GB; M1 scheduling layer estimate 1.7 GB yields 3.5x headroom (exceeds 2.5x requirement in DISPATCH-T-M0b-DO-1 §1.5); existing containers use only 237 MB; newvps is fully capable of co-location."
+}
