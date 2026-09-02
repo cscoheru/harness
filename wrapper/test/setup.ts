@@ -15,4 +15,11 @@ import { existsSync } from 'fs';
 const envLocal = resolve(process.cwd(), '..', '.env.local');
 if (existsSync(envLocal)) {
   config({ path: envLocal, override: false });
+  // Debug log: confirm env loaded (only shown if DEBUG_VITEST_SETUP=1)
+  if (process.env['DEBUG_VITEST_SETUP']) {
+    const keyLen = (process.env['DEEPSEEK_API_KEY'] ?? '').length;
+    console.log(`[vitest-setup] loaded .env.local from ${envLocal} (DEEPSEEK_API_KEY length: ${keyLen})`);
+  }
+} else if (process.env['DEBUG_VITEST_SETUP']) {
+  console.warn(`[vitest-setup] .env.local not found at ${envLocal}`);
 }
