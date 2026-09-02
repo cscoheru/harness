@@ -187,6 +187,10 @@ export async function callDshHeadless(
     ? { DEEPSEEK_API_KEY: apiKey }
     : {};
 
+  if (process.env['DEBUG_DSH_SPAWN']) {
+    console.log(`[dsh_client] key_len=${(apiKey ?? '').length} modelClass=${modelClass} timeoutMs=${timeoutMs}`);
+  }
+
   const args = buildArgs(modelClass, prompt, opts?.extraArgs);
 
   const { stdout, stderr, exitCode: rawExitCode } = await runWithTimeout(
