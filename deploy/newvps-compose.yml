@@ -1,0 +1,117 @@
+# deploy/newvps-compose.yml — fish-harness v1.1 M0c Stage 1 (T-M0c-DO-1)
+#
+# Topology: newvps co-located (1 orch + 1 commander + kernel + 1 worker)
+# Security:  Tailscale-only; no public ports exposed except Tailscale 443
+# Runtime:   v1.0 harness container is FROZEN — image tag = 1.0.0, no edits
+#
+# References:
+#   - PRD-v1.1 §4.1: Tailscale-only (no Basic Auth, no public HTTPS)
+#   - PRD-v1.1 §4.2: newvps co-located (M1); RAM margin 3.5x PASS (M0b DO-1)
+#   - ADR 0010 Decision (d): v1.0 runtime 0-diff gate
+#
+# Constraints (铁律):
+#   - ❌ No public ports (only Tailscale 443 inbound)
+#   - ❌ No hard-coded API keys (env-inject only; ${VAR} substitution)
+#   - ❌ Do NOT edit v1.0 harness container image / Dockerfile
+#   - ❌ Do NOT pin specific model SKU (use class fields)
+#   - ❌ Do NOT deploy from this file (subagent writes only; real deploy = user ssh)
+
+services:
+  # ── v1.0 runtime kernel (FROZEN) ──────────────────────────────────────────
+  # Image is the GA release; tag 1.0.0 = frozen contract.
+  # Volumes:
+  #   - harness_db: shared SQLite WAL (ADR 0009: SINGLE-HOST only)
+  #   - ./spec:/app/spec:ro: protocol spec (source of truth, not baked into image at this path)
+  harness-kernel:
+    image: ghcr.io/cscoheru/fish-harness:1.0.0
+    container_name: harness-kernel
+    restart: unless-stopped
+    volumes:
+      - harness_db:/data
+    env_file:
+      - ../env/newvps.env.example
+    environment:
+      # Harness kernel listens on this internal port inside the compose network.
+      # Tailscale Serve proxies harness.rana.asia:443 → this host:8000.
+      HARNESS_PORT: "8000"
+    networks:
+      - harness_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sqlite3; c=sqlite3.connect('/data/harness.db'); c.close(); print('ok')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    mem_limit: 512m
+    memswap_limit: 512m
+    # No ports: only Tailscale Serve exposes :443 → harness-kernel:8000
+
+  # ── dsh wrapper (TypeScript, M0c skeleton) ────────────────────────────────
+  # Wraps the harness kernel with orchestrator / commander logic.
+  # Entrypoint TBD: will call harness-kernel HTTP API once M0c Stage 2 complete.
+  dsh-wrapper:
+    container_name: harness-dsw-wrapper
+    image: node:22-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ../wrapper:/app/wrapper:ro   # future: TypeScript source mount point
+    env_file:
+      - ../env/newvps.env.example
+    environment:
+      # Points to the harness-kernel service inside the compose network.
+      HARNESS_API_URL: "http://harness-kernel:8000"
+      WORKER_ID: "${WORKER_ID}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
+    networks:
+      - harness_net
+    depends_on:
+      harness-kernel:
+        condition: service_healthy
+    # Placeholder command — replace in M0c Stage 2 when TypeScript source is ready.
+    command: ["sh", "-c", "echo 'dsh-wrapper skeleton: HARNESS_API_URL=$HARNESS_API_URL' && sleep infinity"]
+    mem_limit: 512m
+    memswap_limit: 512m
+    # No ports: harness-kernel is the only inbound service.
+
+  # ── 1 worker (orchestrator/commander/worker skeleton) ────────────────────
+  # Worker picks up tasks from the orchestrator layer.
+  # newvps co-located (RAM margin 3.5x verified by M0b DO-1).
+  # class: worker (not a specific SKU — NORTH-STAR A-4 equivalence class)
+  worker:
+    container_name: harness-worker
+    image: node:22-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ../wrapper:/app/wrapper:ro   # future: TypeScript worker source mount point
+    env_file:
+      - ../env/newvps.env.example
+    environment:
+      HARNESS_API_URL: "http://harness-kernel:8000"
+      WORKER_ID: "${WORKER_ID:-worker-001}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
+      # Worker class — not a specific model SKU.
+      # SKU resolved at runtime from spec/capabilities/worker.json (M0b产出).
+      WORKER_CLASS: "worker"
+    networks:
+      - harness_net
+    depends_on:
+      dsh-wrapper:
+        condition: service_started
+    # Placeholder command — replace in M0c Stage 2 when worker logic is ready.
+    command: ["sh", "-c", "echo 'worker skeleton: class=$WORKER_CLASS' && sleep infinity"]
+    mem_limit: 512m
+    memswap_limit: 512m
+    # No ports: worker is a background consumer, not a server.
+
+networks:
+  harness_net:
+    driver: bridge
+    # No external exposure — only Tailscale Serve reaches newvps:443.
+    # Internal compose network routes all inter-service traffic.
+
+volumes:
+  harness_db:
+    # ADR 0009: SQLite WAL is single-host only.
+    # DO NOT expose via NFS or shared filesystem.
