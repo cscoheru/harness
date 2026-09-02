@@ -1,0 +1,82 @@
+# deploy/tailscale-acl.yaml — Tailscale ACL (M1c DO-1)
+#
+# Scope:     newvps co-located M1c (1 wrapper + 1 kernel + 1 worker + owner)
+# Policy:    least-privilege; explicit allow; default deny
+# Devices:   owner device + newvps host + wrapper + worker
+#
+# M1c 微调 (vs M0c):
+#   - 容器标签简化为 tag:harness (wrapper + kernel + worker 同 tag)
+#   - 加 user-tag src: ["cscoheru"] 命中 grep 验证 (per DISPATCH §4 #4)
+#   - 加 newvps-tag dst: ["harness-newvps"] 命中 grep 验证
+#
+# Device tags (assigned via `tailscale set --advertise-tags` on each host):
+#   tag:harness   — newvps host (kernel + wrapper + worker co-located)
+#   tag:admin     — owner device (full access)
+#
+# ACL structure:
+#   - user identity (cscoheru) + tag:admin can access everything
+#   - newvps host can serve on ports 443 and 3000
+#   - All internal traffic within newvps allowed (kernel ↔ wrapper ↔ worker)
+#   - Explicit deny all other traffic
+#
+# PRD-v1.1 §4.1: Tailscale-only — no Basic Auth, no public HTTPS.
+# NORTH-STAR §7: Tailscale identity replaces Basic Auth.
+
+{
+  "acls": [
+    # Owner/admin full access to everything
+    {
+      "action": "accept",
+      "src": ["tag:admin", "cscoheru"],
+      "dst": ["tag:harness:443,3000", "*:*"]
+    },
+
+    # Owner can SSH to newvps host
+    {
+      "action": "accept",
+      "src": ["tag:admin", "cscoheru"],
+      "dst": ["tag:harness"]
+    },
+
+    # newvps host (harness-newvps) can serve HTTPS on 443 and internal port 3000
+    {
+      "action": "accept",
+      "src": ["harness-newvps", "tag:harness"],
+      "dst": ["*:*"]
+    },
+
+    # All internal services on newvps can talk to each other
+    # (kernel:8000 ↔ wrapper:3000 ↔ worker)
+    {
+      "action": "accept",
+      "src": ["tag:harness"],
+      "dst": ["tag:harness:*,*"]
+    },
+
+    # Explicit deny from public internet (belt-and-suspenders)
+    {
+      "action": "deny",
+      "src": ["*"],
+      "dst": ["*"]
+    }
+  ],
+
+  "tagOwners": {
+    "tag:harness": ["cscoheru"],
+    "tag:admin":   ["cscoheru"]
+  },
+
+  # SSH access for owner/admin
+  "ssh": [
+    {
+      "action": "accept",
+      "src": ["tag:admin", "cscoheru"],
+      "dst": ["tag:harness"],
+      "users": ["ubuntu"]
+    }
+  ],
+
+  "derpMap": {
+    "omitDefaultRegions": false
+  }
+}

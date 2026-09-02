@@ -1,0 +1,32 @@
+# deploy/tailscale-serve-harness.yaml — Tailscale Serve HTTPS config (M1c DO-1)
+#
+# Routes: harness.rana.asia:443 → newvps wrapper:3000
+# Auth:   Tailscale identity (no Basic Auth; PRD-v1.1 §4.1 裁定)
+# Scope:  owner device + newvps host (ACL enforces)
+#
+# M1c 微调 (vs M0c):
+#   - 端口从 kernel:8000 改为 wrapper:3000 (M1c wrapper orchestrator 暴露 PWA port)
+#
+# Setup (one-time, run on newvps host):
+#   tailscale serve --bg --yaml=tailscale-serve-harness.yaml
+#   tailscale serve status   # verify harness.rana.asia is serving
+#
+# Teardown:
+#   tailscale serve reset
+#
+# PRD-v1.1 §4.1: Tailscale-only — no public HTTPS, no Basic Auth.
+
+https: true
+
+# The TLS cert is issued by Tailscale (via Let's Encrypt on the tailnet).
+# No manual cert management needed.
+
+routes:
+  # harness.rana.asia → newvps wrapper orchestrator (port 3000)
+  # The wrapper container exposes the PWA server + /health endpoint on port 3000.
+  # Tailscale Serve proxies HTTPS (443) → HTTP (3000) on the same host.
+  harness.rana.asia:
+    to: http://127.0.0.1:3000
+
+# Auth is handled by Tailscale identity (who you are in the tailnet).
+# ACL in tailscale-acl.yaml restricts which identities can reach this route.
