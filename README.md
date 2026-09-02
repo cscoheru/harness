@@ -122,3 +122,35 @@ Deploy is a separate workflow: `.github/workflows/deploy.yml` (T-DO-4 / T-QA-1 f
 ## License
 
 MIT — see [`LICENSE`](LICENSE). Copyright (c) 2026 cscoheru.
+
+---
+
+## v1.1
+
+v1.1 adds a TypeScript wrapper layer over the v1.0 Python kernel, enabling
+phone-based task dispatch via PWA + Tailscale, with dsh integration and
+newvps co-location deployment. See
+[`docs/v1.1-ga-team-plan.md`](docs/v1.1-ga-team-plan.md) for the full GA ladder.
+
+### 安装（待 M1 阶段填实）
+
+```bash
+git clone https://github.com/cscoheru/harness.git
+cd harness
+cd wrapper && npm install
+```
+
+### 启动（待 newvps 部署后填实）
+
+```bash
+cd /opt/puer-hub  # 真实部署后
+docker compose -f deploy/newvps-compose.yml up -d
+```
+
+### 文档索引
+
+- [`docs/v1.1-ga-team-plan.md`](docs/v1.1-ga-team-plan.md) — v1.1 GA 团队开发计划 (M0c/M1/M2/M3 阶段)
+- [`docs/DISPATCH-T-M0c-*.md`](docs/) — M0c 阶段 DISPATCH 任务书
+- [`docs/DISPATCH-T-M0b-*.md`](docs/) — M0b spike 报告 (H-1/H-2/H-3 PASS)
+- [`adr/0010-v1.1-cycle-scope-admission.md`](adr/0010-v1.1-cycle-scope-admission.md) — v1.1 cycle scope admission (Status: Accepted)
+- [`CHANGELOG.md`](CHANGELOG.md) — v1.1.0-M0c release notes
