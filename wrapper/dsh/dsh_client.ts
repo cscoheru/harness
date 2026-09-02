@@ -200,6 +200,10 @@ export async function callDshHeadless(
     timeoutMs,
   );
 
+  if (process.env['DEBUG_DSH_SPAWN']) {
+    console.log(`[dsh_client] exit=${rawExitCode} stdout=${stdout.trim().slice(0, 100)} stderr=${stderr.trim().slice(0, 200)}`);
+  }
+
   const wallMs = Date.now() - startMs;
   const exitCode = rawExitCode ?? 124; // 124 = timeout exit code convention
 
