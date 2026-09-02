@@ -1,0 +1,19 @@
+{
+  "name": "fish-harness-wrapper",
+  "version": "0.0.0-stub",
+  "description": "TypeScript wrapper for fish-harness v1.0 runtime kernel — M0c skeleton",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "tsc": "tsc --noEmit",
+    "test": "echo 'skeleton stub' && exit 0",
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "typescript": "^5.9.3"
+  }
+}
