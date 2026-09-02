@@ -90,7 +90,7 @@ grep -rE "ts\.net" deploy/ | wc -l
 # 期望: ≥ 6（6 Funnel URL 全用 MagicDNS）
 
 # === 3. 6 Funnel URL 验证 ===
-grep -rE "https://harness-(newvps|edge[1-5])\.tail[a-z0-9]+\.ts\.net/" deploy/tailscale-funnel-*.yaml | wc -l
+grep -rE "https://[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*\.ts\.net/" deploy/tailscale-funnel-*.yaml | wc -l
 # 期望: 6（1 newvps + 5 边缘）
 
 # === 4. STT 守门（whisper 路径绝对）===

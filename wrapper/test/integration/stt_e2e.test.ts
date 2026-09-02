@@ -135,7 +135,7 @@ describe('STT E2E — whisper.cpp integration', { skip: !shouldRun }, () => {
 
     it('transcribeStream completes within 3s for 1s audio', async () => {
       // Lazy-import the real module (only when RUN_STT_E2E=1)
-      const { transcribeStream } = await import('../dsh/whisper_stt.js');
+      const { transcribeStream } = await import('../../dsh/whisper_stt.js');
 
       const pcmBuf = generateMockPcmBuffer(1_000); // 1 second of audio
       const stream = bufferToStream(pcmBuf);
@@ -163,7 +163,7 @@ describe('STT E2E — whisper.cpp integration', { skip: !shouldRun }, () => {
     }, 15_000);
 
     it('transcribeStream returns SttResult with required fields', async () => {
-      const { transcribeStream } = await import('../dsh/whisper_stt.js');
+      const { transcribeStream } = await import('../../dsh/whisper_stt.js');
 
       const pcmBuf = generateMockPcmBuffer(500);
       const stream = bufferToStream(pcmBuf);
@@ -207,7 +207,7 @@ describe('STT E2E — whisper.cpp integration', { skip: !shouldRun }, () => {
         // /tmp may not be readable — skip check
       }
 
-      const { transcribeStream } = await import('../dsh/whisper_stt.js');
+      const { transcribeStream } = await import('../../dsh/whisper_stt.js');
       const pcmBuf = generateMockPcmBuffer(500);
       const stream = bufferToStream(pcmBuf);
 
@@ -279,7 +279,7 @@ describe('STT E2E — whisper.cpp integration', { skip: !shouldRun }, () => {
       // Re-import to pick up env change
       try {
         await expect(
-          import('../dsh/whisper_stt.js'),
+          import('../../dsh/whisper_stt.js'),
         ).rejects.toThrow('WHISPER_MODEL_PATH');
       } finally {
         if (originalPath) process.env.WHISPER_MODEL_PATH = originalPath;
@@ -292,7 +292,7 @@ describe('STT E2E — whisper.cpp integration', { skip: !shouldRun }, () => {
 
       try {
         await expect(
-          import('../dsh/whisper_stt.js'),
+          import('../../dsh/whisper_stt.js'),
         ).rejects.toThrow('absolute path');
       } finally {
         if (originalPath) process.env.WHISPER_MODEL_PATH = originalPath;

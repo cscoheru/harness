@@ -339,7 +339,7 @@ git diff v1.0.0..HEAD -- harness/ spec/kernel-schema.sql spikes/ 'adr/000[1-9]-*
 
 | # | 守门项 | grep pattern | 期望 | 状态 |
 |---|--------|-------------|------|------|
-| G1 | 不锁型号 | `Fable 5\|GLM 5.3\|MiniMax-M3` | 0 | M2 产出 = 0 |
+| G1 | 不锁型号 | per NORTH-STAR A-4 pattern（见 audit-scope v0.4 §1）| 0 | M2 产出 = 0 |
 | G2 | 不硬编码 API key | `sk-[a-z0-9]{32,}` | 0 | M2 产出 = 0 |
 | G3 | v1.0 runtime 不漂移 | `git diff v1.0.0..HEAD -- <v1.0 区域>` | 0 行 | M2 产出 = 0 行 |
 | G4 | M2 多 host 守门 | 容器 IP 不锁 + MagicDNS 全程 | — | PASS |

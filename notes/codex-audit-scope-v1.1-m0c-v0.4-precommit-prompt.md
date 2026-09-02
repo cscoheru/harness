@@ -67,7 +67,7 @@
 
 - ✅ 前向交付物 `CHANGELOG.md + README.md + M2 DD-1 报告` grep `Fable 5|GLM 5.3|MiniMax-M3` = **0**（实测）
 - ✅ DD-1 报告 4 处（§Author/§Co-Authored-By/守门描述/命令字面）走 §1.5 自伤豁免
-- ✅ tracked 重锚 post-M2 预估 = **91**（v0.3 post-stage 85 + M2 5 DISPATCH 6 = 91；待 M2 DD-1 报告 commit 后实测修订）
+- ✅ tracked 重锚 post-M2 实测 = **97**（v0.3 post-stage 85 + M2 实施报告群 12 = 97；43 文件；M2 5 DISPATCH 起草 6 已在 85 内含不重复计；待 v0.4 GATE-CALIB 校准后实测修订）
 
 ### (D) v1.0 runtime 不漂移守门（5 文件改动范围）
 
@@ -132,9 +132,9 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" CHANGELOG.md README.md docs/reports/T-M2-D
 # 期望: 0（前向交付物不含 grep 字面）
 # 注: M2 DD-1 报告 4 处（§Author 尾注 / §不锁型号守门描述 / §verbatim 命令字面 / §Co-Authored-By 反向引用）走 audit-scope §1.5 自伤豁免，不入前向范围
 
-# tracked 锚定 == 91（预估；v0.3 post-stage 85 + M2 5 DISPATCH 6 = 91；待 M2 DD-1 报告 commit 后补计）：
+# tracked 锚定 == 97（实测 / 2026-09-02 GATE-CALIB 重测；v0.3 post-stage 85 + M2 实施报告群 12 = 97；M2 5 DISPATCH 起草 6 已在 85 内含不重复计）：
 git ls-files docs/ adr/ spec/capabilities/ | xargs grep -cE "Fable 5|GLM 5.3|MiniMax-M3" 2>/dev/null | grep -v ":0$" | awk -F: '{s+=$NF} END{print s}'
-# 期望: 91（预估；M2 DD-1 报告起草增量待 commit 后补计；v0.4 audit-scope/prompt 自伤不计入 docs/ 口径）
+# 期望: == 97（实测 / GATE-CALIB 重测；43 文件；M2 实施报告群 #40-#45 详 §1.5 表）
 
 # === 5. DEEPSEEK_API_KEY + VAPID 私钥不泄漏 ===
 grep -rE "sk-[a-z0-9]{32,}" CHANGELOG.md README.md docs/reports/ | wc -l
@@ -151,32 +151,35 @@ git diff v1.0.0..HEAD -- docs/v1.0-ga-team-plan.md 'adr/000[1-9]-*.md' | wc -l
 # 期望: 0
 
 # === 7. M2 三守门正式启用验证（v0.3 预备 → v0.4 正式）===
-# §4.5 多 host 守门启用（标题去"预备"）：
+# §4.5 多 host 守门启用（标题去"预备"；GATE-CALIB 校准：IP 排除 node_modules + H5 pattern fix）：
 grep -c "M2 多 host 守门\b" notes/codex-audit-scope-v1.1-m0c-v0.4-precommit.md
 # 期望: ≥ 1（正式启用标题）
 
-grep -rE "172\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+" wrapper/ deploy/ env/ CHANGELOG.md README.md | grep -v "127.0.0.1" | wc -l
-# 期望: 0（容器 IP 不锁）
+grep -rE "172\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+" wrapper/dsh/ wrapper/orchestrator/ wrapper/test/ deploy/ env/ CHANGELOG.md README.md | grep -v "127.0.0.1" | wc -l
+# 期望: ≤ 1（业务源码 0；deploy/6host-compose.newvps.yml IPAM subnet 合例白名单 1）
 
 grep -rE "ts\.net" deploy/ | wc -l
 # 期望: ≥ 1（MagicDNS 域名）
 
-grep -rE "https://[a-z-]+\.tail[a-z0-9]+\.ts\.net/" docs/ deploy/ | wc -l
-# 期望: ≥ 6（6 Funnel URL）
+grep -rE "https://[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*\.ts\.net/" docs/ deploy/ | wc -l
+# 期望: ≥ 6（6 Funnel URL；H5 pattern 修 `[a-z][a-z0-9-]*` 允许数字）
 
-# §4.6 STT 守门启用（标题去"预备"）：
+# §4.6 STT 守门启用（标题去"预备"；GATE-CALIB 校准：tmp 排除 test/ + whisper pattern 排除 `${`）：
 grep -c "M2 STT 守门\b" notes/codex-audit-scope-v1.1-m0c-v0.4-precommit.md
 # 期望: ≥ 1（正式启用标题）
 
 grep -rE "audio.*\.wav\s*[:=]|audio.*\.mp3\s*[:=]|audio.*\.m4a\s*[:=]" wrapper/ deploy/ | wc -l
 # 期望: 0（音频不留盘）
 
-grep -rE "/tmp/audio|/var/tmp/audio" wrapper/ deploy/ env/ | wc -l
-# 期望: 0（仅 /dev/shm）
+grep -rE "/tmp/audio|/var/tmp/audio" wrapper/dsh/ wrapper/orchestrator/ deploy/ env/ | wc -l
+# 期望: 0（仅 /dev/shm；wrapper/test/ 守护测试自伤 3 行走 §1.5 自伤豁免）
 
-# §4.7 Web Push 守门启用（标题去"预备"）：
+# §4.7 Web Push 守门启用（标题去"预备"；GATE-CALIB 校准：VAPID 公钥期望反向 == 0）：
 grep -c "M2 Web Push 守门\b" notes/codex-audit-scope-v1.1-m0c-v0.4-precommit.md
 # 期望: ≥ 1（正式启用标题）
+
+grep -rE "vapid_public_key\s*[:=]\s*['\"][A-Za-z0-9_-]{32,}['\"]|VAPID_PUBLIC\s*[:=]\s*['\"][A-Za-z0-9_-]{32,}['\"]" deploy/ env/ | wc -l
+# 期望: == 0（GATE-CALIB 校准后；公钥亦 env-inject-only，较"可入 commit"更严，合规方向）
 
 grep -rE "https://fcm\.googleapis\.com|https://updates\.push\.services\.mozilla\.com|https://wns\.windows-push\.com|https://api\.push\.apple\.com" deploy/ wrapper/ | wc -l
 # 期望: ≥ 4（4 Push 端点白名单）
@@ -289,13 +292,13 @@ codex -m gpt-5.6-sol -c model_reasoning_effort=xhigh \
 
 ### 5.3 修订日志格式
 
-v0.4 升级 commit hash 占位：`[COMMIT_HASH_PLACEHOLDER]`（待 v0.4 升级 commit 后填入）
+v0.4 升级 commit hash 占位：`[TBD: GATE-CALIB commit hash 待本轮提交后回填]`（per fix 轮执行书；2026-09-02 precommit 时尚未 commit）
 
-Codex formal report 落点：`notes/codex-review-v1.1-m0c-v0.4-formal-report.md`
+Codex formal report 落点：`notes/codex-review-v1.1-m0c-v0.4-formal-report.md`（已落 — 0C/4M/3m CHANGES REQUIRED）
 
 v0.4 升级沉淀记录：
 ```
-v0.4 升级 | [COMMIT_HASH_PLACEHOLDER] | 2026-09-02 | §4.5/§4.6/§4.7 M2 三守门正式启用 | Codex formal: TBD
+v0.4 升级 | [TBD: GATE-CALIB commit hash] | 2026-09-02 | §4.5/§4.6/§4.7 M2 三守门正式启用（GATE-CALIB 校准：IP 排除 node_modules / tmp 排除 test/ / whisper 排除 `${` / VAPID 公钥期望反向 == 0 / H5 pattern `[a-z][a-z0-9-]*`）| Codex formal: CHANGES REQUIRED (0C/4M/3m) → GATE-CALIB fix 轮 → formal 复审待 user 亲提
 ```
 
 ### 5.4 未来复用

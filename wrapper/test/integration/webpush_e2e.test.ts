@@ -24,7 +24,7 @@ import {
   sendBroadcast,
   type PushSubscription,
   type PushPayload,
-} from '../orchestrator/webpush_gateway.js';
+} from '../../orchestrator/webpush_gateway.js';
 
 // ---------------------------------------------------------------------------
 // Env guard

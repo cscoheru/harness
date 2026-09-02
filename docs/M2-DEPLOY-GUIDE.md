@@ -262,6 +262,8 @@ ssh newvps 'docker ps --format "table {{.Names}}\t{{.Status}}" | grep harness'
 
 ```bash
 # 6 Funnel URL 健康检查（并行）
+# Note: H5 hygiene gate uses https://[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*\.ts\.net/
+# (corrected: previous pattern [a-z-]+ failed on digit-containing tailnet IDs like tail1b9878)
 for host in newvps edge1 edge2 edge3 edge4 edge5; do
   url="https://harness-${host}.tail1b9878.ts.net/health"
   status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$url" 2>/dev/null || echo "FAIL")

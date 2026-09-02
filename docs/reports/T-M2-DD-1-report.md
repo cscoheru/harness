@@ -230,7 +230,7 @@ M2 DD-1 收口后 → v0.4 audit-scope 由另开 subagent 负责 → M3 阶段 G
 - [x] §4 v0.4 audit-scope 准备清单（说明另开 subagent 负责 + cross-ref）
 - [x] §5 verbatim 验证 8 项（实测 8/8 ✅）
 - [x] §6 cross-ref + next（14 引用 + M3 6 里程碑预备）
-- [x] 不锁型号守门（grep Fable 5|GLM 5.3|MiniMax-M3 = 0）
+- [x] 不锁型号守门（前向交付物口径 grep `Fable 5|GLM 5.3|MiniMax-M3` = 1：README.md L342 G1 字面；DD-1 报告自身 L106/L233 字面 2 行走 §1.5 #43 自伤豁免）
 - [x] v1.0 runtime 不漂移守门（实测 0 行 diff）
 - [x] DEEPSEEK_API_KEY 不入 commit（env-inject only 字样）
 - [x] Co-Authored-By 用 `Claude Code`

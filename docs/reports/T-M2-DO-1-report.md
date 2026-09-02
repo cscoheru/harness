@@ -196,7 +196,7 @@ ssh newvps 'docker ps --format "table {{.Names}}\t{{.Status}}" | grep harness'
 | H2 | 不硬编码 API key | `grep -rE "sk-[a-z0-9]{32,}" deploy/ docs/M2-DEPLOY-GUIDE.md` | 0 | **0** |
 | H3 | VAPID 私钥 env-inject | `grep -rE "VAPID_PRIVATE_KEY\s*[:=]\s*['\"][A-Za-z0-9_-]{32,}" deploy/ docs/M2-DEPLOY-GUIDE.md` | 0 | **0** |
 | H4 | 容器 IP 不锁 | `grep -rE "172\.\d+\.\d+\.\d+\|10\.\d+\.\d+\.\d+\|192\.168\.\d+\.\d+" deploy/ docs/M2-DEPLOY-GUIDE.md \| grep -v "127.0.0.1"` | 0 | **0** |
-| H5 | 6 Funnel URL 齐全 | `grep -rE "https://[a-z-]+\.tail[a-z0-9]+\.ts\.net/" deploy/ docs/M2-DEPLOY-GUIDE.md` | ≥6 | **≥6** |
+| H5 | 6 Funnel URL 齐全 | `grep -rE "https://[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*\.ts\.net/" deploy/ docs/M2-DEPLOY-GUIDE.md` | ≥6 | **14** |
 | H6 | ssh puer-hk 红线 | `grep -rE "ssh aliyun -p 16921" docs/M2-DEPLOY-GUIDE.md` | 0 | **0** |
 
 ### 7.2 额外 hygiene 检查

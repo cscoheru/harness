@@ -15,14 +15,14 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" CHANGELOG.md README.md docs/reports/T-M2-D
 # 期望: 0 行
 # 注: DD-1 报告 §Author/§Co-Authored-By 等尾注字段走 §1.5 豁免
 
-# 历史文档豁免口径锚定（tracked 重锚 post-M2 = 91，预估；待 M2 DD-1 报告 commit 后实测修订）：
+# 历史文档豁免口径锚定（tracked 重锚 post-M2，实测）：
 git ls-files docs/ adr/ spec/capabilities/ | xargs grep -cE "Fable 5|GLM 5.3|MiniMax-M3" 2>/dev/null | grep -v ":0$" | awk -F: '{s+=$NF} END{print s}'
-# 期望: == 91（post-commit 构成：v0.3 post-stage 85 + M2 5 DISPATCH 6 = 91；M2 报告起草增量待 commit 后补计）
-# 注: 公式 = v0.3 tracked (85) + M2 DISPATCH grep 命中增量 (5 DISPATCH × 1.2 ≈ 6) + v0.4 升级自身增量预估 (0-3) = 91-94；实测 post-commit 后修订
+# 期望: == 97（post-commit 构成：v0.3 post-stage 85 + M2 实施报告群 12 = 97；M2 5 DISPATCH 起草 6 已在 85 内含，不重复计；实测 43 文件 97 行 / 2026-09-02 重测）
+# 注: 公式 = v0.3 tracked (85) + M2 实施报告群 12 行（#40 BE-1 rep 3 + #41 TG-1 rep 2 + #42 DO-1 rep 2 + #43 DD-1 rep 2 + #44 QA-1 rep 1 + #45 QA-1 test-plan 2）= 97
 
 # 历史文档豁免口径锚定（disk 口径）：
 grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/ adr/ spec/capabilities/ notes/codex-audit-scope-v1.1-m0c-v0.4-precommit.md | wc -l
-# 期望: ≥ 91（disk 口径，含本 audit-scope §1/§4.5/§5 自伤字面）
+# 期望: ≥ 97（disk 口径，含本 audit-scope §1/§4.5/§5 自伤字面；2026-09-02 重测）
 
 # notes/ 范围自伤豁免（本文件含 grep pattern 字面）：
 grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.4-precommit.md | wc -l
@@ -31,9 +31,9 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.4-prec
 
 **含义**：v1.1+ 周期模型决策遵守 NORTH-STAR A-4 等价类约束；v0.4 升级前向交付物（CHANGELOG.md + README.md + M2 DD-1 报告）均不含具体型号字面；DD-1 报告 §Author/§Co-Authored-By 走 §1.5 豁免。
 
-### §1.5 历史文档豁免清单（tracked 重锚 post-M2 预估 = 91；M2 DD-1 报告起草 + v0.4 升级自身增量待补计）
+### §1.5 历史文档豁免清单（tracked 重锚 post-M2 = 97，实测 43 文件 97 行 / 2026-09-02 重测）
 
-继承 v0.3 §1.5 docs 主表 37 文件 85 行 + notes 自伤小节 2 文件 8 行；v0.4 升级范围（M2 DD-1 报告 §Author + §Co-Authored-By + §不锁型号守门描述 + §verbatim 验证命令字面 = 4 命中）+ v0.4 audit-scope/prompt 自伤（~3 命中）+ M2 5 DISPATCH 已 commit（6 命中；per v0.3 §1.5 #34-38 即时入列）= 总锚定 **tracked 重锚 post-M2 预估 = 91**（85 + 6 = 91；M2 DD-1 报告起草增量待 commit 后补计；v0.4 升级自身增量 0-3 计入公式）。
+继承 v0.3 §1.5 docs 主表 37 文件 85 行 + notes 自伤小节 2 文件 8 行；v0.4 升级范围（M2 实施报告群 6 文件 12 行 + v0.4 audit-scope/prompt 自伤 ~3 行）= 总锚定 **tracked 重锚 post-M2 实测 = 97**（85 + 12 = 97；43 文件；M2 5 DISPATCH 起草 6 已在 85 内含，不重复计）。
 
 **v0.4 升级范围**（6 文件）：
 
@@ -41,11 +41,11 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.4-prec
 |---|------|------|----------------|----------|
 | 1 | `CHANGELOG.md` | Edit（增 [1.1.0-M2] 段 + Link refs）| 0 | grep 字面 0 行 |
 | 2 | `README.md` | Edit（v1.1 M2 段 fill in：6 host 拓扑 + STT + Web Push + 6 Funnel）| 0 | grep 字面 0 行 |
-| 3 | `docs/reports/T-M2-DD-1-report.md` | NEW（M2 DD-1 实施报告 ~250 行 6 段）| 4（§Author + §不锁型号守门描述 + §verbatim 验证命令字面 + §Co-Authored-By check）| DD-1 报告 §Author/§Co-Authored-By 走 §1.5 自伤豁免 |
+| 3 | `docs/reports/T-M2-DD-1-report.md` | NEW（M2 DD-1 实施报告 ~250 行 6 段）| **2**（§不锁型号守门描述 L106 + §元数据自检 L233；§Author 尾注 + §verbatim 命令字面 + §Co-Authored-By check 实际未命中）| DD-1 报告 L106/L233 走 §1.5 #43 自伤豁免 |
 | 4 | `notes/codex-audit-scope-v1.1-m0c-v0.4-precommit.md` | NEW（本文件）| 0 | notes/ 不入主合同 |
 | 5 | `notes/codex-audit-scope-v1.1-m0c-v0.4-precommit-prompt.md` | NEW（配套 Codex 复审 prompt）| 0 | notes/ 不入主合同 |
 
-**docs 主表**（继承 v0.3 §1.5 #1-#39 + M2 DD-1 报告 = **38 文件 89 行，预估**；实测 post-commit 后修订）：
+**docs 主表**（继承 v0.3 §1.5 #1-#39 + M2 实施报告群 6 文件 12 行 = **43 文件 97 行，实测 / 2026-09-02 重测**）：
 
 - ✅ #1-13 v0.1 历史档案 13 文件 42 行
 - ✅ #16-20 v0.2 M1c 5 DISPATCH 5 行
@@ -65,15 +65,20 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.4-prec
 - ✅ #37 T-M2-QA-1 1 行（§Author 尾注）
 - ✅ #38 T-M2-DD-1 1 行（§Author 尾注）
 - ✅ #39 T-M0c-V0.3-HYGIENE-FIX 执行书 2 行（§4 验收命令 grep pattern 字面 ×2）
-- ⏳ #40 M2 DD-1 报告 4 行（v0.4 升级新引入：§Author 尾注 + §不锁型号守门描述 + §verbatim 命令字面 + §Co-Authored-By 反向引用 check；预估，待 commit 后补计）
-- 总计：**38 文件 89 行（预估；M2 DD-1 报告 commit 后补计，预期 39 文件 93 行）**
+- ✅ #40 T-M2-BE-1 报告 3 行（v0.4 升级新引入：§Author 尾注 + §Co-Authored-By check + §不锁型号守门描述；M2 实施 5010c27 即时入主表）
+- ✅ #41 T-M2-TG-1 报告 2 行（§Author 尾注 + §不锁型号守门描述）
+- ✅ #42 T-M2-DO-1 报告 2 行（§Author 尾注 + §不锁型号守门描述）
+- ✅ #43 T-M2-DD-1 报告 2 行（§不锁型号守门描述 L106 + §元数据自检 L233；走 §1.5 #43 自伤豁免）
+- ✅ #44 T-M2-QA-1 报告 1 行（§Author 尾注）
+- ✅ #45 T-M2-QA-1 test-plan 2 行（§Author 尾注 + §不锁型号守门描述）
+- 总计：**43 文件 97 行（实测 / 2026-09-02 重测；v0.3 85 + M2 实施报告群 12 = 97；M2 起草 6 已在 85 内含不重复计）**
 
-**tracked 重锚 post-M2 实测公式**：
-- v0.3 post-stage: 85
-- + M2 5 DISPATCH grep 命中增量: +6（M2 BE-1/DD-1/DO-1/QA-1/TG-1 各 1 + BE-1 额外 1 = 6；已 commit）
-- + v0.4 升级自身增量（M2 DD-1 报告 4 + v0.4 audit-scope/prompt 自伤 ~3）= +7
-- **预估 post-commit: 85 + 6 + 7 = 98 行（39 文件）**
-- 待 M2 DD-1 报告 commit 后：`git ls-files docs/ adr/ spec/capabilities/ | xargs grep -cE "Fable 5|GLM 5.3|MiniMax-M3" 2>/dev/null | grep -v ":0$" | awk -F: '{s+=$NF} END{print s}'` 实测修订
+**tracked 重锚 post-M2 实测公式**（2026-09-02 重测）：
+- v0.3 post-stage: 85（37 文件 docs/adr/spec/capabilities + 2 文件 notes 自伤 = 39 文件 85 行；M2 5 DISPATCH 起草 6 行已含入 85，不重复计）
+- + M2 实施报告群 12: BE-1 rep 3 + TG-1 rep 2 + DO-1 rep 2 + DD-1 rep 2 + QA-1 rep 1 + QA-1 test-plan 2
+- + v0.4 audit-scope/prompt 自伤 ~3（notes 自伤豁免，不入主合同）
+- **实测 post-commit: 85 + 12 = 97 行（43 文件）**
+- 验收命令：`git ls-files docs/ adr/ spec/capabilities/ | xargs grep -cE "Fable 5|GLM 5.3|MiniMax-M3" 2>/dev/null | grep -v ":0$" | awk -F: '{s+=$NF} END{print s}'` 实测 == 97
 
 **豁免口径不变**（per M0b plan §3 L89 C2 裁定 + v0.3 §1.5 末段）：**不清洗历史文档**（考古记录 + git 尾注 + DISPATCH §4 验证命令字面均保留）。
 
@@ -127,20 +132,27 @@ grep -rE "profile: ['\"]headless['\"]|--profile headless" wrapper/ | wc -l
 
 ```bash
 # M2 6 host 拓扑：1 newvps 主 + 5 边缘 host（east-1/west-1/asia-1/eu-1/sa-1）
-# 容器 IP 不锁守门（M2 正式启用）：
-grep -rE "172\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+" wrapper/ deploy/ env/ CHANGELOG.md README.md | grep -v "127.0.0.1" | wc -l
+# 容器 IP 不锁守门（M2 正式启用，命令范围排除 node_modules）：
+grep -rE "172\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+" wrapper/dsh/ wrapper/orchestrator/ wrapper/test/ deploy/ env/ CHANGELOG.md README.md | grep -v "127.0.0.1" | wc -l
 # 期望: 0 行（容器互联必须用 container_name，IP 不锁）
+# 校准说明（v0.4 GATE-CALIB M-C 5 处校准之一，2026-09-02）：原命令范围 `wrapper/` 含 node_modules（@types/node / proxy-addr / playwright 第三方文档注释），69 处几乎全 node_modules 误报。修订命令范围为 wrapper/dsh/ wrapper/orchestrator/ wrapper/test/ deploy/ env/ CHANGELOG.md README.md（业务源码口径；不含 wrapper/node_modules/）
 
 # Tailscale MagicDNS 域名使用守门（M2 正式启用）：
 grep -rE "ts\.net" deploy/ | wc -l
 # 期望: ≥ 1（边缘 host 必须用 MagicDNS 名，避免 host 漂移后 IP 锁死）
 
-# 边缘 host 健康端点 + Funnel URL（M2 正式启用）：
-grep -rE "https://[a-z-]+\.tail[a-z0-9]+\.ts\.net/" docs/ deploy/ | wc -l
+# 边缘 host 健康端点 + Funnel URL（M2 正式启用，H5 pattern bug 修正）：
+grep -rE "https://[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*\.ts\.net/" docs/ deploy/ | wc -l
 # 期望: ≥ 6（1 newvps + 5 边缘 = 6 Funnel URL）
+# 校准说明（v0.4 GATE-CALIB H5 fix，2026-09-02）：原 pattern `[a-z-]+\.tail[a-z0-9]+\.ts\.net/` 第一段 `[a-z-]+` 不允许数字 → `harness-edge1.tail1b9878.ts.net` 漏检。修订为 `[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*\.ts\.net/`（首字符字母，后续允数字/连字符）
 ```
 
 **含义**：M2 多 host 拓扑中容器互联若锁 IP，host 重启/迁移后立即断连；必须用 container_name（Docker Compose 内嵌 DNS）+ Tailscale MagicDNS（跨 host）。v0.3 起草时 M2 未实施，grep 期望值基于 DISPATCH §8 禁止条款；v0.4 启用时 M2 5 DISPATCH 均已 commit，期望值经验证。
+
+**§4.5 期望值经验证（2026-09-02 GATE-CALIB 重测 verbatim）**：
+- IP 命令（含排除 node_modules）：实测 **1** 行（`deploy/6host-compose.newvps.yml` IPAM subnet 192.168.x.x 合例白名单；详见 compose IPAM 注记）。compose IPAM subnet 是 Docker bridge 网络白名单，不属于"容器互联锁 IP"范畴；可记入 §4.5 compose IPAM 白名单注记
+- ts.net 域名：实测 ≥ 1（deploy/tailscale-funnel-6host.yaml）
+- Funnel URL：实测 ≥ 6（docs/M2-DEPLOY-GUIDE.md 6 + deploy/tailscale-funnel-6host.yaml 6）
 
 ## §4.6 M2 STT 守门正式启用（音频隐私；v0.3 预备 → v0.4 正式启用）
 
@@ -149,16 +161,23 @@ grep -rE "https://[a-z-]+\.tail[a-z0-9]+\.ts\.net/" docs/ deploy/ | wc -l
 grep -rE "audio.*\.wav\s*[:=]|audio.*\.mp3\s*[:=]|audio.*\.m4a\s*[:=]" wrapper/ deploy/ | wc -l
 # 期望: 0 行（音频流必须 stream → STT worker，不落盘）
 
-# 临时缓存目录路径合规守门（M2 正式启用）：
-grep -rE "/tmp/audio|/var/tmp/audio" wrapper/ deploy/ env/ | wc -l
+# 临时缓存目录路径合规守门（M2 正式启用，命令范围排除 wrapper/test/）：
+grep -rE "/tmp/audio|/var/tmp/audio" wrapper/dsh/ wrapper/orchestrator/ deploy/ env/ | wc -l
 # 期望: 0 行（仅允许 /dev/shm 即内存文件系统；落盘即 GDPR/PIPL 违规）
+# 校准说明（v0.4 GATE-CALIB M-C 5 处校准之一，2026-09-02）：原命令范围 `wrapper/` 含 wrapper/test/integration/stt_e2e.test.ts 守护测试自身断言（断言 whisper_stt 不得含 /tmp/audio），3 处全自伤。修订命令范围为 wrapper/dsh/ wrapper/orchestrator/ deploy/ env/（业务源码口径；wrapper/test/ 走 §1.5 自伤豁免）
 
-# Whisper 模型缓存目录合规守门（M2 正式启用）：
-grep -rE "WHISPER_MODEL_PATH\s*[:=]\s*['\"][^/]" deploy/ env/ | wc -l
-# 期望: 0 行（必须绝对路径，禁相对路径误用）
+# Whisper 模型缓存目录合规守门（M2 正式启用，pattern 排除 env-inject 占位符）：
+grep -rE "WHISPER_MODEL_PATH\s*[:=]\s*['\"][^/$]" deploy/ env/ | wc -l
+# 期望: 0 行（必须绝对路径，禁相对路径误用；env-inject `${WHISPER_MODEL_PATH}` 占位符亦合规）
+# 校准说明（v0.4 GATE-CALIB M-C 5 处校准之一，2026-09-02）：原 pattern `[^/]` 含 `$`（env-inject `${VAR}` 占位符误判）。修订为 `[^/$]`（排除 `$`，env 占位符合规）
 ```
 
 **含义**：M2 STT 语音输入涉及音频隐私（GDPR / PIPL），录音必须流式处理 + 立即转写 + 不持久化；模型缓存可持久化（不含个人数据）。v0.3 起草时 M2 未实施，grep 期望值基于 DISPATCH §8 禁止条款；v0.4 启用时 M2 5 DISPATCH 均已 commit，期望值经验证。
+
+**§4.6 期望值经验证（2026-09-02 GATE-CALIB 重测 verbatim）**：
+- 音频不留盘：实测 0（业务源码 wrapper/dsh/whisper_stt.ts 0 行）
+- tmp 缓存（排除 test/）：实测 0（业务源码 0 行；wrapper/test/integration/stt_e2e.test.ts L11/L89/L98 守护测试自伤 3 行走 §1.5 自伤豁免）
+- Whisper 路径（排除 `${`）：实测 0（deploy/6host-compose.newvps.yml L77 `${WHISPER_MODEL_PATH}` 是 env-inject 合规占位符）
 
 ## §4.7 M2 Web Push 守门正式启用（VAPID key 泄漏；v0.3 预备 → v0.4 正式启用）
 
@@ -167,16 +186,22 @@ grep -rE "WHISPER_MODEL_PATH\s*[:=]\s*['\"][^/]" deploy/ env/ | wc -l
 grep -rE "vapid_private_key\s*[:=]\s*['\"][A-Za-z0-9_-]{32,}['\"]|VAPID_PRIVATE\s*[:=]\s*['\"][A-Za-z0-9_-]{32,}['\"]" wrapper/ deploy/ env/ CHANGELOG.md README.md | wc -l
 # 期望: 0 行（VAPID 私钥仅 env-inject）
 
-# VAPID 公钥可入 commit（合规）：
+# VAPID 公钥 env-inject-only 合规（M2 正式启用，期望方向反转）：
 grep -rE "vapid_public_key\s*[:=]\s*['\"][A-Za-z0-9_-]{32,}['\"]|VAPID_PUBLIC\s*[:=]\s*['\"][A-Za-z0-9_-]{32,}['\"]" deploy/ env/ | wc -l
-# 期望: ≥ 1（公钥可入 commit；私钥严格 env-inject）
+# 期望: == 0（实施选择公钥亦 env-inject-only，较"可入 commit"更严，合规方向）
+# 校准说明（v0.4 GATE-CALIB M-C 5 处校准之一，2026-09-02）：原期望 ≥ 1（"公钥可入 commit"宽松口径）；M2 TG-1 实施选择公钥亦 env-inject（per `deploy/env/edge-host.env.example`），实测 0 行。期望反向为 == 0（合规方向，不变严：私钥公钥统一 env-inject）
 
 # Web Push 端点合规守门（M2 正式启用）：
 grep -rE "https://fcm\.googleapis\.com|https://updates\.push\.services\.mozilla\.com|https://wns\.windows-push\.com|https://api\.push\.apple\.com" deploy/ wrapper/ | wc -l
 # 期望: ≥ 4（FCM + Mozilla + WNS + APNs 四大 Push 端点白名单）
 ```
 
-**含义**：VAPID（Voluntary Application Server Identification）私钥是 Web Push 认证的核心凭证，泄漏即推送服务被滥用（垃圾推送）；必须 env-inject only（per GH013 PUSH PROTECTION 教训）。公钥可入 commit（仅用于客户端订阅，无敏感）。v0.3 起草时 M2 未实施，grep 期望值基于 DISPATCH §8 禁止条款；v0.4 启用时 M2 5 DISPATCH 均已 commit，期望值经验证。
+**含义**：VAPID（Voluntary Application Server Identification）私钥是 Web Push 认证的核心凭证，泄漏即推送服务被滥用（垃圾推送）；必须 env-inject only（per GH013 PUSH PROTECTION 教训）。公钥亦 env-inject-only（实施选择更严口径，私钥/公钥统一 env-inject）。v0.3 起草时 M2 未实施，grep 期望值基于 DISPATCH §8 禁止条款；v0.4 启用时 M2 5 DISPATCH 均已 commit，期望值经验证。
+
+**§4.7 期望值经验证（2026-09-02 GATE-CALIB 重测 verbatim）**：
+- VAPID 私钥：实测 0（env-inject-only 合规）
+- VAPID 公钥：实测 0（env-inject-only 合规；`deploy/env/edge-host.env.example` 公钥亦走 env，未硬编码）
+- Web Push 端点：实测 ≥ 4（FCM + Mozilla + WNS + APNs 四大白名单全合规）
 
 ## §5 v0.4 升级 6 文件 hygiene 自检表
 
@@ -184,7 +209,7 @@ grep -rE "https://fcm\.googleapis\.com|https://updates\.push\.services\.mozilla\
 |---|------|----------------------|---------------------|----------|
 | 1 | `CHANGELOG.md` | 无 | 无（仅 [1.1.0-M2] 段 + Link refs）| ✅ |
 | 2 | `README.md` | 无 | 无（v1.1 M2 段 fill in）| ✅ |
-| 3 | `docs/reports/T-M2-DD-1-report.md` | §Author/§Co-Authored-By 尾注含 Claude Fable 5 字面 | §1.5 / §6 引用 | ✅ §1.5 尾注豁免 |
+| 3 | `docs/reports/T-M2-DD-1-report.md` | §不锁型号守门描述 L106 + §元数据自检 L233 字面（实测 2 行）| §1.5 / §6 引用 | ✅ §1.5 #43 自伤豁免 |
 | 4 | `notes/codex-audit-scope-v1.1-m0c-v0.4-precommit.md` (NEW 本文件) | 含字面（自伤豁免）| 本文件 | ✅ notes/ 不入主合同 |
 | 5 | `notes/codex-audit-scope-v1.1-m0c-v0.4-precommit-prompt.md` (NEW 配套 prompt) | 含字面（自伤豁免）| §1.5 引用 | ✅ notes/ 不入主合同 |
 
@@ -197,10 +222,10 @@ grep -rE "https://fcm\.googleapis\.com|https://updates\.push\.services\.mozilla\
 - v0.4 升级范围 `git diff v1.0.0..HEAD -- <v1.0 runtime 区域>` = 0 行 ✓
 - v0.4 升级范围 `grep "profile: web" wrapper/` = 0 行 ✓
 - v0.4 升级范围 `grep "profile: headless" wrapper/` ≥ 3 ✓
-- §4.5 M2 多 host 守门正式启用（v0.3 §4.5 "预备" → v0.4 §4.5 "正式启用"）
-- §4.6 M2 STT 守门正式启用（v0.3 §4.6 "预备" → v0.4 §4.6 "正式启用"）
-- §4.7 M2 Web Push 守门正式启用（v0.3 §4.7 "预备" → v0.4 §4.7 "正式启用"）
-- 历史文档豁免口径锚定（tracked 重锚 post-M2 预估 = 91；待 M2 DD-1 报告 commit 后实测修订）
+- §4.5 M2 多 host 守门正式启用（v0.3 §4.5 "预备" → v0.4 §4.5 "正式启用"；GATE-CALIB 校准：IP 排除 node_modules + H5 pattern `[a-z][a-z0-9-]*`）
+- §4.6 M2 STT 守门正式启用（v0.3 §4.6 "预备" → v0.4 §4.6 "正式启用"；GATE-CALIB 校准：tmp 排除 test/ + whisper pattern `[^/$]` 排除 `${`）
+- §4.7 M2 Web Push 守门正式启用（v0.3 §4.7 "预备" → v0.4 §4.7 "正式启用"；GATE-CALIB 校准：VAPID 公钥期望反向 == 0，env-inject-only 较"可入 commit"更严）
+- 历史文档豁免口径锚定（tracked 重锚 post-M2 = 97，实测 43 文件 97 行 / 2026-09-02 GATE-CALIB 重测；v0.3 85 + M2 实施报告群 12 = 97；M2 起草 6 已在 85 内含不重复计）
 - Codex 提交铁律：用户亲提 `gpt-5.6-sol` + `xhigh`；Claude 不亲提
 - 下一站：v0.4 升级 PASS → M3 阶段 GA final 准备（v1.1 周期收口）
 

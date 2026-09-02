@@ -1,8 +1,43 @@
 // T-M1c-QA-1: vitest config with coverage + integration filter
 // match: wrapper/test/**/*.test.ts (unit + integration)
-import { defineConfig } from 'vitest/config';
+import { defineConfig, type Plugin } from 'vitest/config';
+import { dirname, resolve as pathResolve } from 'node:path';
+import { existsSync } from 'node:fs';
+
+/**
+ * T-M2-V0.4-GATE-CALIB C6 fix:
+ * Resolve relative imports ending in `.js` to their `.ts` source files.
+ *
+ * Background: TypeScript `module: Node16` requires `.js` extensions in source
+ * (because runtime Node ESM needs them), but vitest/vite uses its own resolver
+ * that doesn't auto-map `.js` → `.ts`. vite rejects `resolve.alias` regex
+ * ("don't have relative aliases"); the supported fix is a resolve plugin.
+ *
+ * Strategy: when we see a relative `.js` import, resolve it to an absolute
+ * filesystem path with `.ts` extension — vite then loads that file directly
+ * without going through its own resolver chain.
+ */
+function stripJsExtensionPlugin(rootDir: string): Plugin {
+  return {
+    name: 'strip-js-extension',
+    enforce: 'pre',
+    resolveId(source: string, importer?: string) {
+      // Only rewrite relative imports ending in `.js` (Node16 ESM convention)
+      if (!/^\.{1,2}\/.+\.js$/.test(source)) return null;
+      if (!importer) return null;
+      const baseDir = importer.startsWith('/') ? dirname(importer) : rootDir;
+      const tsCandidate = pathResolve(baseDir, source.replace(/\.js$/, '.ts'));
+      if (existsSync(tsCandidate)) return tsCandidate;
+      // Fallback: let default resolver try (may resolve via node_modules / etc.)
+      return null;
+    },
+  };
+}
 
 export default defineConfig({
+  // T-M2-V0.4-GATE-CALIB C6 fix: resolve plugin strips `.js` from relative imports
+  // so vite can map `.js` → `.ts` source under Node16 ESM conventions.
+  plugins: [stripJsExtensionPlugin(process.cwd())],
   test: {
     // match unit + integration test files under wrapper/test/
     // Exclude e2e/ — Playwright runs separately via npm run test:e2e:smoke

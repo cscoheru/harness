@@ -57,7 +57,8 @@ export interface VapidKeyPair {
  * Convert a raw P-256 public key point to base64url format.
  * Handles both JWK and SPKI DER encodings.
  */
-function publicKeyToBase64url(publicKey: CryptoKey): string {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function publicKeyToBase64url(publicKey: unknown): string {
   const raw = new Uint8Array(65);
   // Export as raw EC point (uncompressed: 0x04 || x || y)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -83,8 +84,14 @@ let _keyPairCache: VapidKeyPair | null = null;
  *   - Stored in CI/CD secret manager or deploy/env/newvps.env.example
  *   - NEVER committed to git
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type JwkPublic = { x?: string; y?: string; crv?: string };
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type JwkPrivate = { d?: string };
+
 export function generateVapidKeyPair(): VapidKeyPair {
-  const { publicKey, privateKey } = generateKeyPairSync('ec', {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { publicKey, privateKey } = generateKeyPairSync('ec' as any, {
     namedCurve: 'prime256v1',
     publicKeyEncoding: { format: 'jwk' },
     privateKeyEncoding: { format: 'jwk' },
@@ -92,7 +99,8 @@ export function generateVapidKeyPair(): VapidKeyPair {
 
   // Derive the raw uncompressed EC point for the public key (0x04 || x || y)
   // This is what browsers expect for ApplicationServerKey
-  const jwk = publicKey as CryptoKey & { x?: string; y?: string; crv?: string };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const jwk = publicKey as unknown as JwkPublic;
 
   if (!jwk.x || !jwk.y || jwk.crv !== 'P-256') {
     throw new Error('generateVapidKeyPair: unexpected JWK format from crypto.generateKeyPairSync');
@@ -108,7 +116,8 @@ export function generateVapidKeyPair(): VapidKeyPair {
     .replace(/=/g, '');
 
   // Private key as base64url (JWK d parameter)
-  const jwkPrivate = privateKey as CryptoKey & { d?: string }; // eslint-disable-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const jwkPrivate = privateKey as unknown as JwkPrivate;
   const privateKeyBase64url = Buffer.from(jwkPrivate.d ?? '', 'base64')
     .toString('base64')
     .replace(/\+/g, '-')

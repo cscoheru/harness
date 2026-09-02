@@ -178,7 +178,7 @@ export async function transcribeStream(
   // Concatenate all chunks into a single buffer
   // Total size is bounded by audio capture duration (typically < 60s)
   const totalLen = chunks.reduce((sum, c) => sum + c.length, 0);
-  const audioBuf = Buffer.concat([Buffer.from(chunks[0] ?? [])], totalLen);
+  let audioBuf = Buffer.concat([Buffer.from(chunks[0] ?? [])], totalLen);
   for (let i = 1; i < chunks.length; i++) {
     // Extend the buffer — allocate new buffer each iteration
     const next = Buffer.concat([audioBuf, Buffer.from(chunks[i])]);

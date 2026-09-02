@@ -199,8 +199,8 @@ function parseWhisperOutput(raw: string, durationSeconds: number): SttSegment[] 
 
 function normalizeSegment(seg: Record<string, unknown>): SttSegment {
   return {
-    start: typeof seg.t1 === "number" ? seg.t1 : (seg.start ?? 0),
-    end: typeof seg.t2 === "number" ? seg.t2 : (seg.end ?? 0),
+    start: typeof seg.t1 === "number" ? seg.t1 : (typeof seg.start === "number" ? seg.start : 0),
+    end: typeof seg.t2 === "number" ? seg.t2 : (typeof seg.end === "number" ? seg.end : 0),
     text: String(seg.text ?? seg.timestamp ?? "").trim(),
   };
 }

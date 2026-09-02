@@ -26,8 +26,8 @@ import {
   PRIMARY_HOST,
   EDGE_HOSTS,
   MAGIC_DNS_SUFFIX,
-} from '../dsh/6host_client.js';
-import type { ModelClass } from '../dsh/types.js';
+} from '../../dsh/6host_client.js';
+import type { ModelClass } from '../../dsh/types.js';
 
 // ---------------------------------------------------------------------------
 // Env guard
