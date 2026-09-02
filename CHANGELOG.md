@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.0-M0c] - 2026-09-02
+
+M0c skeleton 轮 — TypeScript wrapper + dsh wrapper + newvps 共址部署 + M0b spike 数据归档.
+Cross-ref: [ADR 0010](adr/0010-v1.1-cycle-scope-admission.md) (Accepted, commit `2b0953a`).
+
+### Added
+
+- M0b dsh-spike 三路径 spike 全链路 PASS (commit `5b3d263`; H-1/H-2/H-3 三假设全 PASS)
+- TypeScript wrapper skeleton (`wrapper/orchestrator/{orchestrator,commander,worker}.ts`)
+- dsh wrapper TypeScript client + tool provider (`wrapper/dsh/{dsh_client,tool_provider}.ts`)
+- Tailscale-only + newvps 共址 + 1 worker 部署骨架
+  (`deploy/newvps-compose.yml` + `tailscale-serve-harness.yaml` + `tailscale-acl.yaml`)
+- TS wrapper 集成测试骨架 (`wrapper/test/`)
+- ADR 0010 v1.1 cycle scope admission Accepted (commit `2b0953a`)
+- capability JSON 4 SKU 落地 (`spec/capabilities/{orch,commander,worker,newvps_ram}.json`)
+- v0.1 升级 7 文件 + Cursor 正式复审 PASS (commit `f480269`)
+
+### Notes
+
+- 完整 dsh wrapper 实施 + newvps 真部署 + 真机 E2E 待 M1 阶段
+- TypeScript wrapper 当前是 stub skeleton; stub 函数 + TODO 待真实工程师实跑
+
+---
+
 ## [1.0.0] — 2026-09-01
 
 **General Availability release.** Production runtime backing the v0.9-B spec baseline
