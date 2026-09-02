@@ -1,5 +1,11 @@
 node_modules/
 build/
+dist/
 *.js
+*.js.map
 *.d.ts
+*.d.ts.map
 *.map
+.env
+.env.*
+!.env.example

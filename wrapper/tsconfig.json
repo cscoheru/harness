@@ -13,14 +13,17 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": false,
     "forceConsistentCasingInFileNames": true,
-    "skipLibCheck": false,
+    "skipLibCheck": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
     "types": ["node"],
     "outDir": "build",
     "rootDir": "."
   },
-  "include": ["orchestrator/**/*.ts"],
-  "exclude": ["node_modules", "build"]
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules", "build", "dist"]
 }
