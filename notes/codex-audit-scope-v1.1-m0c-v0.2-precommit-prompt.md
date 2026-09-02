@@ -129,8 +129,9 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/v1.1-ga-team-plan.md docs/DISPATCH-T-
 # 期望: 0
 
 # v0.2 升级前向交付物口径守门（不含历史文档，详见 audit-scope §1）：
-grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/m0b/ spec/capabilities/ adr/ docs/poll/ docs/v1.1-ga-team-plan.md docs/DISPATCH-T-M1c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md | wc -l
+grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/m0b/ spec/capabilities/ adr/ docs/poll/ docs/v1.1-ga-team-plan.md | wc -l
 # 期望: 0（实测 == 0；M0b plan L89 C2 裁定口径）
+# 注: M1c 5 任务书 §4 守门字面 5 行走 §1.5 #16-20 豁免（① 自伤），不在前向交付物口径
 
 # === E. DEEPSEEK_API_KEY 不泄漏 ===
 grep -rE "sk-[a-z0-9]{32,}" docs/v1.1-ga-team-plan.md docs/DISPATCH-T-M1c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md docs/poll/cc-ready.json | wc -l

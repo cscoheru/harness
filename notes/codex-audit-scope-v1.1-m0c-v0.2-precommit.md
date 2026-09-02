@@ -2,7 +2,7 @@
 
 > **Date**: 2026-09-02
 > **Purpose**: v0.2 升级 8 文件改动 hygiene 守门集合（不锁型号 / 不硬编码 API key / v1.0 runtime 0 行 diff / dsh `headless` profile 守门 / Tailscale-only）
-> **Why**: v0.2 升级前向交付物（v1.1-ga-team-plan.md + 5 DISPATCH-T-M1c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md + cc-ready.json）若直接包含字面 grep pattern（`Fable 5|GLM 5.3|MiniMax-M3`），守门 grep 会自伤。继承 v0.1 已建立的"前向交付物口径"机制（grep 字面移到 notes/，范围限定 `docs/m0b/ spec/capabilities/ adr/ docs/poll/ docs/v1.1-ga-team-plan.md docs/DISPATCH-T-M0c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md docs/DISPATCH-T-M1c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md`）。
+> **Why**: v0.2 升级前向交付物（v1.1-ga-team-plan.md + 5 DISPATCH-T-M1c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md + cc-ready.json）若直接包含字面 grep pattern（`Fable 5|GLM 5.3|MiniMax-M3`），守门 grep 会自伤。继承 v0.1 已建立的"前向交付物口径"机制（grep 字面移到 notes/，范围限定 `docs/m0b/ spec/capabilities/ adr/ docs/poll/ docs/v1.1-ga-team-plan.md docs/DISPATCH-T-M0c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md`；M1c 5 DISPATCH 的 §4 守门字面走 §1.5 #16-20 豁免）。
 > **How to apply**: v0.2 升级前向交付物守门命令统一引用本 §1-§5；本文件保留字面 grep pattern 用作后续 Codex 复审 hygiene anchor。
 
 ---
@@ -11,42 +11,71 @@
 
 ```bash
 # v0.2 升级前向交付物不锁型号（实测 == 0）：
-grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/m0b/ spec/capabilities/ adr/ docs/poll/ docs/v1.1-ga-team-plan.md docs/DISPATCH-T-M0c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md docs/DISPATCH-T-M1c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md | wc -l
+grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/m0b/ spec/capabilities/ adr/ docs/poll/ docs/v1.1-ga-team-plan.md docs/DISPATCH-T-M0c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md | wc -l
 # 期望: 0 行
+# 注: M1c 5 任务书 §4 守门字面 5 行走 §1.5 #16-20 豁免（① 自伤），不在前向交付物口径
+# 注: cc-ready.json (0 行 after redact) + DISPATCH-T-M1c-GATE-REPAIR.md/-2.md (2+3) + T-M1c-GATE-REPAIR-2-report.md (5) 共 10 行走 §1.5 #27/#30/#31 docs 主表 ① 自伤豁免
 
-# 历史文档豁免口径锚定（继承 v0.1 §1.5 清单 13 文件 42 处；v0.2 audit-scope 自伤豁免 + 1 行；GATE-REPAIR 1 文件 2 行；M1c EXEC + 实施报告 6 文件 6 行）：
+# 历史文档豁免口径锚定（tracked 重锚 == 71，§1.5 docs 主表 29 文件 71 行 + notes 自伤小节不计入）：
+git ls-files docs/ adr/ spec/capabilities/ | xargs grep -cE "Fable 5|GLM 5.3|MiniMax-M3" 2>/dev/null | grep -v ":0$" | awk -F: '{s+=$NF} END{print s}'
+# 期望: == 71（tracked 口径 = 唯一准绳；disk 口径含未归档工作文件会漂移，仅作辅助）
+
+# 历史文档豁免口径锚定（disk 口径，含未归档执行书 + notes 自伤 6 行）：
 grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/ adr/ spec/capabilities/ notes/codex-audit-scope-v1.1-m0c-v0.2-precommit.md | wc -l
-# 期望: == 62（§1.5 清单 56 处 + 本 audit-scope §1 字面自伤 6 行）
+# 期望: ≥ 68（disk 口径，含本 audit-scope §1 字面自伤 6 行 + 未归档执行书 2 行）
 
 # notes/ 范围自伤豁免（本文件含 grep pattern 字面）：
 grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.2-precommit.md | wc -l
 # 期望: ≥ 3（grep 字面必现：§1 + §5 + §1.5）
 ```
 
-**含义**：v1.1+ 周期模型决策遵守 NORTH-STAR A-4 等价类约束；v0.2 升级前向交付物（plan v0.2 / 5 DISPATCH-T-M1c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md / cc-ready.json）均不含具体型号字面。
+**含义**：v1.1+ 周期模型决策遵守 NORTH-STAR A-4 等价类约束；v0.2 升级前向交付物（plan v0.2 / cc-ready.json / 5 DISPATCH-T-M1c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md）均不含具体型号字面；M1c 5 DISPATCH 的 §4 守门字面走 §1.5 #16-20 豁免（① 自伤）。
 
-### §1.5 历史文档豁免清单（继承 v0.1 §1.5 13 文件 42 处 + v0.2 升级新增 5 文件 5 行 + GATE-REPAIR 1 文件 2 行 + M1c 实施新增 6 文件 6 行 + M0c-DONE 1 文件 1 行 = 26 文件 56 处三类定性，不清洗历史）
+### §1.5 历史文档豁免清单（tracked 重锚 == 71；docs 主表 29 文件 71 行 + notes 自伤小节不计入，三类定性 — 不清洗历史）
 
-继承 v0.1 §1.5 13 文件 42 处三类定性（① 守门字面自伤 / ② 叙述性引用 / ③ 署名尾注），新增 v0.2 升级 5 文件 5 行（全部 ① 守门字面自伤）+ GATE-REPAIR 1 文件 2 行 + M1c 实施 6 文件 6 行（EXEC + 实施报告带入守门字面）：
+继承 v0.1 §1.5 13 文件 42 处三类定性（① 守门字面自伤 / ② 叙述性引用 / ③ 署名尾注）+ v0.2 升级新增 docs 16 文件 26 行（M1c 5 DISPATCH + EXEC 1 + 实施报告 5 + GATE-REPAIR 2 + M0c-DONE 1 + GATE-REPAIR-report 4 + GATE-REPAIR-2 执行书 3 + GATE-REPAIR-2 report 5 = 16 文件 26 行）。docs 主表合计 29 文件 68 行，tracked-only 锚定 == 68；notes 自伤小节保留完整性入档但不计入锚定。
+
+**docs 主表**（#1-13 v0.1 + #16-28 v0.2 + #29 GATE-REPAIR-report + #30 GATE-REPAIR-2 执行书 + #31 GATE-REPAIR-2 report = 29 文件 71 行）：
 
 | # | 文件 | 命中数 | 定性类别 | 说明 |
 |---|------|--------|----------|------|
-| 14 | `notes/codex-audit-scope-v1.1-m0c-v0.2-precommit.md` | ≥ 3 | ① 守门字面自伤 | 本文件 §1/§5 验证命令字面含 grep pattern（by-design；归档 notes/ 不入主合同）|
-| 15 | `notes/codex-audit-scope-v1.1-m0c-v0.2-precommit-prompt.md` | ≥ 2 | ① 守门字面自伤 | 本配套 prompt 文件 §1.5 + §2 (G) + §3 验证命令字面含 grep pattern（by-design；归档 notes/ 不入主合同）|
-| 16 | `docs/DISPATCH-T-M1c-BE-1.md` | 1 | ① 守门字面自伤 | M1c BE-1 §4 验证命令 #6 grep `Fable 5|GLM 5.3|MiniMax-M3` wrapper/orchestrator/ 字面（per v0.1 §1.5 #4 同口径）|
-| 17 | `docs/DISPATCH-T-M1c-TG-1.md` | 1 | ① 守门字面自伤 | M1c TG-1 §4 验证命令 #6 grep 字面 |
-| 18 | `docs/DISPATCH-T-M1c-DO-1.md` | 1 | ① 守门字面自伤 | M1c DO-1 §4 验证命令 #10 grep 字面 |
-| 19 | `docs/DISPATCH-T-M1c-QA-1.md` | 1 | ① 守门字面自伤 | M1c QA-1 §4 验证命令 #5 grep 字面 |
-| 20 | `docs/DISPATCH-T-M1c-DD-1.md` | 1 | ① 守门字面自伤 | M1c DD-1 §4 验证命令 #8 grep 字面 |
+| 1 | `docs/VISION-v1.0-supplement.md` | 12 | ② 叙述性引用（v0.x before-record）| v0.x 历史愿景归档，含 M0 周期型号枚举；M0b 已 SUPERSEDED 2026-08-30；考古记录保留 |
+| 2 | `docs/DISPATCH-T-M0b-DD-1.md` | 6 | ① 守门字面自伤 + ② 叙述性引用 | M0b 报告尾注 + M0b §3.1.5 验证命令字面（per Codex v0.1 m3 豁免） |
+| 3 | `docs/DISPATCH-T-M0c-V0.1-PRECOMMIT-FIX.md` | 3 | ① 守门字面自伤 | v0.1 升级执行书 §2/§4 验证命令字面含 grep pattern（归档 commit 不入主合同，by-design） |
+| 4 | `docs/v1.1-m0b-three-path-spike-plan.md` | 5 | ① 守门字面自伤 + ② 叙述性引用 | M0b 模板计划 §3 L89 明文裁定「DISPATCH 文档允许叙述性引用模型名」（C2 fix 裁定） |
+| 5 | `docs/DISPATCH-T-M0b-BE-1.md` | 4 | ① 守门字面自伤 + ③ 署名尾注 | M0b BE-1 报告 §8 命令字面 + Co-Authored-By 尾注 |
+| 6 | `docs/DISPATCH-T-M0b-DO-1.md` | 3 | ① 守门字面自伤 + ③ 署名尾注 | M0b DO-1 报告命令字面 + 尾注 |
+| 7 | `docs/DISPATCH-T-M0b-SCOPE-FIX.md` | 2 | ① 守门字面自伤 | M0b scope-fix 执行书验证命令字面 |
+| 8 | `docs/ARCHITECT-REVIEW-fish-harness-prd-v1.0.md` | 2 | ② 叙述性引用（历史评审）| v0.x 周期架构评审；考古记录保留 |
+| 9 | `docs/REVIEW-T-DD-6.md` | 1 | ③ 署名尾注 `Co-Authored-By: Claude Fable 5` | v0.x 评审报告；不可也不应清除 git 历史尾注 |
+| 10 | `docs/PRD-v1.1-product.md` | 1 | ② 叙述性引用 | v1.1 product PRD §1.5 等价类约束；规则性引用 |
+| 11 | `docs/PRD-V0.1-NORTH-STAR.md` | 1 | ② 叙述性引用 | NORTH-STAR §10 冲突 5；规则性引用 |
+| 12 | `docs/DOCS-REVIEW-v1.1-adjudication.md` | 1 | ② 叙述性引用 | 六项裁定文档；规则性引用 |
+| 13 | `docs/DISPATCH-T-M0b-TG-1.md` | 1 | ① 守门字面自伤 | M0b TG-1 报告命令字面 |
+| 16 | `docs/DISPATCH-T-M1c-BE-1.md` | 1 | ① 守门字面自伤 | M1c BE-1 §4 验证命令 grep 字面（per v0.1 §1.5 #4 同口径） |
+| 17 | `docs/DISPATCH-T-M1c-TG-1.md` | 1 | ① 守门字面自伤 | M1c TG-1 §4 验证命令 grep 字面 |
+| 18 | `docs/DISPATCH-T-M1c-DO-1.md` | 1 | ① 守门字面自伤 | M1c DO-1 §4 验证命令 grep 字面 |
+| 19 | `docs/DISPATCH-T-M1c-QA-1.md` | 1 | ① 守门字面自伤 | M1c QA-1 §4 验证命令 grep 字面 |
+| 20 | `docs/DISPATCH-T-M1c-DD-1.md` | 4 | ① 守门字面自伤 | M1c DD-1 DISPATCH §Author + §不锁型号守门 + §验证 + §Co-Authored-By 4 处（DD-1 起草后实测 4 行；user 2026-09-02 「e 和 f 请启动」触发）|
 | 21 | `docs/DISPATCH-T-M1c-EXEC.md` | 1 | ① 守门字面自伤 | M1c EXEC §4 验证命令 grep 字面（实施执行书带入守门字面）|
 | 22 | `docs/reports/T-M1c-BE-1-report.md` | 1 | ① 守门字面自伤 | M1c BE-1 实施报告 §守门 grep 字面 |
 | 23 | `docs/reports/T-M1c-TG-1-report.md` | 1 | ① 守门字面自伤 | M1c TG-1 实施报告 grep 字面 |
 | 24 | `docs/reports/T-M1c-DO-1-report.md` | 1 | ① 守门字面自伤 | M1c DO-1 实施报告 grep 字面 |
 | 25 | `docs/reports/T-M1c-QA-1-report.md` | 1 | ① 守门字面自伤 | M1c QA-1 实施报告 grep 字面 |
 | 26 | `docs/reports/T-M0c-TG-1-report.md` | 1 | ① 守门字面自伤 | M0c TG-1 实施报告 grep 字面（v0.2 升级未单独豁免，今补）|
-| 27 | `docs/DISPATCH-T-M1c-GATE-REPAIR.md` | 2 | ① 守门字面自伤 | GATE-REPAIR §4 验收命令两行 grep 字面（by-design）|
-| 28 | `docs/DISPATCH-T-M0c-DONE.md` | 1 | ① 守门字面自伤 | M0c 总报告 §1.5 引用本 audit-scope 锚点 25 文件 55 处（v0.2 升级 commit 同包 1 文件 1 行）|
-| **总计** | **26 文件** | **56 行** | ① 守门字面自伤 / ② 叙述性引用 / ③ 署名尾注 | 实测 = 56（v0.1 §1.5 13 文件 42 + M1c 5 DISPATCH 守门字面 5 + EXEC 1 + 实施报告 5 + GATE-REPAIR 2 + M0c-DONE 1）|
+| 27 | `docs/DISPATCH-T-M1c-GATE-REPAIR.md` | 2 | ① 守门字面自伤 | GATE-REPAIR §4 验收命令两行 grep 字面（by-design；GATE-REPAIR-2 归档后 tracked 计入）|
+| 28 | `docs/DISPATCH-T-M0c-DONE.md` | 1 | ① 守门字面自伤 | M0c 总报告 §1 grep 守门字面 1 行（v0.2 升级未单列，GATE-REPAIR-2 补）|
+| 29 | `docs/reports/T-M1c-GATE-REPAIR-report.md` | 4 | ① 守门字面自伤 | GATE-REPAIR-report §守门 grep 字面 + §1.5 引用本 audit-scope（v0.2 升级未单列，GATE-REPAIR-2 补）|
+| 30 | `docs/DISPATCH-T-M1c-GATE-REPAIR-2.md` | 3 | ① 守门字面自伤 | GATE-REPAIR-2 执行书 §2 G2/G3 验证命令字面 3 行（per v0.1 §1.5 #3 同口径）|
+| 31 | `docs/reports/T-M1c-GATE-REPAIR-2-report.md` | 5 | ① 守门字面自伤 | GATE-REPAIR-2 report §2.1/§2.2/§3 verbatim 验证表 grep 字面 5 行（per v0.1 §1.5 #3 同口径）|
+| **总计** | **29 文件** | **71 行** | ① 守门字面自伤 / ② 叙述性引用 / ③ 署名尾注 | 实测 = 71（v0.1 §1.5 13 文件 42 + M1c 5 DISPATCH 5 + EXEC 1 + 实施报告 5 + GATE-REPAIR 2 + M0c-DONE 1 + GATE-REPAIR-report 4 + GATE-REPAIR-2 3 + GATE-REPAIR-2 report 5 + DD-1 起草增量 3）|
+
+**notes 自伤小节**（#14-15，**不计入 docs 锚定 68**；notes/ 在 §1 前向口径已豁免，仅为完整性入档）：
+
+| # | 文件 | 命中数 | 定性类别 | 说明 |
+|---|------|--------|----------|------|
+| 14 | `notes/codex-audit-scope-v1.1-m0c-v0.2-precommit.md` | ≥ 6 | ① 守门字面自伤 | 本文件 §1/§5/§1.5/§2/§3 验证命令字面含 grep pattern（by-design；归档 notes/ 不入主合同）|
+| 15 | `notes/codex-audit-scope-v1.1-m0c-v0.2-precommit-prompt.md` | ≥ 2 | ① 守门字面自伤 | 本配套 prompt 文件 §1.5 + §2 (G) + §3 验证命令字面含 grep pattern（by-design；归档 notes/ 不入主合同）|
 
 **豁免口径不变**（per M0b plan §3 L89 C2 裁定 + pre-commit report §2 M1）：**不清洗历史文档**（考古记录 + git 尾注 + DISPATCH §4 验证命令字面均保留；§4 grep 字面是设计必然，与 v0.1 §1.5 #2/#4/#5/#6/#7/#13 同口径）。
 
@@ -121,4 +150,4 @@ grep -rE "profile: ['\"]headless['\"]|--profile headless" wrapper/ | wc -l
 
 ---
 
-*hygiene audit-scope — v0.2 升级 8 文件改动守门 by-design（grep 字面移到 notes/；范围限定前向交付物口径 `docs/m0b/ spec/capabilities/ adr/ docs/poll/ docs/v1.1-ga-team-plan.md docs/DISPATCH-T-M0c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md docs/DISPATCH-T-M1c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md`；继承 v0.1 §1.5 历史文档豁免清单 + v0.2 audit-scope 自伤 ≥ 3 行 + prompt 自伤 ≥ 2 行）*
+*hygiene audit-scope — v0.2 升级 8 文件改动守门 by-design（grep 字面移到 notes/；范围限定前向交付物口径 `docs/m0b/ spec/capabilities/ adr/ docs/poll/ docs/v1.1-ga-team-plan.md docs/DISPATCH-T-M0c-{BE-1,TG-1,DO-1,QA-1,DD-1}.md`；M1c 5 DISPATCH §4 守门字面走 §1.5 #16-20 豁免；继承 v0.1 §1.5 历史文档豁免清单 + v0.2 audit-scope 自伤 ≥ 6 行 + prompt 自伤 ≥ 2 行 + GATE-REPAIR-2 锚定 tracked 重入表 71）*

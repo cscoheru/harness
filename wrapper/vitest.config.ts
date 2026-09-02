@@ -11,6 +11,8 @@ export default defineConfig({
     passWithNoTests: true,
     // allowOnly: allow test.todo() to count as passing
     allowOnly: true,
+    // M1c GATE-REPAIR-2: testTimeout 30s（默认 5s 不足以覆盖真 dsh 调用 1.5-3.5s+ 波动）
+    testTimeout: 30000,
     // Load project-root .env.local into process.env before each test
     // (DEEPSEEK_API_KEY, TS_AUTHKEY, etc.)
     setupFiles: ['./test/setup.ts'],
