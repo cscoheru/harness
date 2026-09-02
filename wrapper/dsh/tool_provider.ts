@@ -1,50 +1,124 @@
 /**
- * tool_provider.ts — ToolProvider Protocol implementation (TypeScript skeleton).
+ * tool_provider.ts — DshToolProvider with profile-aware model selection.
  *
- * Mirrors spec/interfaces/tool_provider.py but is NOT 1:1:
- *   - TypeScript has no @runtime_checkable Protocol; we use an interface.
- *   - AsyncToolProvider uses async/await (dsh CLI is async in Node).
- *   - Simplified CapabilitySpec fields (no frozen dataclass equivalent).
- *   - ToolRequest / ToolResponse simplified to plain objects.
+ * Maps capabilityId -> modelClass -> profile -> dsh invoke.
  *
- * The TS ToolProvider does NOT enforce policy — that is the gateway's job
- * (mirrors the Python spec: "Providers are NOT trusted to enforce policy").
+ * Profile selection per model class:
+ *   orch      → docs/m0b/profile-override-orch.yaml
+ *               (deepseek-v4-pro; high-reasoning, cross-project)
+ *   commander → docs/m0b/profile-override-commander.yaml
+ *               (deepseek-v4-flash; mid-context, single-workflow)
+ *   worker    → docs/m0b/profile-override-worker.yaml
+ *               (deepseek-v4-flash; low-cost batch summaries)
+ *
+ * Does NOT hardcode model IDs — model is set by the --patch YAML files.
+ * Does NOT lock to a specific model — capability JSON class field governs SKU.
  *
  * @file wrapper/dsh/tool_provider.ts
  */
 
-import { callDshHeadless } from './dsh_client.js';
+import { dshInvoke } from './dsh_client.js';
+import { loadProfile, getRolePatchPath } from './profile.js';
 import type {
-  DshOpts,
+  DshInvokeOptions,
   IToolProvider,
+  ModelClass,
+  Profile,
   ToolInvokeRequest,
   ToolInvokeResult,
 } from './types.js';
 
+// ---------------------------------------------------------------------------
+// Capability -> modelClass registry
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps capabilityId prefix to modelClass.
+ *
+ * M1c coverage (A-class tasks per PRD-v1.1 §3 H-1):
+ *   research.*  → orch      (BE-1:调研)
+ *   code.*      → commander  (TG-1:改代码)
+ *   summary.*   → worker     (DO-1:摘要)
+ *   generic.*   → commander  (default fallback)
+ */
+const CAPABILITY_MODEL_CLASS_MAP: Record<string, ModelClass> = {
+  research: 'orch',
+  'research.': 'orch',
+  code: 'commander',
+  'code.': 'commander',
+  edit: 'commander',
+  'edit.': 'commander',
+  summary: 'worker',
+  'summary.': 'worker',
+  extract: 'worker',
+  'extract.': 'worker',
+  generic: 'commander',
+  'generic.': 'commander',
+};
+
+/**
+ * Resolve modelClass from a capabilityId string.
+ */
+export function resolveModelClass(capabilityId: string): ModelClass {
+  // Exact prefix match first
+  for (const [prefix, modelClass] of Object.entries(CAPABILITY_MODEL_CLASS_MAP)) {
+    if (capabilityId.startsWith(prefix)) return modelClass;
+  }
+  // Fallback: commander
+  return 'commander';
+}
+
+/**
+ * Capability metadata for audit logging.
+ */
+export interface CapabilityInfo {
+  capabilityId: string;
+  modelClass: ModelClass;
+  profile: Profile;
+  description: string;
+}
+
+// ---------------------------------------------------------------------------
+// DshToolProvider
+// ---------------------------------------------------------------------------
+
 /**
  * DshToolProvider — wraps dsh CLI calls as a ToolProvider.
  *
- * In M0c skeleton: stub only. Real implementation will:
- *   1. Map capabilityId to a dsh prompt template.
- *   2. Serialize ToolInvokeRequest.arguments into the prompt.
- *   3. Call dsh via callDshHeadless().
- *   4. Parse stdout into ToolInvokeResult.result.
+ * In M1c: real implementation with profile-aware model selection.
+ *   1. Resolve modelClass from capabilityId
+ *   2. Load profile YAML (base + role patch)
+ *   3. Serialize ToolInvokeRequest into a dsh prompt
+ *   4. Call dsh via dshInvoke()
+ *   5. Parse stdout into ToolInvokeResult
  *
  * @implements IToolProvider
  */
 export class DshToolProvider implements IToolProvider {
   private readonly _capabilityId: string;
   private readonly _description: string;
-  private readonly _modelClass: DshOpts['modelClass'];
+  private readonly _modelClass: ModelClass;
+  private readonly _profile: Profile;
 
+  /**
+   * Create a DshToolProvider.
+   *
+   * @param opts.capabilityId - the capability being served
+   * @param opts.description  - human-readable description
+   * @param opts.modelClass  - override model class (auto-resolved from capabilityId if omitted)
+   */
   constructor(opts?: {
     capabilityId?: string;
     description?: string;
-    modelClass?: DshOpts['modelClass'];
+    modelClass?: ModelClass;
   }) {
-    this._capabilityId = opts?.capabilityId ?? 'dsh.generic';
-    this._description = opts?.description ?? 'Generic dsh tool provider';
-    this._modelClass = opts?.modelClass ?? 'commander';
+    const capabilityId = opts?.capabilityId ?? 'generic.default';
+    const modelClass = opts?.modelClass ?? resolveModelClass(capabilityId);
+
+    this._capabilityId = capabilityId;
+    this._description = opts?.description ?? `dsh ${modelClass} tool provider`;
+    this._modelClass = modelClass;
+    this._profile = loadProfile(modelClass);
   }
 
   capabilityId(): string {
@@ -56,57 +130,118 @@ export class DshToolProvider implements IToolProvider {
   }
 
   /**
+   * Get the resolved capability info for this provider.
+   */
+  getCapabilityInfo(): CapabilityInfo {
+    return {
+      capabilityId: this._capabilityId,
+      modelClass: this._modelClass,
+      profile: this._profile,
+      description: this._description,
+    };
+  }
+
+  /**
    * Invoke dsh with the given tool request.
    *
    * @param request - ToolInvokeRequest from the gateway
    * @returns ToolInvokeResult
-   *
-   * TODO (M0c skeleton):
-   *   - Build prompt from request.arguments
-   *   - Pass modelClass to callDshHeadless()
-   *   - Handle dsh exit codes (denial, timeout, etc.)
-   *   - Parse and return result
    */
-  invoke(request: ToolInvokeRequest): ToolInvokeResult {
-    // TODO: build prompt string from request.arguments
-    const prompt = `[stub] invoke ${request.capabilityId} attempt=${request.attemptId}`;
+  async invoke(request: ToolInvokeRequest): Promise<ToolInvokeResult> {
+    const prompt = this._buildPrompt(request);
 
-    // TODO: actually call dsh (currently synchronous stub)
-    // const response = await callDshHeadless(prompt, { modelClass: this._modelClass });
+    const response = await dshInvoke({
+      modelClass: this._modelClass,
+      prompt,
+      timeoutMs: this._profile.timeoutMs,
+    });
+
+    return this._parseResponse(request, response);
+  }
+
+  /**
+   * Build a dsh prompt from a ToolInvokeRequest.
+   * Serialises request.arguments into the prompt text.
+   */
+  private _buildPrompt(request: ToolInvokeRequest): string {
+    const argsJson = JSON.stringify(request.arguments, null, 2);
+    return [
+      `[Task ID: ${request.taskId}]`,
+      `[Attempt: ${request.attemptId}]`,
+      `[Capability: ${request.capabilityId}]`,
+      '',
+      `Arguments:`,
+      argsJson,
+      '',
+      'Please complete this task and return the result.',
+    ].join('\n');
+  }
+
+  /**
+   * Parse dsh CLI response into ToolInvokeResult.
+   */
+  private _parseResponse(
+    request: ToolInvokeRequest,
+    response: Awaited<ReturnType<typeof dshInvoke>>,
+  ): ToolInvokeResult {
+    const { stdout, stderr, exitCode, wallMs, traceId, tokenUsage, denialReason } = response;
+
+    if (exitCode !== 0 || denialReason) {
+      return {
+        capabilityId: request.capabilityId,
+        result: { stdout, stderr, wallMs },
+        denialReason: denialReason ?? `dsh exit code ${exitCode}`,
+        artifactId: traceId,
+      };
+    }
 
     return {
       capabilityId: request.capabilityId,
       result: {
-        // TODO: populate from dsh response
-        stub: true,
-        attemptId: request.attemptId,
-        taskId: request.taskId,
+        stdout,
+        stderr,
+        wallMs,
+        traceId,
+        tokenUsage,
       },
       denialReason: undefined,
-      artifactId: undefined,
+      artifactId: traceId,
     };
   }
 }
 
+// ---------------------------------------------------------------------------
+// Factory
+// ---------------------------------------------------------------------------
+
 /**
- * Stub factory: create a DshToolProvider for a given capability.
- *
- * In production, the registry would map capabilityId -> provider instance.
- *
- * TODO (M0c skeleton):
- *   - Register providers for each supported capabilityId
- *   - Return the appropriate provider instance
+ * Create a DshToolProvider for a given capabilityId.
+ * modelClass is auto-resolved from capabilityId prefix.
  */
 export function createToolProvider(
   capabilityId: string,
-  modelClass?: DshOpts['modelClass'],
+  modelClass?: ModelClass,
 ): IToolProvider {
   return new DshToolProvider({ capabilityId, modelClass });
 }
 
 /**
+ * Create a DshToolProvider for a specific model class (no capabilityId lookup).
+ * Useful for direct orchestrator/commander/worker invocations.
+ */
+export function createToolProviderForClass(
+  modelClass: ModelClass,
+  description?: string,
+): IToolProvider {
+  return new DshToolProvider({ modelClass, description });
+}
+
+// ---------------------------------------------------------------------------
+// Type guard
+// ---------------------------------------------------------------------------
+
+/**
  * Type guard: verify an object satisfies IToolProvider.
- * (No runtime protocol check in TS; this is a compile-time aid.)
  */
 export function isToolProvider(obj: unknown): obj is IToolProvider {
   if (typeof obj !== 'object' || obj === null) return false;
