@@ -48,9 +48,9 @@ describe('tool_provider unit', () => {
   // ── DshToolProvider constructor ──────────────────────────────────────────
 
   describe('DshToolProvider constructor', () => {
-    it('defaults: capabilityId = dsh.generic', () => {
+    it('defaults: capabilityId = generic.default', () => {
       const provider = new DshToolProvider();
-      expect(provider.capabilityId()).toBe('dsh.generic');
+      expect(provider.capabilityId()).toBe('generic.default');
     });
 
     it('defaults: description = generic description', () => {
@@ -59,10 +59,10 @@ describe('tool_provider unit', () => {
       expect(provider.description().length).toBeGreaterThan(0);
     });
 
-    it('defaults: modelClass = commander', () => {
+    it('defaults: modelClass = commander (auto-resolved)', async () => {
       const provider = new DshToolProvider();
-      // modelClass is internal; verify via invoke result
-      const result = provider.invoke(makeRequest());
+      // modelClass is internal; verify via invoke result shape (M1c real impl)
+      const result = await provider.invoke(makeRequest());
       expect(isToolInvokeResult(result)).toBe(true);
     });
 
@@ -79,8 +79,9 @@ describe('tool_provider unit', () => {
     it('accepts all modelClass values', () => {
       const classes: Array<'orch' | 'commander' | 'worker'> = ['orch', 'commander', 'worker'];
       for (const mc of classes) {
+        // modelClass only — capabilityId falls back to default 'generic.default'
         const provider = new DshToolProvider({ modelClass: mc });
-        expect(provider.capabilityId()).toBe('dsh.generic');
+        expect(provider.capabilityId()).toBe('generic.default');
       }
     });
   });
@@ -122,18 +123,20 @@ describe('tool_provider unit', () => {
       expect(result.denialReason).toBeUndefined();
     });
 
-    it('returns undefined artifactId (stub)', async () => {
+    it('returns traceId as artifactId (M1c real impl)', async () => {
       const provider = new DshToolProvider();
       const result = await provider.invoke(makeRequest());
-      expect(result.artifactId).toBeUndefined();
+      // M1c: artifactId is the dsh trace id (non-empty string)
+      expect(typeof result.artifactId).toBe('string');
+      expect(result.artifactId!.length).toBeGreaterThan(0);
     });
 
-    it('accepts arbitrary arguments', () => {
+    it('accepts arbitrary arguments', async () => {
       const provider = new DshToolProvider();
       const req = makeRequest({
         arguments: { prompt: 'complex task', context: { user: 'test' }, steps: [1, 2, 3] },
       });
-      const result = provider.invoke(req);
+      const result = await provider.invoke(req);
       expect(isToolInvokeResult(result)).toBe(true);
     });
   });
