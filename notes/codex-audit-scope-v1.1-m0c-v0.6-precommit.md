@@ -16,26 +16,27 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" CHANGELOG.md README.md docs/v1.1-ga-team-p
 
 # 历史文档豁免口径锚定（tracked 重锚 post-v0.6，引用式）：
 git ls-files docs/ adr/ spec/capabilities/ | xargs grep -cE "Fable 5|GLM 5.3|MiniMax-M3" 2>/dev/null | grep -v ":0$" | awk -F: '{s+=$NF} END{print s}'
-# 期望: == audit-scope §1.5 主表合计 tracked（v0.6 实测后唯一权威源；演进链 117 → 公式预测 ~214 但**实测为准**）
+# 期望: == audit-scope §1.5 主表合计（唯一权威源；v0.6 实测 = **117 / 49 文件**；演进链 91→97→101→103→107→114→117；禁公式预测，以实测为准）
 
 # 历史文档豁免口径锚定（disk 口径 == tracked + 本 audit-scope 自伤）：
 grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/ adr/ spec/capabilities/ notes/codex-audit-scope-v1.1-m0c-v0.6-precommit.md | wc -l
-# 期望: == audit-scope §1.5 主表 disk 行（v0.6 实测后三源同值）
+# 期望: == audit-scope §1.5 主表 disk 行（v0.6 实测 = **124** = docs/adr/spec tracked 117 + 本文件自伤实测 7；三源同值）
 
 # notes/ 范围自伤豁免（本文件含 grep pattern 字面）：
 grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.1-m0c-v0.6-precommit.md | wc -l
-# 期望: ≥ 8（grep 字面必现：§1 + §1.5 + §4.5 + §4.5.5 + §6 + §7 共 6 节）
+# 期望: == 7（实测：§1 ×2 + §1.5 主表 ×1 + §4.5 ×1 + §6 ×1 + §7 ×1；起草预估 ≥8 系 over，按实测校准）
 
-# wrapper/ stub 替换 守门（v0.6 NEW §1.4）：
-grep -c "createSign\|asn1" wrapper/dsh/vapid_keys.ts  # == 0（避免误用 createSign 默认 DER 输出）
-grep -c "signVapidJwt" wrapper/dsh/vapid_keys.ts  # ≥ 1（export function）
+# wrapper/ stub 替换 守门（v0.6 NEW §1.4；per Codex v0.6 复审校准——createSign 系合规 API 不禁，禁的是 DER 编码）：
+grep -c "dsaEncoding: 'ieee-p1363'" wrapper/dsh/vapid_keys.ts  # ≥ 1（RFC 8292 §3.2 raw r||s 64B 正确签名编码；实测 2）
+grep -ciE "asn1|der\b" wrapper/dsh/vapid_keys.ts  # == 0（禁 DER/ASN.1 编码输出）
+grep -c "signVapidJwt" wrapper/dsh/vapid_keys.ts  # ≥ 1（export function；实测 3）
 ```
 
 **含义**：v1.1+ 周期模型决策遵守 NORTH-STAR A-4 等价类约束；v0.6 升级前向交付物均不含具体型号字面；ADR 0011 + 公告 + release notes 走 §1.5 自伤豁免（与 ADR 0001-0010 同口径）。
 
 ### §1.5 历史文档豁免清单（tracked 重锚 v0.6 实测后 = 引用式本节；本主表 = 锚定唯一权威源，prompt/报告一律引用不复制数字）
 
-继承 v0.5 §1.5 docs 主表 49 文件 117 行 + notes 自伤小节 2 文件；v0.6 升级范围（wrapper/ stub 替换自引入 + 公告 NEW + release notes NEW + audit-scope/prompt v0.6 自伤实测）= **v0.6 实测后填 tracked + disk 三源同值（禁公式预测；以实测为准）**。
+继承 v0.5 §1.5 docs 主表 49 文件 117 行 + notes 自伤小节 2 文件；v0.6 升级范围（wrapper/ 3 文件不入 §1 命令范围 + 公告/release notes docs 命中实测 0 + audit-scope/prompt v0.6 notes 自伤）= **tracked 终态 117 / 49 文件（v0.6 实测）+ disk 124（= 117 + 本文件自伤实测 7）三源同值**。
 
 **v0.6 升级范围**（11 文件）：
 
@@ -45,15 +46,15 @@ grep -c "signVapidJwt" wrapper/dsh/vapid_keys.ts  # ≥ 1（export function）
 | 2 | `wrapper/orchestrator/webpush_gateway.ts` | Edit（L156 stub → signVapidJwt + L180-187 删 stub + L23 import 删 createHmac）| 0 | wrapper/ 不入 §1 命令范围 |
 | 3 | `wrapper/test/integration/webpush_e2e.test.ts` | Edit（4 broken URL paths `../` → `../../` + env delete order + §7 ECDSA 断言 describe block）| 0 | wrapper/ 不入 §1 命令范围 |
 | 4 | `notes/codex-audit-scope-v1.1-m0c-v0.6-precommit.md` | NEW（本文件）| 0 | notes/ 不入主合同 |
-| 5 | `notes/codex-audit-scope-v1.1-m0c-v0.6-precommit-prompt.md` | NEW（配套 Codex 复审 prompt）| v0.6 实测后填 | notes/ 不入主合同 |
-| 6 | `docs/announcements/adr-0011-closure.md` | NEW（ADR 0011 closure 公告 9 段）| v0.6 实测后填 | docs/ 入主合同 |
+| 5 | `notes/codex-audit-scope-v1.1-m0c-v0.6-precommit-prompt.md` | NEW（配套 Codex 复审 prompt）| 0（notes/ 不入 tracked；自伤豁免）| notes/ 不入主合同 |
+| 6 | `docs/announcements/adr-0011-closure.md` | NEW（ADR 0011 closure 公告 9 段）| **0（v0.6 实测）** | docs/ 入主合同（#54）|
 | 7 | `CHANGELOG.md` | Edit（[1.1.0] GA 段补「M3 EXEC PASS」+ M3-EXEC-3 stub 替换条 + cross-ref）| 0 | grep 字面 0 行 |
 | 8 | `README.md` | Edit（v1.1 final 段补 M3 EXEC 状态 + stub 替换说明 + GA tag 命令升级）| 0 | grep 字面 0 行 |
 | 9 | `docs/v1.1-ga-team-plan.md` | Edit（v0.4 → v0.5 升级：M3 GA final 收口 + ADR 0011 公告 cross-ref）| 0 | grep 字面 0 行 |
-| 10 | `docs/DOCS-RELEASE-NOTES-v1.1.0.md` | NEW（GA release notes）| v0.6 实测后填 | docs/ 入主合同 |
+| 10 | `docs/DOCS-RELEASE-NOTES-v1.1.0.md` | NEW（GA release notes）| **0（v0.6 实测）** | docs/ 入主合同（#55）|
 | 11 | `docs/poll/cc-ready.json` | Edit（task_id → T-M3-EXEC-PASS + status 翻牌 + 11 文件清单）| 0 | grep 字面 0 行 |
 
-**docs 主表**（继承 v0.5 §1.5 #1-#53 49 文件 117 行 + v0.6 自引入 #54-#57 + v0.6 audit-scope 自伤 = **v0.6 实测后填 tracked + disk 三源同值**；演进链 117 → 实测 ~214 公式预测但不复制绝对数字；Plan agent 2026-09-03 风险评估 v0.6 formula drift MEDIUM）。
+**docs 主表**（继承 v0.5 §1.5 #1-#53 49 文件 117 行；v0.6 docs 增量实测 **0**（公告 #54 0 + release notes #55 0 + CHANGELOG/README/plan/cc-ready 0；wrapper 3 文件不入 §1 命令范围）= **tracked 终态 117 / 49 文件 + disk 124（117 + audit-scope 自伤 7）/ 50 文件 disk，实测三源同值**；演进链 91→97→101→103→107→114→117，公式预测已废弃（per Codex v0.6 复审裁定，原「~214」系 Plan agent 范围误算噪音，删）。
 
 **v0.6 实测公式**（post-M3-EXEC-3 + M3-EXEC-5 commit 后实测）：
 
@@ -175,6 +176,7 @@ grep -rE "vapid_private_key\s*[:=]\s*['\"][A-Za-z0-9_-]{32,}['\"]|VAPID_PRIVATE\
 # VAPID 公钥 env-inject-only 合规（v0.5 §4.7 GATE-CALIB 校准：期望反向 == 0）：
 grep -rE "vapid_public_key\s*[:=]\s*['\"][A-Za-z0-9_-]{32,}['\"]|VAPID_PUBLIC\s*[:=]\s*['\"][A-Za-z0-9_-]{32,}['\"]" deploy/ env/ | wc -l
 # 期望: == 0
+# 白名单（per Codex v0.6 复审裁定 2026-09-03）：公钥**裸文件** `deploy/vapid_public.key`（87B base64url，RFC 8292 公钥本为公开分发物，per wrapper/dsh/vapid_keys.ts L8/L80「SAFE to commit」实现契约）以单文件白名单入库——赋值式 pattern 期望仍 == 0（防字面散布）；公钥文件不入锚定范围（deploy/ 在 §1 命令范围外）；私钥文件严禁落盘（实测 disk 仅公钥 1 文件）
 
 # Web Push 端点合规守门（v0.5 §4.7 继承）：
 grep -rE "https://fcm\.googleapis\.com|https://updates\.push\.services\.mozilla\.com|https://wns\.windows-push\.com|https://api\.push\.apple\.com" deploy/ wrapper/ docs/announcements/adr-0011-closure.md docs/DOCS-RELEASE-NOTES-v1.1.0.md | wc -l
