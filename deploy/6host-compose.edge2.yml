@@ -22,9 +22,9 @@ services:
     container_name: harness-edge2-wrapper
     image: node:22-alpine
     restart: unless-stopped
-    working_dir: /app
+    working_dir: /app/wrapper
     volumes:
-      - ../wrapper:/app/wrapper:ro
+      - ..:/app:ro
     env_file:
       - env/edge-host.env.example
     environment:
@@ -39,7 +39,7 @@ services:
       - harness_net
     ports:
       - "4001:4001"
-    command: ["sh", "-c", "echo 'edge2-wrapper (west-1): region=$EDGE_REGION, harness=$HARNESS_API_URL, DSH_PROFILE=$DSH_PROFILE' && sleep infinity"]
+    command: ["node", "build/server.js"]
     mem_limit: 512m
     memswap_limit: 512m
 

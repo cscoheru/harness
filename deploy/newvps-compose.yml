@@ -61,9 +61,9 @@ services:
     container_name: harness-wrapper
     image: node:22-alpine
     restart: unless-stopped
-    working_dir: /app
+    working_dir: /app/wrapper
     volumes:
-      - ../wrapper:/app/wrapper:ro
+      - ..:/app:ro
     env_file:
       - ../env/newvps.env.example
     environment:
@@ -86,8 +86,7 @@ services:
     # Tailscale Serve proxies harness.rana.asia:443 → wrapper:3000.
     ports:
       - "${WRAPPER_PORT:-3000}:3000"
-    # Placeholder command — replace when M1c BE-1 wrapper 实装完成.
-    command: ["sh", "-c", "echo 'wrapper orchestrator: WRAPPER_PORT=$WRAPPER_PORT, DSH_PROFILE=$DSH_PROFILE' && sleep infinity"]
+    command: ["node", "build/server.js"]
     mem_limit: 512m
     memswap_limit: 512m
 
@@ -99,9 +98,9 @@ services:
     container_name: harness-worker
     image: node:22-alpine
     restart: unless-stopped
-    working_dir: /app
+    working_dir: /app/wrapper
     volumes:
-      - ../wrapper:/app/wrapper:ro
+      - ..:/app:ro
     env_file:
       - ../env/newvps.env.example
     environment:
@@ -118,8 +117,8 @@ services:
     depends_on:
       wrapper:
         condition: service_started
-    # Placeholder command — replace when worker logic 实装完成.
-    command: ["sh", "-c", "echo 'worker: class=$WORKER_CLASS, DSH_PROFILE=$DSH_PROFILE' && sleep infinity"]
+    # Real worker entry — M2 spec (post PROJECT_ROOT fix; volume = .. mount).
+    command: ["node", "build/server.js"]
     mem_limit: 512m
     memswap_limit: 512m
     # No ports: worker is a background consumer, not a server.

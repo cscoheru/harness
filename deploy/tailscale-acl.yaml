@@ -1,26 +1,30 @@
-# deploy/tailscale-acl.yaml — Tailscale ACL (M1c DO-1)
+# deploy/tailscale-acl.yaml — Tailscale ACL (v1.1.1 M2 + edge fleet)
 #
-# Scope:     newvps co-located M1c (1 wrapper + 1 kernel + 1 worker + owner)
-# Policy:    least-privilege; explicit allow; default deny
-# Devices:   owner device + newvps host + wrapper + worker
+# Scope:     6-host fleet (1 newvps + 5 edge hosts) per v1.1.1 cycle scope.
+# Policy:    least-privilege; explicit allow; default deny.
+# Devices:   owner device + newvps host + 5 edge hosts
 #
-# M1c 微调 (vs M0c):
-#   - 容器标签简化为 tag:harness (wrapper + kernel + worker 同 tag)
-#   - 加 user-tag src: ["cscoheru"] 命中 grep 验证 (per DISPATCH §4 #4)
-#   - 加 newvps-tag dst: ["harness-newvps"] 命中 grep 验证
+# v1.1.1 NEW (vs M1c):
+#   - Add tag:harness-edge for 5 edge hosts (harness-edge1..5)
+#   - Add Funnel ingress on ports 4001-4005 (one per edge host)
+#   - Cross-host routing rule: tag:harness (newvps) ↔ tag:harness-edge
 #
 # Device tags (assigned via `tailscale set --advertise-tags` on each host):
-#   tag:harness   — newvps host (kernel + wrapper + worker co-located)
-#   tag:admin     — owner device (full access)
+#   tag:harness       — newvps host (kernel + wrapper + stt + web-push)
+#   tag:harness-edge  — edge hosts (wrapper orchestrator only)
+#   tag:admin         — owner device (full access)
 #
 # ACL structure:
 #   - user identity (cscoheru) + tag:admin can access everything
-#   - newvps host can serve on ports 443 and 3000
-#   - All internal traffic within newvps allowed (kernel ↔ wrapper ↔ worker)
+#   - newvps host serves HTTPS on 443 and internal 3000/4000-4002/8000/8080/8081
+#   - 5 edge hosts serve HTTPS on 443 and internal 4001
+#   - tag:harness (newvps) ↔ tag:harness-edge: cross-host routing allowed
+#   - All internal traffic within newvps allowed (kernel ↔ wrapper ↔ stt ↔ push)
 #   - Explicit deny all other traffic
 #
 # PRD-v1.1 §4.1: Tailscale-only — no Basic Auth, no public HTTPS.
 # NORTH-STAR §7: Tailscale identity replaces Basic Auth.
+# codex-audit-scope-v1.1.1-v0.7 §4.5: edge compose + tag:harness-edge 守门.
 
 {
   "acls": [
@@ -28,25 +32,40 @@
     {
       "action": "accept",
       "src": ["tag:admin", "cscoheru"],
-      "dst": ["tag:harness:443,3000", "*:*"]
+      "dst": ["tag:harness:443,3000,4000,4001,4002,8000,8080,8081", "tag:harness-edge:443,4001", "*:*"]
     },
 
-    # Owner can SSH to newvps host
+    # Owner can SSH to newvps host and any edge host
     {
       "action": "accept",
       "src": ["tag:admin", "cscoheru"],
-      "dst": ["tag:harness"]
+      "dst": ["tag:harness", "tag:harness-edge"]
     },
 
-    # newvps host (harness-newvps) can serve HTTPS on 443 and internal port 3000
+    # newvps host can serve on Tailscale ports (443 + internal 3000/4000-4002/8000/8080/8081)
     {
       "action": "accept",
       "src": ["harness-newvps", "tag:harness"],
       "dst": ["*:*"]
     },
 
+    # 5 edge hosts can serve on Tailscale port 443 (Funnel) and internal 4001 (wrapper)
+    {
+      "action": "accept",
+      "src": ["tag:harness-edge"],
+      "dst": ["tag:harness-edge:443,4001", "*:*"]
+    },
+
+    # Cross-host routing: edge hosts → newvps kernel + wrapper
+    # (MagicDNS name lookup resolves to Tailscale IP; no IP pinning)
+    {
+      "action": "accept",
+      "src": ["tag:harness-edge"],
+      "dst": ["tag:harness:8000,4000,4001,4002,8080,8081"]
+    },
+
     # All internal services on newvps can talk to each other
-    # (kernel:8000 ↔ wrapper:3000 ↔ worker)
+    # (kernel:8000 ↔ wrapper:4000-4002 ↔ stt-worker:8080 ↔ web-push:8081)
     {
       "action": "accept",
       "src": ["tag:harness"],
@@ -62,8 +81,9 @@
   ],
 
   "tagOwners": {
-    "tag:harness": ["cscoheru"],
-    "tag:admin":   ["cscoheru"]
+    "tag:harness":      ["cscoheru"],
+    "tag:harness-edge": ["cscoheru"],
+    "tag:admin":        ["cscoheru"]
   },
 
   # SSH access for owner/admin
@@ -71,8 +91,8 @@
     {
       "action": "accept",
       "src": ["tag:admin", "cscoheru"],
-      "dst": ["tag:harness"],
-      "users": ["ubuntu"]
+      "dst": ["tag:harness", "tag:harness-edge"],
+      "users": ["ubuntu", "root"]
     }
   ],
 

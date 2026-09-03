@@ -59,9 +59,9 @@ services:
     container_name: harness-stt-worker
     image: node:22-alpine
     restart: unless-stopped
-    working_dir: /app
+    working_dir: /app/wrapper
     volumes:
-      - ../wrapper:/app/wrapper:ro
+      - ..:/app:ro
       - whisper_model:/models
     env_file:
       - env/newvps.env.example
@@ -82,7 +82,7 @@ services:
     depends_on:
       harness-kernel:
         condition: service_healthy
-    command: ["sh", "-c", "echo 'stt-worker: model=$WHISPER_MODEL_PATH, audio_temp=$AUDIO_TEMP_DIR' && sleep infinity"]
+    command: ["node", "build/server.js"]
     mem_limit: 1024m
     memswap_limit: 1024m
     # whisper.cpp CPU-bound; no host ports needed
@@ -92,9 +92,9 @@ services:
     container_name: harness-web-push
     image: node:22-alpine
     restart: unless-stopped
-    working_dir: /app
+    working_dir: /app/wrapper
     volumes:
-      - ../wrapper:/app/wrapper:ro
+      - ..:/app:ro
     env_file:
       - env/newvps.env.example
     environment:
@@ -111,7 +111,7 @@ services:
         condition: service_healthy
     ports:
       - "8081:8081"
-    command: ["sh", "-c", "echo 'web-push-gateway: VAPID private key injected=$VAPID_PRIVATE_KEY' && sleep infinity"]
+    command: ["node", "build/server.js"]
     mem_limit: 256m
     memswap_limit: 256m
 
@@ -120,9 +120,9 @@ services:
     container_name: harness-wrapper-orch
     image: node:22-alpine
     restart: unless-stopped
-    working_dir: /app
+    working_dir: /app/wrapper
     volumes:
-      - ../wrapper:/app/wrapper:ro
+      - ..:/app:ro
     env_file:
       - env/newvps.env.example
     environment:
@@ -139,7 +139,7 @@ services:
         condition: service_healthy
     ports:
       - "4000:4000"
-    command: ["sh", "-c", "echo 'wrapper-orchestrator: port=$WRAPPER_PORT, DSH_PROFILE=$DSH_PROFILE' && sleep infinity"]
+    command: ["node", "build/server.js"]
     mem_limit: 512m
     memswap_limit: 512m
 
@@ -148,9 +148,9 @@ services:
     container_name: harness-wrapper-commander
     image: node:22-alpine
     restart: unless-stopped
-    working_dir: /app
+    working_dir: /app/wrapper
     volumes:
-      - ../wrapper:/app/wrapper:ro
+      - ..:/app:ro
     env_file:
       - env/newvps.env.example
     environment:
@@ -167,7 +167,7 @@ services:
         condition: service_healthy
     ports:
       - "4001:4001"
-    command: ["sh", "-c", "echo 'wrapper-commander: port=$WRAPPER_PORT, DSH_PROFILE=$DSH_PROFILE' && sleep infinity"]
+    command: ["node", "build/server.js"]
     mem_limit: 512m
     memswap_limit: 512m
 
@@ -176,9 +176,9 @@ services:
     container_name: harness-wrapper-frontend
     image: node:22-alpine
     restart: unless-stopped
-    working_dir: /app
+    working_dir: /app/wrapper
     volumes:
-      - ../wrapper:/app/wrapper:ro
+      - ..:/app:ro
     env_file:
       - env/newvps.env.example
     environment:
@@ -195,7 +195,7 @@ services:
         condition: service_healthy
     ports:
       - "4002:4002"
-    command: ["sh", "-c", "echo 'wrapper-frontend: port=$WRAPPER_PORT, DSH_PROFILE=$DSH_PROFILE' && sleep infinity"]
+    command: ["node", "build/server.js"]
     mem_limit: 512m
     memswap_limit: 512m
 
