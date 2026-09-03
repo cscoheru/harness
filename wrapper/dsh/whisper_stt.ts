@@ -40,11 +40,17 @@ const WHISPER_PORT = process.env.WHISPER_PORT ?? '8080';
 const WHISPER_BASE_URL = `http://${WHISPER_HOST}.tail1b9878.ts.net:${WHISPER_PORT}`;
 
 /**
- * Absolute path to the whisper model binary on the newvps host.
- * Must be set via WHISPER_MODEL_PATH env var (absolute path required).
- * Example: /opt/harness/models/whisper-base.en.bin
+ * Validate WHISPER_MODEL_PATH at module load time (eager validation).
+ *
+ * Throws synchronously so that `import('../../dsh/whisper_stt.js')` rejects
+ * when the env var is missing or not absolute. This makes the constraint
+ * testable via `await expect(import(...)).rejects.toThrow(...)` and fails
+ * fast at boot rather than on first transcription call.
+ *
+ * `getWhisperModelPath()` still re-validates per-call as defense-in-depth
+ * (env vars can be unset at runtime after import).
  */
-function getWhisperModelPath(): string {
+function validateWhisperModelPathOrThrow(): void {
   const modelPath = process.env.WHISPER_MODEL_PATH;
   if (!modelPath) {
     throw new Error(
@@ -58,7 +64,25 @@ function getWhisperModelPath(): string {
       `WHISPER_MODEL_PATH must be an absolute path, got: ${modelPath}`,
     );
   }
-  return modelPath;
+}
+
+// Eager module-level validation: throws on import if env invalid.
+// Wrapped in IIFE so the throw doesn't leak to top-level (which would be
+// caught by some bundlers and turned into undefined module).
+(function eagerValidate(): void {
+  validateWhisperModelPathOrThrow();
+})();
+
+/**
+ * Get the absolute path to the whisper model on the newvps host.
+ * Must be set via WHISPER_MODEL_PATH env var (absolute path required).
+ * Example: /opt/harness/models/whisper-base.en.bin
+ *
+ * Re-validates per call as defense-in-depth (env vars can change after import).
+ */
+export function getWhisperModelPath(): string {
+  validateWhisperModelPathOrThrow();
+  return process.env.WHISPER_MODEL_PATH as string;
 }
 
 /**

@@ -16,7 +16,7 @@
  * @file wrapper/test/integration/stt_e2e.test.ts
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { Readable } from 'stream';
 
 // ---------------------------------------------------------------------------
@@ -89,7 +89,7 @@ describe('STT E2E — whisper.cpp integration', { skip: !shouldRun }, () => {
     it('whisper_stt.ts does NOT reference /tmp/audio or /var/tmp/audio', async () => {
       // Read the source file to assert hygiene
       const fs = await import('fs');
-      const sourcePath = new URL('../dsh/whisper_stt.ts', import.meta.url);
+      const sourcePath = new URL('../../dsh/whisper_stt.ts', import.meta.url);
       const source = fs.readFileSync(sourcePath, 'utf8');
 
       const tmpAudioPattern = /\/tmp\/audio|\/var\/tmp\/audio/;
@@ -101,7 +101,7 @@ describe('STT E2E — whisper.cpp integration', { skip: !shouldRun }, () => {
 
     it('whisper_stt.ts uses /dev/shm for any temp buffer', async () => {
       const fs = await import('fs');
-      const sourcePath = new URL('../dsh/whisper_stt.ts', import.meta.url);
+      const sourcePath = new URL('../../dsh/whisper_stt.ts', import.meta.url);
       const source = fs.readFileSync(sourcePath, 'utf8');
 
       // /dev/shm is the allowed memory filesystem path
@@ -115,7 +115,7 @@ describe('STT E2E — whisper.cpp integration', { skip: !shouldRun }, () => {
 
     it('WHISPER_MODEL_PATH enforcement: must be absolute path', async () => {
       const fs = await import('fs');
-      const sourcePath = new URL('../dsh/whisper_stt.ts', import.meta.url);
+      const sourcePath = new URL('../../dsh/whisper_stt.ts', import.meta.url);
       const source = fs.readFileSync(sourcePath, 'utf8');
 
       // Should enforce startsWith('/') for model path
@@ -272,6 +272,13 @@ describe('STT E2E — whisper.cpp integration', { skip: !shouldRun }, () => {
   // ---------------------------------------------------------------------------
 
   describe('§4 — Error handling', () => {
+    // vitest caches module imports across dynamic import() calls.
+    // vi.resetModules() forces a fresh module load so eager WHISPER_MODEL_PATH
+    // validation in whisper_stt.ts runs again with the new env var state.
+    beforeEach(() => {
+      vi.resetModules();
+    });
+
     it('throws if WHISPER_MODEL_PATH is not set', async () => {
       const originalPath = process.env.WHISPER_MODEL_PATH;
       delete process.env.WHISPER_MODEL_PATH;
