@@ -30,7 +30,7 @@
 // Imports
 // ---------------------------------------------------------------------------
 
-import { createPublicKey, createPrivateKey, generateKeyPairSync } from 'crypto';
+import { createECDH, createPublicKey, createPrivateKey, createSign, generateKeyPairSync } from 'crypto';
 import { writeFileSync } from 'fs';
 import { resolve } from 'path';
 
@@ -136,6 +136,67 @@ export function getVapidKeyPair(): VapidKeyPair {
     _keyPairCache = generateVapidKeyPair();
   }
   return _keyPairCache;
+}
+
+// ---------------------------------------------------------------------------
+// VAPID JWT signing (RFC 8292)
+// ---------------------------------------------------------------------------
+
+/**
+ * Sign a VAPID JWT input with ECDSA P-256 + SHA-256.
+ * Outputs raw r||s 64-byte signature as base64url (RFC 8292 §3.2).
+ *
+ * Used by webpush_gateway.ts to produce real ES256 signatures
+ * (replaces the M2 BE-1 HMAC stub that was never valid for push services).
+ *
+ * @param input - The signing input (e.g., "eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiJ9.eyJhdW...")
+ * @param privateKeyBase64url - base64url-encoded 32-byte P-256 private scalar (JWK d parameter)
+ * @returns base64url-encoded raw r||s signature (64 bytes → 86 chars no padding)
+ */
+export function signVapidJwt(input: string, privateKeyBase64url: string): string {
+  // Step 1: base64url decode the private scalar → 32 raw bytes
+  const padded = privateKeyBase64url + '='.repeat((4 - (privateKeyBase64url.length % 4)) % 4);
+  const dBytes = Buffer.from(padded.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+
+  if (dBytes.length !== 32) {
+    throw new Error(`signVapidJwt: expected 32-byte private scalar, got ${dBytes.length}`);
+  }
+
+  // Step 2: Derive public point (x, y) from private scalar via ECDH.
+  // Node.js createPrivateKey with a JWK requires both x and y, not just d,
+  // so we use ECDH to derive the public point from the private scalar.
+  const ecdh = createECDH('prime256v1');
+  ecdh.setPrivateKey(dBytes);
+  const publicPoint = ecdh.getPublicKey(); // 65 bytes: 0x04 || x || y
+
+  // Step 3: Construct full JWK with x, y, d
+  const x = publicPoint.subarray(1, 33).toString('base64url');
+  const y = publicPoint.subarray(33, 65).toString('base64url');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const jwk = {
+    kty: 'EC',
+    crv: 'P-256',
+    x,
+    y,
+    d: dBytes.toString('base64url'),
+  } as any;
+
+  const keyObject = createPrivateKey({ key: jwk, format: 'jwk' });
+
+  // Step 3: Sign with SHA-256 + ECDSA P-256.
+  // Use dsaEncoding: 'ieee-p1363' to get raw r||s 64 bytes (RFC 8292 §3.2)
+  // instead of the default DER-encoded ASN.1 SEQUENCE.
+  const signObj = createSign('SHA256');
+  signObj.update(input);
+  const sig = signObj.sign({ key: keyObject, dsaEncoding: 'ieee-p1363' });
+
+  // Step 4: P-256 signature = 32-byte r + 32-byte s = 64 bytes total
+  if (sig.length !== 64) {
+    throw new Error(`signVapidJwt: expected 64-byte raw r||s signature, got ${sig.length}`);
+  }
+
+  // Step 5: base64url encode (no padding, RFC 8292 §3.2)
+  return sig.toString('base64url');
 }
 
 // ---------------------------------------------------------------------------

@@ -105,7 +105,7 @@ describe('Web Push E2E — VAPID signed push', { skip: !shouldRun }, () => {
   describe('§1 — Hygiene: no hardcoded VAPID private key', () => {
     it('webpush_gateway.ts does NOT contain hardcoded VAPID private key', async () => {
       const fs = await import('fs');
-      const sourcePath = new URL('../orchestrator/webpush_gateway.ts', import.meta.url);
+      const sourcePath = new URL('../../orchestrator/webpush_gateway.ts', import.meta.url);
       const source = fs.readFileSync(sourcePath, 'utf8');
 
       // Pattern: VAPID_PRIVATE_KEY := or : followed by 32+ char base64-like string
@@ -118,7 +118,7 @@ describe('Web Push E2E — VAPID signed push', { skip: !shouldRun }, () => {
 
     it('VAPID private key getter reads from process.env only', async () => {
       const fs = await import('fs');
-      const sourcePath = new URL('../orchestrator/webpush_gateway.ts', import.meta.url);
+      const sourcePath = new URL('../../orchestrator/webpush_gateway.ts', import.meta.url);
       const source = fs.readFileSync(sourcePath, 'utf8');
 
       // Should contain process.env["VAPID_PRIVATE_KEY"]
@@ -130,7 +130,7 @@ describe('Web Push E2E — VAPID signed push', { skip: !shouldRun }, () => {
 
     it('VAPID public key is safe to include in source (not sensitive)', async () => {
       const fs = await import('fs');
-      const sourcePath = new URL('../orchestrator/webpush_gateway.ts', import.meta.url);
+      const sourcePath = new URL('../../orchestrator/webpush_gateway.ts', import.meta.url);
       const source = fs.readFileSync(sourcePath, 'utf8');
 
       // Public key is referenced but should be safe to include
@@ -174,7 +174,7 @@ describe('Web Push E2E — VAPID signed push', { skip: !shouldRun }, () => {
 
     it('4 push service endpoint domains appear in source', async () => {
       const fs = await import('fs');
-      const sourcePath = new URL('../orchestrator/webpush_gateway.ts', import.meta.url);
+      const sourcePath = new URL('../../orchestrator/webpush_gateway.ts', import.meta.url);
       const source = fs.readFileSync(sourcePath, 'utf8');
 
       const endpoints = [
@@ -234,14 +234,15 @@ describe('Web Push E2E — VAPID signed push', { skip: !shouldRun }, () => {
       expect(typeof health.hasSubject).toBe('boolean');
     });
 
-    it('throws if VAPID_PRIVATE_KEY is not set', () => {
+    it('checkPushHealth reports hasPrivateKey=false when VAPID_PRIVATE_KEY is not set', () => {
       const originalKey = process.env['VAPID_PRIVATE_KEY'];
-      delete process.env['VAPID_PRIVATE_KEY'];
+      if (originalKey !== undefined) delete process.env['VAPID_PRIVATE_KEY'];
 
       try {
-        expect(() => checkPushHealth()).toThrow();
+        const health = checkPushHealth();
+        expect(health.hasPrivateKey, 'hasPrivateKey should be false when env var is missing').toBe(false);
       } finally {
-        if (originalKey) process.env['VAPID_PRIVATE_KEY'] = originalKey;
+        if (originalKey !== undefined) process.env['VAPID_PRIVATE_KEY'] = originalKey;
       }
     });
 
@@ -263,8 +264,10 @@ describe('Web Push E2E — VAPID signed push', { skip: !shouldRun }, () => {
 
   describe('§5 — sendPush delivery attempt', () => {
     it('sendPush returns a PushResult shape', async () => {
-      // Set a dummy VAPID key for the test (signing will succeed, delivery may fail)
-      process.env['VAPID_PRIVATE_KEY'] = process.env['VAPID_PRIVATE_KEY'] ?? 'test-private-key-32-chars-minimum!!!';
+      // Force a valid 32-byte base64url VAPID private key (signing must succeed even if FCM rejects)
+      const { generateVapidKeyPair } = await import('../../dsh/vapid_keys.js');
+      const kp = generateVapidKeyPair();
+      process.env['VAPID_PRIVATE_KEY'] = kp.privateKey;
       process.env['VAPID_PUBLIC_KEY'] = process.env['VAPID_PUBLIC_KEY'] ?? 'test-public-key-minimum-32-chars!!!!';
       process.env['VAPID_SUBJECT'] = process.env['VAPID_SUBJECT'] ?? 'mailto:test@fish-harness.ts.net';
 
@@ -291,6 +294,12 @@ describe('Web Push E2E — VAPID signed push', { skip: !shouldRun }, () => {
     });
 
     it('sendBroadcast returns array of PushResults', async () => {
+      const { generateVapidKeyPair } = await import('../../dsh/vapid_keys.js');
+      const kp = generateVapidKeyPair();
+      process.env['VAPID_PRIVATE_KEY'] = kp.privateKey;
+      process.env['VAPID_PUBLIC_KEY'] = process.env['VAPID_PUBLIC_KEY'] ?? 'test-public-key-minimum-32-chars!!!!';
+      process.env['VAPID_SUBJECT'] = process.env['VAPID_SUBJECT'] ?? 'mailto:test@fish-harness.ts.net';
+
       const subs: PushSubscription[] = [
         mockFcmSubscription(),
         mockMozillaSubscription(),
@@ -311,7 +320,9 @@ describe('Web Push E2E — VAPID signed push', { skip: !shouldRun }, () => {
 
   describe('§6 — VAPID signing latency benchmark', () => {
     it('VAPID JWT creation < 50ms (signing overhead)', async () => {
-      process.env['VAPID_PRIVATE_KEY'] = process.env['VAPID_PRIVATE_KEY'] ?? 'test-private-key-32-chars-minimum!!!';
+      const { generateVapidKeyPair } = await import('../../dsh/vapid_keys.js');
+      const kp = generateVapidKeyPair();
+      process.env['VAPID_PRIVATE_KEY'] = kp.privateKey;
       process.env['VAPID_PUBLIC_KEY'] = process.env['VAPID_PUBLIC_KEY'] ?? 'test-public-key-minimum-32-chars!!!!';
       process.env['VAPID_SUBJECT'] = process.env['VAPID_SUBJECT'] ?? 'mailto:test@fish-harness.ts.net';
 
@@ -337,6 +348,62 @@ describe('Web Push E2E — VAPID signed push', { skip: !shouldRun }, () => {
         avgMs,
         'average VAPID signing + request time should be reasonable',
       ).toBeLessThan(2_000);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // §7: VAPID ECDSA P-256 signature correctness (post-M3-EXEC-3 stub replacement)
+  // ---------------------------------------------------------------------------
+
+  describe('§7 — VAPID ECDSA P-256 signature correctness', () => {
+    it('signVapidJwt outputs 86-char base64url (64-byte raw r||s)', async () => {
+      const { signVapidJwt, generateVapidKeyPair } = await import('../../dsh/vapid_keys.js');
+      const kp = generateVapidKeyPair();
+      const sig = signVapidJwt('test.input.payload', kp.privateKey);
+
+      expect(typeof sig).toBe('string');
+      expect(sig.length, '64-byte raw r||s base64url = 86 chars no padding').toBe(86);
+      expect(sig, 'must be pure base64url (no + / = chars)').not.toMatch(/[+/=]/);
+    });
+
+    it('signVapidJwt signature verifies against matching public key (RFC 8292)', async () => {
+      const { signVapidJwt, generateVapidKeyPair } = await import('../../dsh/vapid_keys.js');
+      const { createPublicKey, createVerify } = await import('crypto');
+      const kp = generateVapidKeyPair();
+
+      // Reconstruct public KeyObject from base64url-encoded uncompressed point (0x04 || x || y = 65 bytes)
+      const paddedPub = kp.publicKey + '='.repeat((4 - (kp.publicKey.length % 4)) % 4);
+      const rawPub = Buffer.from(paddedPub.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+      const publicJwk = {
+        kty: 'EC',
+        crv: 'P-256',
+        x: rawPub.subarray(1, 33).toString('base64url'),
+        y: rawPub.subarray(33, 65).toString('base64url'),
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const publicKeyObj = createPublicKey({ key: publicJwk as any, format: 'jwk' });
+
+      const input = 'header.payload.verify-test';
+      const sig = signVapidJwt(input, kp.privateKey);
+
+      // Verify: ECDSA P-256 + SHA-256 of input bytes against the raw r||s signature (RFC 8292 §3.2)
+      // dsaEncoding: 'ieee-p1363' tells Node.js the signature is raw r||s (64 bytes) not DER
+      const verifyObj = createVerify('SHA256');
+      verifyObj.update(input);
+      const ok = verifyObj.verify(
+        { key: publicKeyObj, dsaEncoding: 'ieee-p1363' },
+        Buffer.from(sig, 'base64url'),
+      );
+      expect(ok, 'signature must verify against the matching public key (RFC 8292 ES256)').toBe(true);
+    });
+
+    it('webpush_gateway.ts uses signVapidJwt (not hmacSha256 stub)', async () => {
+      const fs = await import('fs');
+      const sourcePath = new URL('../../orchestrator/webpush_gateway.ts', import.meta.url);
+      const source = fs.readFileSync(sourcePath, 'utf8');
+
+      expect(source, 'must import signVapidJwt').toContain('signVapidJwt');
+      expect(source, 'must NOT contain hmacSha256 stub calls').not.toMatch(/hmacSha256\s*\(/);
     });
   });
 });

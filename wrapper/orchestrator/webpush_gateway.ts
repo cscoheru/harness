@@ -20,7 +20,8 @@
  * Co-Authored-By: Claude Code <noreply@anthropic.com>
  */
 
-import { createHmac, randomUUID } from "crypto";
+import { randomUUID } from "crypto";
+import { signVapidJwt } from "../dsh/vapid_keys.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -148,12 +149,10 @@ function createVapidJwt(audience: string): string {
   });
   const payloadEncoded = base64urlEncode(payload);
 
-  // Signature: HMAC-SHA256 of "header.payload" using private key
-  // NOTE: In production use the `web-push` npm package or equivalent RFC 8292 lib.
-  // This stub implements the structural shape for testing; replace with real ECDSA
-  // signing in production (e.g., node:crypto with P-256 key import).
+  // Signature: ECDSA P-256 + SHA-256 of "header.payload" using private key
+  // (RFC 8292 §3.2 — raw r||s 64 bytes via signVapidJwt in dsh/vapid_keys.ts).
   const signingInput = `${header}.${payloadEncoded}`;
-  const signature = hmacSha256(signingInput, privateKey);
+  const signature = signVapidJwt(signingInput, privateKey);
 
   return `${signingInput}.${signature}`;
 }
@@ -164,23 +163,6 @@ function createVapidJwt(audience: string): string {
 function base64urlEncode(input: string): string {
   return Buffer.from(input)
     .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=/g, "");
-}
-
-/**
- * HMAC-SHA256 signing (stub — use proper ECDSA P-256 in production).
- * In production, use `@web-push/web-push` or `web-push` package which handles
- * RFC 8292 ECDSA signing correctly.
- *
- * This stub exists so the module has no external dependencies during M2 BE-1
- * skeleton implementation. Replace with real VAPID signing before production use.
- */
-function hmacSha256(input: string, secret: string): string {
-  return createHmac("sha256", secret)
-    .update(input)
-    .digest("base64")
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=/g, "");
