@@ -164,15 +164,6 @@ app.post('/api/stt/transcribe', async (req, res) => {
   }
 });
 
-// GET * SPA fallback (PWA shell) — registered as catch-all middleware (not
-// app.get('*'), which path-to-regexp v8 rejects in Express 5).
-app.use((_req, res) => {
-  res.type('html').send(
-    '<!DOCTYPE html><html><head><meta charset="utf-8"><title>fish-harness wrapper</title></head>'
-    + '<body><div id="root"></div><script>/* PWA bundle injected in M2+ */</script></body></html>',
-  );
-});
-
 // ---------------------------------------------------------------------------
 // Listener (started only when run as main entry, not when imported by tests)
 // ---------------------------------------------------------------------------

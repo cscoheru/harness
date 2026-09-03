@@ -123,6 +123,43 @@ services:
     memswap_limit: 512m
     # No ports: worker is a background consumer, not a server.
 
+  # ── PWA frontend server (Option B per D-9) ────────────────────────────────
+  # Separate container running pwa_server.ts: serves the 288-line vanilla JS
+  # PWA from wrapper/orchestrator/static/ + its own /api/pwa/{dispatch,status}
+  # routes (used by the form in the PWA). Mapped to host port 3001.
+  # Tailscale Funnel path routing:
+  #   /api/v1/* → wrapper:3000 (API-only; per D-9 server.ts no SPA fallback)
+  #   /*        → frontend:3001 (PWA + /api/pwa/* form handlers)
+  frontend:
+    container_name: harness-frontend
+    image: node:22-alpine
+    restart: unless-stopped
+    working_dir: /app/wrapper
+    volumes:
+      - ..:/app:ro
+    env_file:
+      - ../env/newvps.env.example
+    environment:
+      # pwa_server calls orchestrator which calls kernel — same network path
+      # as wrapper, just different namespace.
+      HARNESS_RUNTIME_URL: "http://harness-kernel:8000"
+      WRAPPER_API_URL: "http://wrapper:3000"
+      # pwa_server port (container-internal; host-mapped below).
+      PWA_PORT: "3000"
+      # dsh profile: headless (per M0b QA-1 §6.X).
+      DSH_PROFILE: "headless"
+    networks:
+      - harness_net
+    depends_on:
+      wrapper:
+        condition: service_started
+    ports:
+      - "3001:3000"
+    # Real PWA entry: serves static/index.html + /api/pwa/* routes.
+    command: ["node", "build/orchestrator/pwa_server.js"]
+    mem_limit: 384m
+    memswap_limit: 384m
+
 networks:
   harness_net:
     driver: bridge
