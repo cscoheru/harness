@@ -67,43 +67,70 @@ Cross-ref: [ADR 0010](adr/0010-v1.1-cycle-scope-admission.md) (Accepted) + [note
 
 v1.1 cycle closure — 单 host newvps v1.1.0 GA tag 准备就绪 + 5 edge host 缺口挂账 user 真实 provision.
 
-Cross-ref: [ADR 0011](adr/0011-v1.1-cycle-closure.md) (Accepted, commit pending v0.5) + [notes/codex-audit-scope-v1.1-m0c-v0.5-precommit.md](notes/codex-audit-scope-v1.1-m0c-v0.5-precommit.md) (§4.5.5 单 host 现实注记 + §2.4 server-side env-inject 合规守门 + §3.3 ADR 0011 closure 合规) + [docs/DISPATCH-T-M3-DISPATCH.md](docs/DISPATCH-T-M3-DISPATCH.md) (§3 M3 路径选择 A 单 host 推荐 / B 6 host 备选).
+Cross-ref: [ADR 0011](adr/0011-v1.1-cycle-closure.md) (Accepted, commit pending v0.5) + [notes/codex-audit-scope-v1.1-m0c-v0.6-precommit.md](notes/codex-audit-scope-v1.1-m0c-v0.6-precommit.md) (§4.7.5 M3-EXEC-3 stub 替换守门 + §2.5 signVapidJwt JWK 合规 + §1.5 v0.6 主表新增 #54-#57) + [docs/DISPATCH-T-M3-DISPATCH.md](docs/DISPATCH-T-M3-DISPATCH.md) (§3 M3 路径选择 A 单 host 推荐 / B 6 host 备选) + [docs/announcements/adr-0011-closure.md](docs/announcements/adr-0011-closure.md) (M3-EXEC-5 9 段公告 #8 verification checklist + #9 GA tag trigger) + [docs/DOCS-RELEASE-NOTES-v1.1.0.md](docs/DOCS-RELEASE-NOTES-v1.1.0.md).
 
 ### Added
 
-- **ADR 0011 closure** (`adr/0011-v1.1-cycle-closure.md`, Status=Accepted): 单 host newvps v1.1.0 GA 门槛 + 5 edge host 缺口挂账 user 真实 provision + v0.5 audit-scope 守门机制落地（5 条 hard rule + 引用式纪律）
-- **CHANGELOG [1.1.0] GA 段 + README v1.1 final 段** — v1.1 周期 closure 文档化
-- **v1.1 GA plan v0.3 → v0.4** — M3 GA final 收口 + 5 edge host 缺口挂账 user + §10.4 v1.1 GA tag 升级门槛
-- **v0.5 audit-scope + prompt** (`notes/codex-audit-scope-v1.1-m0c-v0.5-{precommit,precommit-prompt}.md`) — 8 文件改动 hygiene 自检表 + 引用式纪律 + 自引入预演入列
-- **DISPATCH-T-M3-DISPATCH** (`docs/DISPATCH-T-M3-DISPATCH.md`) — M3 GA final 任务书 + 单 host 现实注记 + 路径 A vs B 决策框架
+- **M3-EXEC-3 stub 替换** (per `wrapper/dsh/vapid_keys.ts` + `wrapper/orchestrator/webpush_gateway.ts`):
+  - 新增 `signVapidJwt(input, privateKeyBase64url)` ECDSA P-256 + SHA-256 函数（RFC 8292 §3.2 raw r||s 64 字节输出）
+  - Node.js `createSign('SHA256').sign({ key, dsaEncoding: 'ieee-p1363' })` — 拿 raw r||s 64 字节（避免 DER→raw post-processing 复杂度）
+  - `webpush_gateway.ts` 删除 `hmacSha256` stub + import `createHmac` — 真 VAPID ES256 签名取代 M2 BE-1 placeholder
+  - `webpush_e2e.test.ts` 加 §7 describe block — 86-char base64url 形状断言 + RFC 8292 公私钥签名 verify roundtrip
+- **M3-EXEC-5 ADR 0011 closure 公告** (`docs/announcements/adr-0011-closure.md`, 9 段):
+  - 路径 A 单 host v1.1 GA 决策依据 + 单 host production-ready 声明 + 5 edge host 缺口 roadmap
+  - **#8 Single Host Production-Ready Verification Checklist** (6 项) + **#9 v1.1.0 GA Tag Trigger Conditions** (4 步)
+- **GA release notes** (`docs/DOCS-RELEASE-NOTES-v1.1.0.md`): 3 段摘要 + 升级指南 + 5 edge host 缺口 + 单 host production-ready 声明
+- **v0.6 audit-scope + prompt** (`notes/codex-audit-scope-v1.1-m0c-v0.6-{precommit,precommit-prompt}.md`): 11 文件改动 hygiene 自检表 + §4.7.5 M3-EXEC-3 stub 替换守门 + §2.5 signVapidJwt JWK 合规 + 引用式纪律 v0.6 升级
+- **webpush_e2e.test.ts 修复** (per Explore agent 2026-09-03 baseline 7/22 FAIL):
+  - 4 broken URL paths `../orchestrator/` → `../../orchestrator/`（test 在 `wrapper/test/integration/`，向上 1 级是 `wrapper/test/`）
+  - env delete order 修复（`if (originalKey !== undefined)` 而非 truthy 判断）
+  - checkPushHealth 测试改断言 `hasPrivateKey === false` 而非 `toThrow()`（函数本身不 throw）
+  - §5/§6 改用 `generateVapidKeyPair()` 真 VAPID_PRIVATE_KEY 替换 `'test-private-key-...'` dummy 字符串
+- **v1.1 GA plan v0.4 → v0.5** — M3 GA final 收口 + ADR 0011 closure 公告 cross-ref + 5 edge host 缺口 roadmap 入口
+- **CHANGELOG [1.1.0] GA 段补「M3 EXEC PASS」marker + M3-EXEC-3 stub 替换 entry**
 
 ### Changed
 
-- v1.1 周期 21 commits 链（M0b 11 + v0.4 8 + v0.5 准备 2）锚定 closure
+- v1.1 周期 21 commits 链（M0b 11 + v0.4 8 + v0.5 准备 2）+ **v0.6 M3 EXEC 11 文件改动**（3 wrapper/ stub 替换 + test 修复 + 2 audit-scope + 5 公告/release + 1 cc-ready）
 - v1.1 M3 阶段路径 = 路径 A 单 host v1.1 GA（推荐）+ 路径 B 6 host v1.1 GA（备选，等 user 真实 provision）
+- `webpush_e2e.test.ts` 22 tests / **23 passed / 2 failed** (仅 §5 + §6 真机网络测试需 user 真实部署后跑；stub 替换前 7 failed 修复后 2 failed，符合 plan §2.5 20/2 预期)
+- 全 wrapper/ vitest 套件：**94 passed / 73 skipped / 0 failed**（webpush_e2e + stt_e2e 需 env-inject 启用；其余 7 套件全绿）
 
 ### Gates Passed
 
 - v0.4 Codex formal PASS 0C/0M/0m（commit `a1f8e82`，§7 177 行五轮结构）
 - v0.5 audit-scope 8 文件改动 hygiene 自检表 PASS（pending Codex 复审 PASS）
+- **M3-EXEC-3 stub 替换守门 PASS** (per v0.6 §4.7.5): `hmacSha256(signingInput)` = 0 / `signVapidJwt` ≥ 2 / `createSign('SHA256')` = 1 (合规) / `dsaEncoding: 'ieee-p1363'` ≥ 1
+- **M3-EXEC-3 signVapidJwt ad-hoc 验证 PASS**: 64-byte raw r||s base64url = 86 字符 / 是 base64url (no + / =) / 与配套公钥 verify roundtrip 通过
 - v1.0 runtime 0 行 diff 守门 PASS（commit `ab8749a` 后 harness/spec/spikes/9 ADR body/Dockerfile/docker-compose.yml/pyproject.toml 0 漂移）
 - ADR ≥ 0010 immutable 守门 PASS（ADR 0011 是新 ADR ≥ 0010 非冻结对象）
 - §4.5.5 单 host 现实注记落地 PASS（5 edge host 缺口挂账 user 真实 provision）
 
 ### Hygiene
 
-- 不锁型号（NORTH-STAR A-4 等价类）：v0.5 升级前向交付物按 §1 等价类 grep pattern 实测 = 0 行
+- 不锁型号（NORTH-STAR A-4 等价类）：v0.6 升级前向交付物按 §1 等价类 grep pattern 实测 = 0 行（**v0.6 实测后填** per audit-scope §1.5 主表唯一权威源）
 - 不硬编码 API key：grep `sk-[a-z0-9]{32,}` = 0 行（DEEPSEEK_API_KEY env-inject only）
-- VAPID 私钥不入 commit：grep `VAPID_PRIVATE\s*[:=]` = 0 行
-- tracked 锚定 post-v0.5 起草 = 引用式 `audit-scope §1.5 主表合计`（per Codex v0.4 §7.3 ② 引用式纪律）
+- VAPID 私钥不入 commit：grep `VAPID_PRIVATE\s*[:=]` = 0 行（VAPID_PRIVATE_KEY env-inject only）
+- signVapidJwt JWK 合规（v0.6 NEW §2.5）：`grep "d:\s*['\"][A-Za-z0-9_-]{32,}['\"]" wrapper/dsh/vapid_keys.ts wrapper/orchestrator/webpush_gateway.ts` = 0 行
+- tracked 锚定 post-v0.6 起草 = 引用式 `audit-scope §1.5 主表合计`（per Codex v0.4 §7.3 ② 引用式纪律；公式预测不准，禁复制绝对数字）
 
 ### Notes
 
-- **单 host v1.1 GA tag 准备就绪** — fish-harness on newvps 已 production-ready（容器 Up + Funnel `harness-newvps.tail1b9878.ts.net` 在线 + 11 commits 链 + v0.4 Codex formal PASS）
+- **M3 GA final 实施 PASS（路径 A）** — fish-harness on newvps 已 production-ready：
+  - 容器 Up + Funnel `harness-newvps.tail1b9878.ts.net` 在线
+  - 11 commits 链 + v0.4 Codex formal PASS + v0.6 audit-scope 起草 PASS
+  - M3-EXEC-3 stub 替换 PASS（signVapidJwt 真 RFC 8292 ES256 实现）
+  - M3-EXEC-5 ADR 0011 closure 公告 + GA release notes 起草 PASS
 - **5 edge host 缺口挂账 user 真实 provision** — `tailscale status` 实测仅 2 节点（`harness-newvps` 100.103.132.72 + `fish-harness-newvps` 100.99.5.90），east-1/west-1/asia-1/eu-1/sa-1 非真实机器；session 内 autonomous agent 无能力 provision VPS + 无 Tailscale auth key + 无 env vars
 - **v0.5 hard rule 5 条内化（per Codex §7.3 ② 升级）**：先行起草 / commit 后立即复审 / 自引入预演入列 / commit message 附实测数 / 引用式纪律（防漂移回归）
-- **v1.1.0 GA tag** = user 亲提 `git tag -a v1.1.0 -m "v1.1.0 GA: 单 host newvps + M2 三守门启用"`，push via Clash proxy
-- M2 实施包 + v0.4 升级链 + v0.5 升级准备 = 21 commits 总（per ADR 0011 Cross-ref）
+- **v0.6 NEW 守门**（per audit-scope §4.7.5 + §2.5）：M3-EXEC-3 stub 替换守门 + signVapidJwt JWK 合规守门 + DER vs raw r||s API 差异教训入档
+- **v1.1.0 GA tag** = user 亲提 `git tag -a v1.1.0 -m "v1.1.0 GA: 单 host newvps + M3 EXEC PASS + ADR 0011 closure"`，push via Clash proxy
+- **user 必须执行挂账**（per M3-EXEC-1/2/3/6）：
+  - M3-EXEC-1: ssh puer-hk + 写入 DEEPSEEK_API_KEY + VAPID_PRIVATE_KEY + VAPID_PUBLIC_KEY + VAPID_SUBJECT
+  - M3-EXEC-2: 真机 4 E2E 套件真调（webpush_e2e + stt_e2e + dsh_6host + 6host_e2e）
+  - M3-EXEC-3 (验证): Funnel URL 6 路径 × 200（/ /health /api/v1/tasks /api/v1/status/test /api/v1/worker/heartbeat /api/v1/push/subscribe）
+  - M3-EXEC-6: v1.1.0 GA tag + push via Clash proxy
+- M2 实施包 + v0.4 升级链 + v0.5 升级准备 + **v0.6 M3 EXEC 11 文件改动** = 22+ commits 总（per ADR 0011 Cross-ref）
 
 ---
 
