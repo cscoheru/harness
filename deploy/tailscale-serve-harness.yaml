@@ -1,32 +1,49 @@
-# deploy/tailscale-serve-harness.yaml — Tailscale Serve HTTPS config (M1c DO-1)
+# deploy/tailscale-serve-harness.yaml — Tailscale Serve HTTPS config (v1.1.1 NEW)
 #
-# Routes: harness.rana.asia:443 → newvps wrapper:3000
+# Routes: harness.rana.asia:443 → newvps
+#   /api/v1/*  → wrapper (host port 3010 = API-only server.ts)
+#   /api/pwa/* → frontend (host port 3011 = PWA form handlers)
+#   /*         → frontend (host port 3011 = static index.html + SPA fallback)
 # Auth:   Tailscale identity (no Basic Auth; PRD-v1.1 §4.1 裁定)
 # Scope:  owner device + newvps host (ACL enforces)
 #
-# M1c 微调 (vs M0c):
-#   - 端口从 kernel:8000 改为 wrapper:3000 (M1c wrapper orchestrator 暴露 PWA port)
+# v1.1.1 切换 (vs M1c):
+#   - path-based routing: API vs PWA 拆分到不同容器
+#   - wrapper 容器: API-only (8 endpoints on /api/v1/* + /api/stt/*)
+#   - frontend 容器: 288-line vanilla JS PWA + /api/pwa/* form handlers
+#   - 端口: wrapper=3010 (host)/3000 (container); frontend=3011 (host)/3000 (container)
 #
 # Setup (one-time, run on newvps host):
-#   tailscale serve --bg --yaml=tailscale-serve-harness.yaml
+#   tailscale serve --bg --yaml=/opt/fish-harness/deploy/tailscale-serve-harness.yaml
 #   tailscale serve status   # verify harness.rana.asia is serving
 #
 # Teardown:
 #   tailscale serve reset
 #
 # PRD-v1.1 §4.1: Tailscale-only — no public HTTPS, no Basic Auth.
+# D-9 Option B (v1.1.1 NEW): pwa_server.ts as separate frontend service.
 
 https: true
 
 # The TLS cert is issued by Tailscale (via Let's Encrypt on the tailnet).
 # No manual cert management needed.
 
+# Path-based routing: longest prefix match wins.
 routes:
-  # harness.rana.asia → newvps wrapper orchestrator (port 3000)
-  # The wrapper container exposes the PWA server + /health endpoint on port 3000.
-  # Tailscale Serve proxies HTTPS (443) → HTTP (3000) on the same host.
-  harness.rana.asia:
-    to: http://127.0.0.1:3000
+  # API endpoints (server.ts; no SPA fallback) → wrapper on host port 3010
+  - hostname: harness.rana.asia
+    path: /api/v1/*
+    to: http://127.0.0.1:3010
+
+  # PWA form handlers (pwa_server.ts) → frontend on host port 3011
+  - hostname: harness.rana.asia
+    path: /api/pwa/*
+    to: http://127.0.0.1:3011
+
+  # Catch-all (PWA index.html + SPA fallback) → frontend on host port 3011
+  - hostname: harness.rana.asia
+    path: /*
+    to: http://127.0.0.1:3011
 
 # Auth is handled by Tailscale identity (who you are in the tailnet).
 # ACL in tailscale-acl.yaml restricts which identities can reach this route.
