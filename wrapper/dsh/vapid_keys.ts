@@ -246,4 +246,16 @@ function main(): void {
   console.log(`Public key (safe to commit): ${keyPair.publicKey}`);
 }
 
-main();
+// Only run the CLI (generate keys + write deploy/vapid_public.key) when this
+// file is the entry point: `node wrapper/dsh/vapid_keys.js`.
+//
+// This module is ALSO imported as a library by orchestrator/webpush_gateway.ts
+// (which only needs `signVapidJwt`). Running `main()` unconditionally on import
+// writes outside the wrapper dir and breaks unit tests that load the server
+// graph under a filesystem sandbox (EACCES on deploy/vapid_public.key).
+const isMain = process.argv[1] !== undefined
+  && resolve(process.argv[1]) === resolve(__filename);
+
+if (isMain) {
+  main();
+}
