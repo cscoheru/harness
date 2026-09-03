@@ -1,16 +1,17 @@
 # notes/deviation-v1.1.1-dsh-install.md — v1.1.1 dsh install deviation record
 
-> **Status**: Active — deviation document, not a plan. Captures 3 deviations
-> that emerged during v1.1.1 commit 5 / commit 6 work on dsh install.
+> **Status**: Active — deviation document, not a plan. Captures 5 deviations
+> that emerged during v1.1.1 commit 5 / commit 6 / commit 8 work on dsh install
+> and PROJECT_ROOT path resolution.
 > Will be referenced by future v0.7+ audit-scope and by anyone doing dsh
-> install verification on newvps.
+> install + wrapper build verification on newvps.
 >
 > **Cycle**: v1.1.1 (server-side cutover + 5 edge host provision draft)
 > **Date**: 2026-09-03
 
 ---
 
-## §1 Deviation summary (3 items)
+## §1 Deviation summary (5 items)
 
 | # | Deviation | Original (wrong) | Correct | Impact |
 |---|-----------|------------------|---------|--------|
@@ -18,10 +19,12 @@
 | **D-2** | Plan §2.4 install method | GitHub release binary URL download | npm install -g `@deepseek-ai/dsh` | High — script would have failed if used |
 | **D-3** | deploy/install-dsh.sh Usage example | `ssh puer-hk '...'` | `ssh newvps '...'` | Low — example only, operator would have spotted |
 | **D-4** | U3 newvps build verify — 1 environmental vitest failure | test/unit/server.test.ts assumes "dsh missing" (200 or 500 if dsh missing); newvps has dsh installed at `/usr/local/bin/dsh`, so dsh runs in headless mode without `DEEPSEEK_API_KEY` and hangs test 30s | Document as environmental; U3 overall PASS (tsc exit 0 + 126 passed + 1 environmental failure) | Low — not a wrapper regression; test name explicit about "if dsh missing" |
+| **D-5** | PROJECT_ROOT 2-layer resolution fails in tsc-compiled `wrapper/build/dsh/` | `resolve(__dirname, '..', '..')` in src → fish-harness/ (correct); in build output `wrapper/build/dsh/foo.js` → `wrapper/build/` (WRONG, off by one level) | Conditional: `__dirname.includes('/build/') ? resolve(__dirname, '..', '..', '..') : resolve(__dirname, '..', '..')` | High — without fix, vapid_keys.js wrote public key to `wrapper/deploy/vapid_public.key` instead of `deploy/vapid_public.key`; profile.ts could not load `docs/m0b/profile-override-*.yaml` from compiled output |
 
-All four deviations share a common root cause: **Plan was written without
-verifying the dsh project's actual distribution channel and without
-distinguishing puer-hk (puer-hub project) from newvps (fish-harness project).**
+All five deviations share a common root cause: **Plan was written without
+verifying the dsh project's actual distribution channel, without distinguishing
+puer-hk (puer-hub project) from newvps (fish-harness project), and without
+re-checking PROJECT_ROOT resolution after tsc output is one level deeper than src.**
 
 ---
 
@@ -151,7 +154,92 @@ This is an environmental mismatch: the test was designed to verify graceful hand
 
 ---
 
-## §5 Hygiene check (per v0.7 audit-scope)
+## §5 D-5 PROJECT_ROOT 2-layer vs 3-layer — tsc output is one level deeper than src
+
+### Background
+
+After D-1/D-2 fix landed (commits 5/6/7) and U3 PASS with D-4 environmental, the
+next blocker was VAPID key generation:
+
+```
+$ ssh newvps 'cd /opt/fish-harness/wrapper && node build/dsh/vapid_keys.js'
+[error] ENOENT: no such file or directory, open 'wrapper/deploy/vapid_public.key'
+```
+
+This means: the compiled `wrapper/build/dsh/vapid_keys.js` resolved `PROJECT_ROOT`
+to `wrapper/` instead of `fish-harness/` — one level too shallow.
+
+### Deviation
+
+4 dsh files used `resolve(__dirname, '..', '..')` everywhere:
+
+| File | Original (wrong) | Symptom in compiled output |
+|------|------------------|----------------------------|
+| `wrapper/dsh/dsh_client.ts` | `const PROJECT_ROOT = resolve(__dirname, '..', '..')` | resolves to `wrapper/build/` → can't find `docs/m0b/profile-override-*.yaml` |
+| `wrapper/dsh/profile.ts` | `const PROJECT_ROOT = resolve(__dirname, '..', '..')` | resolves to `wrapper/build/` → `BASE_PATCH_PATH` ENOENT |
+| `wrapper/dsh/6host_client.ts` | `const projectRoot = resolve(__dirname, '..', '..')` (in `buildArgs`) | resolves to `wrapper/build/` → basePatch / rolePatch ENOENT |
+| `wrapper/dsh/vapid_keys.ts` | `const projectRoot = resolve(__dirname, '..', '..')` (in `main`) | resolves to `wrapper/` → wrote public key to `wrapper/deploy/vapid_public.key` instead of `deploy/vapid_public.key` |
+
+### Root cause — `import.meta.url` 2-layer vs 3-layer
+
+- **In src** (vitest via `stripJsExtensionPlugin` mapping `.js` → `.ts`):
+  `__dirname` = `wrapper/dsh/` → `resolve('..', '..')` → `fish-harness/` ✓
+- **In build output** (tsc emits `.js` to `wrapper/build/dsh/`):
+  `__dirname` = `wrapper/build/dsh/` → `resolve('..', '..')` → `wrapper/` ✗
+
+The plan §2.3 chose `resolve(__dirname, '..')` based on the planned volume mount
+change (mount `..` → `/app`, working_dir `/app/wrapper`). After commit 3 was
+deferred and only the code-side fix landed (no volume mount change yet), the
+tsc output gained an extra `build/` layer that the 2-layer resolution didn't
+account for.
+
+### Resolution
+
+`wrapper/test/unit/project_root.test.ts` and the 4 dsh files now use a
+conditional D-5 pattern that handles both src and build layouts from the same
+source:
+
+```typescript
+const PROJECT_ROOT = __dirname.includes('/build/')
+  ? resolve(__dirname, '..', '..', '..')  // wrapper/build/dsh → fish-harness/
+  : resolve(__dirname, '..', '..');         // wrapper/dsh → fish-harness/
+```
+
+For function-local variants (`projectRoot` in `6host_client.ts:buildArgs` and
+`vapid_keys.ts:main`), the same conditional is applied with `projectRoot`
+(camelCase):
+
+```typescript
+const projectRoot = __dirname.includes('/build/')
+  ? resolve(__dirname, '..', '..', '..')
+  : resolve(__dirname, '..', '..');
+```
+
+### Test coverage
+
+`wrapper/test/unit/project_root.test.ts` updated with 2 new assertions per file:
+
+1. **D-5 conditional discriminator** — every file must detect the build layout
+   via `__dirname.includes('/build/')`
+2. **D-5 conditional: 3-layer resolve branch** — every file must include a
+   3-layer `resolve(__dirname, '..', '..', '..')` branch for the build case
+
+The original "uses __dirname-based PROJECT_ROOT" assertion was widened to
+accept either direct or conditional ternary form.
+
+### U4 follow-on
+
+After D-5 fix lands (commit 8) and is pushed via Clash, U4 can proceed:
+1. `cd /opt/fish-harness/wrapper && ./node_modules/.bin/tsc` → exit 0
+2. `node build/dsh/vapid_keys.js` → writes `deploy/vapid_public.key` correctly;
+   operator captures `VAPID_PRIVATE_KEY=` from stdout
+3. Add `VAPID_PRIVATE_KEY` + `WHISPER_MODEL_PATH=/opt/whisper/models/ggml-base.bin`
+   to `/opt/fish-harness/.env.local`
+4. `docker compose --env-file /opt/fish-harness/.env.local up -d` (8 services)
+
+---
+
+## §6 Hygiene check (per v0.7 audit-scope)
 
 - `grep -rE "Fable 5|GLM 5.3|MiniMax-M3" deploy/install-dsh.sh` → 0 (锁 lock pattern OK)
 - `grep -rE "sk-[a-zA-Z0-9]{32,}" deploy/install-dsh.sh` → 0 (no hardcoded secrets)
@@ -163,7 +251,7 @@ This is an environmental mismatch: the test was designed to verify graceful hand
 
 ---
 
-## §6 Forward-looking
+## §7 Forward-looking
 
 ### Plan hygiene
 - All future plans MUST distinguish `puer-hk` (puer-hub project server) from `newvps` (fish-harness project server) explicitly
@@ -183,14 +271,16 @@ This is an environmental mismatch: the test was designed to verify graceful hand
 
 ---
 
-## §7 References
+## §8 References
 
 - Plan: `~/.claude/plans/buzzing-humming-book.md` §3.4 U2-U8 (local-only, not in repo)
-- Commit 5 (pending): `fix(v1.1.1): install-dsh.sh npm registry rewrite + Usage ssh target correction`
-- Commit 6 (pending): `fix(plan): §3.4 U2-U8 ssh target puer-hk → newvps (deviation D-1)`
+- Commit 5: `fix(v1.1.1): install-dsh.sh npm registry rewrite + Usage ssh target correction`
+- Commit 6: `fix(plan): §3.4 U2-U8 ssh target puer-hk → newvps (deviation D-1)`
+- Commit 7: deviation note first commit (`notes/deviation-v1.1.1-dsh-install.md` with D-1/D-2/D-3)
+- Commit 8: `fix(v1.1.1): PROJECT_ROOT src/build conditional resolution (D-5)` — 4 dsh files + project_root.test.ts
 - Audit-scope: `notes/codex-audit-scope-v1.1.1-v0.7-precommit.md` (v0.7 §3 v1.0 diff command守门; this deviation does not affect v1.0 runtime)
 - Runbook: `deploy/runbook-edge-provision.md` §3 (uses `ssh newvps` indirectly via edge host provisioning; not affected)
 
 ---
 
-*Deviation record archived (v1.1.1, 2026-09-03) — 3 deviations (D-1 ssh target, D-2 install method, D-3 Usage example) all resolved by commit 5 + commit 6 + plan §3.4 edit. newvps dsh version still TBD (ssh instability). Future plans must distinguish puer-hk vs newvps.*
+*Deviation record archived (v1.1.1, 2026-09-03) — 5 deviations (D-1 ssh target, D-2 install method, D-3 Usage example, D-4 U3 environmental test, D-5 PROJECT_ROOT src/build mismatch) all resolved by commit 5 + commit 6 + commit 7 + commit 8. newvps dsh version still TBD (ssh instability). Future plans must distinguish puer-hk vs newvps AND verify PROJECT_ROOT resolution against both src and tsc build layouts before declaring wrapper/ code production-ready.*

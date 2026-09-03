@@ -143,7 +143,9 @@ export function listAllHostFqdns(): string[] {
  * @param prompt     - task prompt
  */
 function buildArgs(modelClass: ModelClass, prompt: string): string[] {
-  const projectRoot = resolve(__dirname, '..', '..');
+  const projectRoot = __dirname.includes('/build/')
+    ? resolve(__dirname, '..', '..', '..')
+    : resolve(__dirname, '..', '..');
   const basePatch = resolve(projectRoot, 'docs', 'm0b', 'profile-override-base.yaml');
   const rolePatch = resolve(projectRoot, PROFILE_YAML_MAP[modelClass]);
 

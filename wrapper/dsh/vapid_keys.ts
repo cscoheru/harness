@@ -226,7 +226,9 @@ export function signVapidJwt(input: string, privateKeyBase64url: string): string
  */
 function main(): void {
   const keyPair = generateVapidKeyPair();
-  const projectRoot = resolve(__dirname, '..', '..');
+  const projectRoot = __dirname.includes('/build/')
+    ? resolve(__dirname, '..', '..', '..')
+    : resolve(__dirname, '..', '..');
   const publicKeyPath = resolve(projectRoot, 'deploy', 'vapid_public.key');
 
   writeFileSync(publicKeyPath, keyPair.publicKey, 'utf8');

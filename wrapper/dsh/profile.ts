@@ -32,11 +32,15 @@ import {
  *
  * Resolved via import.meta.url — independent of process.cwd() so it works
  * in both src (wrapper/dsh/) and build (wrapper/build/dsh/) layouts,
- * regardless of working_dir in compose deployment.
+ * regardless of working_dir in compose deployment. tsc preserves the
+ * wrapper/dsh/ → wrapper/build/dsh/ offset, so 2-layer resolution works in
+ * src and 3-layer in build.
  */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const PROJECT_ROOT = resolve(__dirname, '..', '..');
+const PROJECT_ROOT = __dirname.includes('/build/')
+  ? resolve(__dirname, '..', '..', '..')
+  : resolve(__dirname, '..', '..');
 
 /** dsh base profile override — enables A-class tools. */
 export const BASE_PATCH_PATH = resolve(PROJECT_ROOT, 'docs', 'm0b', 'profile-override-base.yaml');

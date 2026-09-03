@@ -6,6 +6,12 @@
  * process.cwd() = /app/wrapper, so resolve(cwd, '..') would point to /app
  * (wrong) instead of the fish-harness project root.
  *
+ * tsc preserves the wrapper/dsh/ → wrapper/build/dsh/ offset, so 2-layer
+ * resolution works in src and 3-layer in build. D-5 introduced a conditional
+ * pattern (`__dirname.includes('/build/') ? 3-layer : 2-layer`) so the same
+ * source code works in both layouts. This test accepts either the simple
+ * direct form or the conditional ternary form.
+ *
  * @file wrapper/test/unit/project_root.test.ts
  */
 
@@ -51,11 +57,29 @@ describe('PROJECT_ROOT path resolution (4 dsh files)', () => {
         expect(contents).not.toMatch(/resolve\s*\(\s*process\.cwd\(\)\s*,\s*['"]\.\.['"]\s*\)/);
       });
 
-      it('uses __dirname-based PROJECT_ROOT (either module const or local var)', () => {
-        // Module-level PROJECT_ROOT uses __dirname; function-local projectRoot uses __dirname
-        const usesModuleConst = /const\s+PROJECT_ROOT\s*=\s*resolve\s*\(\s*__dirname\s*,\s*['"]\.\.['"]\s*(?:,\s*['"]\.\.['"]\s*)?\)/.test(contents);
-        const usesLocalVar = /(?:const|let)\s+projectRoot\s*=\s*resolve\s*\(\s*__dirname\s*,\s*['"]\.\.['"]\s*(?:,\s*['"]\.\.['"]\s*)?\)/.test(contents);
-        expect(usesModuleConst || usesLocalVar).toBe(true);
+      it('uses __dirname-based PROJECT_ROOT (direct OR conditional D-5 ternary)', () => {
+        // Direct form: const PROJECT_ROOT = resolve(__dirname, '..' [, '..'] [, '..'])
+        const directModuleConst = /const\s+PROJECT_ROOT\s*=\s*resolve\s*\(\s*__dirname\s*(?:,\s*['"]\.\.['"]){1,3}\s*\)/.test(contents);
+        const directLocalVar = /(?:const|let)\s+projectRoot\s*=\s*resolve\s*\(\s*__dirname\s*(?:,\s*['"]\.\.['"]){1,3}\s*\)/.test(contents);
+
+        // Conditional D-5 form: __dirname.includes('/build/') ? resolve(..., '..', '..', '..') : resolve(..., '..', '..')
+        const conditionalModuleConst = /const\s+PROJECT_ROOT\s*=\s*__dirname\.includes\s*\(\s*['"]\/build\/['"]\s*\)\s*\?\s*resolve\s*\(\s*__dirname\s*(?:,\s*['"]\.\.['"]){1,3}\s*\)\s*:\s*resolve\s*\(\s*__dirname\s*(?:,\s*['"]\.\.['"]){1,3}\s*\)/.test(contents);
+        const conditionalLocalVar = /(?:const|let)\s+projectRoot\s*=\s*__dirname\.includes\s*\(\s*['"]\/build\/['"]\s*\)\s*\?\s*resolve\s*\(\s*__dirname\s*(?:,\s*['"]\.\.['"]){1,3}\s*\)\s*:\s*resolve\s*\(\s*__dirname\s*(?:,\s*['"]\.\.['"]){1,3}\s*\)/.test(contents);
+
+        expect(directModuleConst || directLocalVar || conditionalModuleConst || conditionalLocalVar).toBe(true);
+      });
+
+      it('D-5 conditional: uses __dirname.includes("/build/") discriminator', () => {
+        // After D-5, every file must detect the build layout via __dirname.includes('/build/')
+        // so the same source compiles to both src and build without path mismatch.
+        expect(contents).toMatch(/__dirname\.includes\s*\(\s*['"]\/build\/['"]\s*\)/);
+      });
+
+      it('D-5 conditional: 3-layer resolve branch targets build layout', () => {
+        // wrapper/build/dsh/foo.js → wrapper/build/dsh → wrapper/build → wrapper → fish-harness/
+        // That's 3 ".." segments. The build branch must use 3 layers.
+        const threeLayerBuild = /resolve\s*\(\s*__dirname\s*,\s*['"]\.\.['"]\s*,\s*['"]\.\.['"]\s*,\s*['"]\.\.['"]\s*\)/.test(contents);
+        expect(threeLayerBuild).toBe(true);
       });
     });
   }

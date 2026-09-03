@@ -30,10 +30,12 @@ import {
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Absolute path to the project root. Resolved via import.meta.url so it works correctly in both src (wrapper/dsh/) and build (wrapper/build/dsh/) layouts, regardless of process.cwd(). */
+/** Absolute path to the project root. Resolved via import.meta.url so it works correctly in both src (wrapper/dsh/) and build (wrapper/build/dsh/) layouts, regardless of process.cwd(). tsc preserves the wrapper/dsh/ → wrapper/build/dsh/ offset, so a 2-layer resolution works in src and 3-layer in build. */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const PROJECT_ROOT = resolve(__dirname, '..', '..');
+const PROJECT_ROOT = __dirname.includes('/build/')
+  ? resolve(__dirname, '..', '..', '..')
+  : resolve(__dirname, '..', '..');
 
 /** dsh base profile override — enables A-class tools. */
 const BASE_PATCH = resolve(PROJECT_ROOT, 'docs', 'm0b', 'profile-override-base.yaml');
