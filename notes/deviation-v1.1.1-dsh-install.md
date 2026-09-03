@@ -1,17 +1,18 @@
 # notes/deviation-v1.1.1-dsh-install.md — v1.1.1 dsh install deviation record
 
-> **Status**: Active — deviation document. Captures 6 deviations that emerged
-> during v1.1.1 commit 5 / commit 6 / commit 8 / commit 9 / U4 work on dsh
-> install, PROJECT_ROOT path resolution, isMain guard, and Phase 1+2 deploy.
+> **Status**: Active — deviation document. Captures 7 deviations that emerged
+> during v1.1.1 commit 5 / commit 6 / commit 8 / commit 9 / U4 / U5 work on dsh
+> install, PROJECT_ROOT path resolution, isMain guard, Phase 1+2 deploy, and
+> E2E suite verification.
 > Will be referenced by future v0.7+ audit-scope and by anyone doing dsh
-> install + wrapper build verification + Phase 1+2 deploy on newvps.
+> install + wrapper build verification + Phase 1+2 deploy + U5 E2E on newvps.
 >
 > **Cycle**: v1.1.1 (server-side cutover + 5 edge host provision draft)
 > **Date**: 2026-09-03
 
 ---
 
-## §1 Deviation summary (6 items)
+## §1 Deviation summary (7 items)
 
 | # | Deviation | Original (wrong) | Correct | Impact |
 |---|-----------|------------------|---------|--------|
@@ -21,13 +22,15 @@
 | **D-4** | U3 newvps build verify — 1 environmental vitest failure | test/unit/server.test.ts assumes "dsh missing" (200 or 500 if dsh missing); newvps has dsh installed at `/usr/local/bin/dsh`, so dsh runs in headless mode without `DEEPSEEK_API_KEY` and hangs test 30s | Document as environmental; U3 overall PASS (tsc exit 0 + 126 passed + 1 environmental failure) | Low — not a wrapper regression; test name explicit about "if dsh missing" |
 | **D-5** | PROJECT_ROOT 2-layer resolution fails in tsc-compiled `wrapper/build/dsh/` | `resolve(__dirname, '..', '..')` in src → fish-harness/ (correct); in build output `wrapper/build/dsh/foo.js` → `wrapper/build/` (WRONG, off by one level) | Conditional: `__dirname.includes('/build/') ? resolve(__dirname, '..', '..', '..') : resolve(__dirname, '..', '..')` | High — without fix, vapid_keys.js wrote public key to `wrapper/deploy/vapid_public.key` instead of `deploy/vapid_public.key`; profile.ts could not load `docs/m0b/profile-override-*.yaml` from compiled output |
 | **D-6** | U4 Phase 1+2 deploy — 3 environmental newvps issues | (a) port 3000 held by stale `next-server` (systemd-managed, respawns when killed); (b) kernel FROZEN — `python -m harness` only prints version (no HTTP server) per ADR 0010; (c) `env/newvps.env.example` missing on newvps (compose env_file path) | (a) bind wrapper to host port 3010 (local edit, not committed); (b) `--no-deps` flag to start wrappers bypassing kernel healthcheck; (c) `scp env/newvps.env.example` to newvps:deploy/env/ | Medium — all 7 wrapper/worker/push/stt services Up; kernel FROZEN excluded; Next.js port conflict needs user disposition |
+| **D-7** | U5 6host_e2e — 14 infrastructure-gated ENOTFOUND failures | `RUN_6HOST_E2E=1` test expects 5 edge hosts (`harness-edge[1-5].tail1b9878.ts.net`) to resolve via Tailscale MagicDNS and respond on Funnel | Document as v1.1.1.1+ cycle work (per plan §7.3); U5 partial PASS — dsh_6host ✓ + 6host_e2e §1-§4 18 passed (primary host) + §5/§6 edge-rejection 14 ENOTFOUND | Medium — test file is correct; suites are 1-pass + 1-infrastructure-gated. Edge provision (5 VPS + auth key + Funnel) deferred to v1.1.1.1+ |
 
-All six deviations share a common root cause: **Plan was written without
+All seven deviations share a common root cause: **Plan was written without
 verifying the dsh project's actual distribution channel, without distinguishing
 puer-hk (puer-hub project) from newvps (fish-harness project), without
 re-checking PROJECT_ROOT resolution after tsc output is one level deeper than
 src, and without anticipating the newvps port-keeper (Next.js systemd) and the
-kernel FROZEN-no-server limitation.**
+kernel FROZEN-no-server limitation, and without explicit edge-host provision
+sequencing (v1.1.1 = draft only, v1.1.1.1+ = real provision).**
 
 ---
 
@@ -341,7 +344,69 @@ After (a)+(b)+(c) fixes:
 
 ---
 
-## §7 Hygiene check (per v0.7 audit-scope)
+## §7 D-7 U5 6host_e2e — 14 infrastructure-gated ENOTFOUND failures
+
+### Background
+
+`wrapper/test/integration/6host_e2e.test.ts` requires `RUN_6HOST_E2E=1`
+and assumes the 5 edge hosts (`harness-edge1.tail1b9878.ts.net` …
+`harness-edge5.tail1b9878.ts.net`) are reachable via Tailscale MagicDNS
++ Funnel. Edge host provisioning is per plan §7.3 deferred to v1.1.1.1+
+because the operator holds the Tailscale auth key (5 VPS purchase + auth
+key + Funnel config are operator-only actions).
+
+### Deviation
+
+U5 ran `vitest run test/integration/{dsh_6host,6host_e2e}.test.ts` on
+newvps after pulling commit `c06af14`. Result: 34 tests, 20 passed,
+14 failed.
+
+**Category breakdown:**
+
+| Category | Tests | Status | Root cause |
+|----------|-------|--------|------------|
+| dsh_6host §1/§6 (file URL) | 2 | ✓ PASS after `c06af14` fix | `'../dsh/6host_client.ts'` → `'../../dsh/6host_client.ts'` (same pattern as stt_e2e §1) |
+| 6host_e2e §1-§4 (primary host = harness-newvps) | 13 | ✓ PASS | harness-newvps resolves; wrapper port 3010 healthy; orchestrator + 6host router reachable |
+| 6host_e2e §1-§4 (edge1-5 health + JSON shape + orch round-trip) | 5 | ✗ FAIL (ENOTFOUND) | `harness-edge[1-5].tail1b9878.ts.net` not resolvable |
+| 6host_e2e §5 (STT edge rejection) | 5 | ✗ FAIL (ENOTFOUND) | Same — edges don't exist to "reject" |
+| 6host_e2e §6 (Web Push edge rejection) | 4 | ✗ FAIL (ENOTFOUND) | Same — edges don't exist |
+
+### Fix
+
+The 2 dsh_6host file URL bugs are fixed by `c06af14`. The 14 6host_e2e
+failures are **not wrapper regressions** — they are infrastructure gates.
+Per plan §7.3 they belong to v1.1.1.1+:
+
+- ❌ edge host east-1/west-1/asia-1/eu-1/sa-1 VPS 采购
+- ❌ 5 edge host Tailscale 节点加入 (持有 auth key)
+- ❌ 5 edge host Funnel 配置 (`tailscale funnel --bg 4001-4005`)
+- ❌ 5 edge host Docker Compose 部署
+- ❌ 5 edge host env vars 填入 (`TAILSCALE_MAGIC_DNS_SUFFIX` + `DEEPSEEK_API_KEY` + `VAPID_PRIVATE_KEY`)
+
+When the operator provisions the 5 edge hosts in v1.1.1.1+, the same
+test command re-run is expected to yield 34/34 PASS:
+
+```bash
+cd /opt/fish-harness/wrapper
+source /opt/fish-harness/.env.local
+export RUN_DSH_6HOST=1 RUN_6HOST_E2E=1
+./node_modules/.bin/vitest run test/integration/{dsh_6host,6host_e2e}.test.ts
+# Expected after v1.1.1.1+ edge provision: 34/34 PASS
+```
+
+### Impact
+
+- **U5 PASS** as defined by v1.1.1 scope (server-side cutover verified;
+  test infrastructure exercised; edge-host tests properly fail-closed
+  when edges absent)
+- **v1.1.1 GA gate**: not blocked — the edge-host tests are explicit
+  v1.1.1.1+ work in plan §7.3
+- **No code regressions** in 6host_e2e (test logic is correct; only
+  external infrastructure is missing)
+
+---
+
+## §8 Hygiene check (per v0.7 audit-scope)
 
 - `grep -rE "Fable 5|GLM 5.3|MiniMax-M3" deploy/install-dsh.sh` → 0 (锁 lock pattern OK)
 - `grep -rE "sk-[a-zA-Z0-9]{32,}" deploy/install-dsh.sh` → 0 (no hardcoded secrets)
@@ -353,7 +418,7 @@ After (a)+(b)+(c) fixes:
 
 ---
 
-## §8 Forward-looking
+## §9 Forward-looking
 
 ### Plan hygiene
 - All future plans MUST distinguish `puer-hk` (puer-hub project server) from `newvps` (fish-harness project server) explicitly
@@ -373,7 +438,7 @@ After (a)+(b)+(c) fixes:
 
 ---
 
-## §9 References
+## §10 References
 
 - Plan: `~/.claude/plans/buzzing-humming-book.md` §3.4 U2-U8 (local-only, not in repo)
 - Commit 5: `fix(v1.1.1): install-dsh.sh npm registry rewrite + Usage ssh target correction`
