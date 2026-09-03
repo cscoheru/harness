@@ -7,6 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.1] - 2026-09-03
+
+v1.1.1 cycle scope — server-side 切入口 + 5 edge host provision 起草 + dsh binary install.
+
+Cross-ref: [notes/codex-audit-scope-v1.1.1-v0.7-precommit.md](notes/codex-audit-scope-v1.1.1-v0.7-precommit.md) (v0.7 守门：§4.5.7 5 edge compose 守门 + §4.7.6 server.ts 8 endpoint 守门 + §4.8 PROJECT_ROOT 路径修法守门 + §4.9 dsh binary install 守门) + [notes/codex-audit-scope-v1.1.1-v0.7-precommit-prompt.md](notes/codex-audit-scope-v1.1.1-v0.7-precommit-prompt.md) (v0.7 Codex 复审 prompt + cursor F1-F4 GATE-CALIB 同轮修订) + [deploy/runbook-edge-provision.md](deploy/runbook-edge-provision.md) (5 edge host provision runbook §2 5 步骤 + §3 5 edge 表 + §4 验证清单 + §5 故障排除 6 项 + §6 rollback).
+
+### Added
+
+- **server.ts 8 endpoint integration** (`wrapper/server.ts`, NEW ~150 行):
+  - `GET /health` → `orchestrator.health()`
+  - `POST /api/v1/tasks` → `orchestrator.dispatch()`
+  - `GET /api/v1/status/:task_id` → `orchestrator.getTaskStatus()`
+  - `GET /api/v1/status/test` → inline `{status:"ok",test:true,ts}`
+  - `POST /api/v1/worker/heartbeat` → stub `{status:"ok"}` (M1+ skeleton; v1.2.0+ 真实现)
+  - `POST /api/v1/push/subscribe` → `webpush.sendPush()`
+  - `POST /api/stt/transcribe` → `stt.transcribe()` (dynamic-imported in handler to defer WHISPER_MODEL_PATH module-level check)
+  - `GET *` SPA fallback → `app.use` catch-all (Express 5 / path-to-regexp v8 不支持裸 `*`)
+  - Route order: literal `/status/test` BEFORE parameterized `/status/:task_id` (otherwise `test` captured as task_id)
+- **PROJECT_ROOT 路径修法** (4 dsh 文件统一模式):
+  - `wrapper/dsh/dsh_client.ts:33` + `profile.ts:37` + `6host_client.ts:138` (buildArgs 内) + `vapid_keys.ts:221` (main() 内)
+  - 旧: `resolve(process.cwd(), '..')` (容器内 `cwd=/app/wrapper` → `/app` 错位)
+  - 新: `import.meta.url` + `__filename`/`__dirname` 派生 + `resolve(__dirname, '..', '..')`
+  - 双修 volume mount: `../wrapper:/app/wrapper:ro` → `..:/app:ro` + `working_dir: /app/wrapper`
+- **5 edge host provision 起草** (5 compose + ACL + env + runbook):
+  - 5 edge compose 文件 (`deploy/6host-compose.edge[1-5].yml`) 真 command `node build/server.js`
+  - `EDGE_REGION` east-1/west-1/asia-1/eu-1/sa-1; container_name harness-edge[1-5]-wrapper; port 4001
+  - `deploy/tailscale-acl.yaml` 加 `tag:harness-edge` tagOwners + 端口 4001 Funnel 入口 + 跨 host routing 规则 (edge → newvps kernel:8000 + wrapper:4000-4002 + stt:8080 + push:8081)
+  - `deploy/runbook-edge-provision.md` 起草 §2 5 步骤 (VPS 采购 / Tailscale 节点加入 / Funnel / Docker Compose / 验证) + §5 故障排除 6 项
+  - `env/edge-host.env.example` 起草 (TAILSCALE_AUTHKEY + DEEPSEEK_API_KEY + WORKER_ID + EDGE_REGION 模板; chmod 600)
+- **dsh binary install 起草** (`deploy/install-dsh.sh`, NEW ~70 行):
+  - bash script with `set -euo pipefail`
+  - `curl -fsSL --retry 3 --retry-delay 5 DSH_URL > tmp; chmod +x; mv to /usr/local/bin/dsh`
+  - `which dsh` + `dsh --version` verify
+  - DSH_VERSION + DSH_URL env var required (operator 必须 verify URL)
+  - GitHub URL pattern sanity check
+- **3 NEW tests** (`wrapper/test/`):
+  - `unit/server.test.ts` — 12 unit tests 覆盖 8 endpoint shapes via ephemeral http.createServer + node fetch (无 supertest 依赖)
+  - `unit/project_root.test.ts` — 20 regression tests 验证 4 dsh 文件 PROJECT_ROOT 修法 (import.meta.url + __dirname + process.cwd() forbidden)
+  - `integration/server_integration.test.ts` — 7 HTTP integration tests (skipped unless RUN_SERVER_E2E=1)
+- **v0.7 audit-scope + prompt** (`notes/codex-audit-scope-v1.1.1-v0.7-{precommit,precommit-prompt}.md`):
+  - §3.5 deploy/ 范围确认 + §4.5.7 5 edge compose 守门 + §4.7.6 server.ts 8 endpoint 守门
+  - §4.8 PROJECT_ROOT 路径修法守门 + §4.9 dsh binary install 守门
+  - §5 24 文件 hygiene 自检表 + §7 v1.1.1 NEW 教训记档 + §9 11 验证命令矩阵
+
+### Changed
+
+- 7 docker-compose 文件 (`deploy/{newvps-compose,6host-compose.{newvps,edge[1-5]}}.yml`) 切入口：
+  - 12 service entries: volumes `../wrapper` → `..` (12 处) + working_dir `/app` → `/app/wrapper` (12 处) + command `sleep infinity` → `node build/server.js` (12 处)
+  - kernel FROZEN 不动 (per ADR 0010 Decision (d))
+- v1.1 cycle 链：M0b + M0c + M1c + M2 + M3 + **v1.1.1 cycle scope** = 单 host newvps production-ready + 5 edge 起草待 v1.1.1.1+ 真实 provision
+
+### Gates Passed
+
+- **tsc 双 gate** — `./node_modules/.bin/tsc --noEmit` exit 0（项目本地 bin 必须，per §5.3 复审环境注记）
+- **vitest 双 gate** — `./node_modules/.bin/vitest run` 126 passed / 80 skipped / 0 failed（含 32 NEW tests: 12 server + 20 project_root）
+- **v0.7 §4.5.7 5 edge compose 守门 PASS** — `sleep infinity` == 0 / `harness-edge[1-5]` = 34 ≥ 5 / `tag:harness-edge` = 12 ≥ 1 / `build/server.js` = 12 services (newvps 2 + 6host 5 + 5 edge) / `EDGE_REGION` == 5
+- **v0.7 §4.7.6 server.ts 8 endpoint 守门 PASS** — `app.(get|post|use)` = 10 (8 endpoint + json middleware + catch-all) / stt dynamic-imported / `/status/test` before `/status/:task_id`
+- **v0.7 §4.8 PROJECT_ROOT 路径修法守门 PASS** — `import.meta.url` == 8 (4 文件 × 2 occurrences) / `process.cwd()` 在 PROJECT_ROOT forbidden
+- **v0.7 §4.9 dsh binary install 守门 PASS** — DSH_VERSION + DSH_URL env var required + sanity check GitHub URL pattern + chmod +x + which dsh verify
+- **hygiene 8 项全过** — 不锁型号 == 0 / DEEPSEEK_API_KEY 字面 == 0 / VAPID 私钥字面 == 0 / hmacSha256 stub == 0 / `signVapidJwt` ≥ 2 / `dsaEncoding ieee-p1363` ≥ 1 / `createSign('SHA256')` ≥ 1 / `import.meta.url` == 8
+- **v1.0 runtime 0 行 diff 守门 PASS** — `git diff v1.0.0..HEAD -- harness/ spec/ spikes/ adr/0001-0010.md Dockerfile docker-compose.yml pyproject.toml` == 0 行
+
+### Notes
+
+- **v1.1.1 dispatch PASS** — server-side 切入口 + 5 edge 起草 + dsh install 实施包 commit 链落地（4 commits: 309abeb + 5ce30ec + ec0c38f + pending）
+- **5 edge host 真实 provision 留待 v1.1.1.1+** — `tailscale status` 实测仅 2 节点（harness-newvps + fish-harness-newvps）；east-1/west-1/asia-1/eu-1/sa-1 非真实机器，session 内 autonomous agent 无能力 provision VPS + 无 Tailscale auth key
+- **v0.5 hard rule 5 条 + v0.6 NEW 2 条 + v0.7 NEW 5 条实战验证** — 先行起草 / commit 后立即复审 / 自引入预演入列 / commit message 附实测数 / 引用式纪律 + DER→raw r||s 验证 + signVapidJwt JWK 合规 + 5 edge compose 守门 + server.ts 8 endpoint 守门 + PROJECT_ROOT 路径修法守门 + dsh binary install 守门
+- **server.ts 实战发现** — Express 5 + path-to-regexp v8 不再支持裸 `*`，必须用 `app.use` catch-all middleware；dynamic import 是隔离副作用核心（`stt_worker.ts` module-level WHISPER_MODEL_PATH check 不会触发 wrapper 启动）
+- **v1.1.1 patch tag** = user 亲提 `git tag -a v1.1.1 -m "v1.1.1: server-side entrypoint cutover + 5 edge host provision draft + v0.7 audit-scope + dsh binary install"`，push via Clash proxy
+- **user 必须执行挂账**（per plan §4 9 EXEC items）：
+  - U1 dsh GitHub release URL verify（浏览器 + curl -sI 验证 HTTP 200）
+  - U2 dsh binary install on newvps（ssh puer-hk + `DSH_VERSION + DSH_URL + bash < deploy/install-dsh.sh` + `which dsh` + `dsh --version` 验证）
+  - U3 TypeScript build on newvps（ssh puer-hk + `cd /opt/fish-harness/wrapper && npm install && ./node_modules/.bin/tsc`）
+  - U4 docker compose restart 切入口（ssh puer-hk + `docker compose -f deploy/newvps-compose.yml down && up -d` + 6host + 5 edge compose 验证 Up）
+  - U5 真机 4 E2E 套件真调（`RUN_WEBPUSH_E2E=1 RUN_STT_E2E=1 RUN_DSH_6HOST=1 RUN_6HOST_E2E=1 DEEPSEEK_API_KEY WHISPER_MODEL_PATH ./node_modules/.bin/vitest run test/integration/{webpush_e2e,stt_e2e,dsh_6host,6host_e2e}.test.ts`）
+  - U6 6 Funnel URL 路径 200 验证（`curl 6 路径 / /health /api/v1/tasks /api/v1/status/test /api/v1/worker/heartbeat /api/v1/push/subscribe`）
+  - U7 Codex v0.7 formal 复审（user 亲提 Codex CLI `model=gpt-5.6-sol + reasoning_effort=xhigh` 复审 v0.7 commit → 预期 0C/0M/0m）
+  - U8 v1.1.1 patch tag + push via Clash proxy
+  - U9 5 edge host 真实 provision v1.1.1.1+（per `deploy/runbook-edge-provision.md` §2 5 步骤）
+- **v1.1 cycle 总 commit 链** — M0b 11 + v0.4 8 + v0.5 准备 2 + M3 EXEC 11 + **v1.1.1 cycle 4** = 36 commits 总
+
+---
+
 ## [1.1.0-M1c] - 2026-09-02
 
 M1c 阶段 — TypeScript wrapper 三档 profile 收口 + vitest 稳定化 + Codex formal PASS + iPhone Safari Funnel E2E 实测.

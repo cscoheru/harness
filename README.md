@@ -475,6 +475,112 @@ git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin v1.1.
 - **M3-EXEC-3 (验证)**：Funnel URL 6 路径 × 200 验证
 - **M3-EXEC-6**：v1.1.0 GA tag + push via Clash proxy（命令见上）
 
+### v1.1.1 cycle scope（2026-09-03 — server-side 切入口 + 5 edge host provision 起草 + dsh binary install）
+
+v1.1 cycle scope 继续推进：把仓库 12 个 wrapper 真实现文件（`orchestrator.ts` + `6host_router.ts` + `stt_worker.ts` + `webpush_gateway.ts` + `pwa_server.ts` + `types.ts` + 7 dsh 文件）的 server-side 切入口落地（`sleep infinity` placeholder → `node build/server.js` 真实现），同时把 5 edge host provision 起草到「operator 真机 provision ready」状态。
+
+**Cross-ref**：[`notes/codex-audit-scope-v1.1.1-v0.7-precommit.md`](notes/codex-audit-scope-v1.1.1-v0.7-precommit.md)（v0.7 守门：§4.5.7 5 edge compose 守门 + §4.7.6 server.ts 8 endpoint 守门 + §4.8 PROJECT_ROOT 路径修法守门 + §4.9 dsh binary install 守门）+ [`deploy/runbook-edge-provision.md`](deploy/runbook-edge-provision.md)（5 edge host provision runbook §2 5 步骤 + §3 5 edge 表 + §4 验证清单 + §5 故障排除 6 项 + §6 rollback）。
+
+#### 1. server.ts 8 endpoint integration（NEW `wrapper/server.ts`）
+
+```
+GET  /health                    → orchestrator.health()
+POST /api/v1/tasks              → orchestrator.dispatch()
+GET  /api/v1/status/:task_id    → orchestrator.getTaskStatus()
+GET  /api/v1/status/test        → inline {status:"ok",test:true,ts}
+POST /api/v1/worker/heartbeat   → stub {status:"ok"} (M1+ skeleton)
+POST /api/v1/push/subscribe     → webpush.sendPush()
+POST /api/stt/transcribe        → stt.transcribe() (dynamic-imported)
+GET  *                          → SPA fallback (app.use catch-all)
+```
+
+**实战发现**：
+- Express 5 + path-to-regexp v8 不再支持裸 `*`，必须用 `app.use` catch-all middleware
+- Route order：literal `/status/test` 必须 BEFORE parameterized `/status/:task_id`（否则 `test` 被捕获为 task_id → 404）
+- `stt_worker.ts` module-level `WHISPER_MODEL_PATH` check 会触发 wrapper 启动崩溃 → handler 内 dynamic import 隔离副作用
+
+#### 2. PROJECT_ROOT 路径修法（4 dsh 文件统一模式）
+
+```
+旧: const PROJECT_ROOT = resolve(process.cwd(), '..')
+新: const __filename = fileURLToPath(import.meta.url)
+    const __dirname = dirname(__filename)
+    const PROJECT_ROOT = resolve(__dirname, '..', '..')
+```
+
+**双修 volume mount**：`../wrapper:/app/wrapper:ro` → `..:/app:ro` + `working_dir: /app/wrapper`
+
+4 文件：`wrapper/dsh/{dsh_client.ts:33, profile.ts:37, 6host_client.ts:138 (函数内), vapid_keys.ts:221 (main() 内)}`
+
+#### 3. deploy 切入口（12 services sleep infinity → node build/server.js）
+
+| Compose file | Services | 切入口 |
+|--------------|----------|--------|
+| `deploy/newvps-compose.yml` | wrapper + worker (2) | volumes + working_dir + command |
+| `deploy/6host-compose.newvps.yml` | stt-worker + web-push-gateway + wrapper-orch/commander/frontend (5) | 同上 |
+| `deploy/6host-compose.edge[1-5].yml` | edge1-5 wrapper (5) | 同上 + EDGE_REGION east-1/west-1/asia-1/eu-1/sa-1 |
+
+**kernel FROZEN 不动**（per ADR 0010 Decision (d)）— 12 service entries 全部切到 `node build/server.js`。
+
+#### 4. 5 edge host provision 起草（operator 真机执行 ready）
+
+- 5 edge compose + `tag:harness-edge` ACL + 跨 host routing（edge → newvps kernel:8000 + wrapper:4000-4002 + stt:8080 + push:8081）+ 端口 4001 Funnel
+- `env/edge-host.env.example` 模板（TAILSCALE_AUTHKEY + DEEPSEEK_API_KEY + WORKER_ID + EDGE_REGION）
+- `deploy/runbook-edge-provision.md` §2 5 步骤 + §5 故障排除 6 项 + §6 rollback
+- **真机 provision 留待 v1.1.1.1+** — session 内 autonomous agent 无能力 provision VPS + 无 Tailscale auth key
+
+#### 5. dsh binary install（`deploy/install-dsh.sh` NEW ~70 行）
+
+```bash
+# Operator SSH to newvps + 跑:
+ssh puer-hk 'DSH_VERSION=v1.0.0 DSH_URL=https://github.com/<owner>/dsh/releases/download/v1.0.0/dsh-linux-x64 \
+  bash -s' < deploy/install-dsh.sh
+# Verify: which dsh && dsh --version
+```
+
+**operator 必须 verify** DSH_URL（agent 无法访问 GitHub + 不知道 dsh 项目确切 URL）。
+
+#### 6. 双 gate + hygiene 守门 PASS
+
+| Gate | Result |
+|------|--------|
+| tsc `--noEmit` | exit 0 |
+| vitest run | 126 passed / 80 skipped / 0 failed（含 32 NEW tests: 12 server + 20 project_root）|
+| 不锁型号 grep | == 0 |
+| DEEPSEEK_API_KEY 字面 | == 0 |
+| VAPID 私钥字面 | == 0 |
+| hmacSha256 stub | == 0 |
+| `signVapidJwt` | ≥ 2 |
+| `dsaEncoding ieee-p1363` | ≥ 1 |
+| `createSign('SHA256')` | ≥ 1 |
+| `import.meta.url` | == 8 (4 dsh files × 2 occurrences) |
+| `sleep infinity` | == 0 |
+| `harness-edge[1-5]` | ≥ 5 |
+| `tag:harness-edge` | ≥ 1 |
+| `build/server.js` services | == 12 (newvps 2 + 6host 5 + 5 edge) |
+
+#### 7. user 必须执行挂账（per `notes/codex-audit-scope-v1.1.1-v0.7-precommit.md` §5 + plan §4 9 EXEC items）
+
+| # | Step | Command |
+|---|------|---------|
+| **U1** | dsh GitHub release URL verify | 浏览器 + `curl -sI <dsh release URL>` 验证 HTTP 200 |
+| **U2** | dsh binary install on newvps | `ssh puer-hk 'DSH_VERSION=v1.0.0 DSH_URL=<verified-url> bash -s < deploy/install-dsh.sh && which dsh && dsh --version'` |
+| **U3** | TypeScript build on newvps | `ssh puer-hk 'cd /opt/fish-harness/wrapper && npm install && ./node_modules/.bin/tsc'` |
+| **U4** | docker compose restart 切入口 | `ssh puer-hk 'cd /opt/fish-harness && docker compose -f deploy/newvps-compose.yml down && docker compose -f deploy/newvps-compose.yml up -d && docker compose -f deploy/6host-compose.newvps.yml up -d && docker compose ps'` |
+| **U5** | 真机 4 E2E 套件真调 | `ssh puer-hk 'cd /opt/fish-harness/wrapper && RUN_WEBPUSH_E2E=1 RUN_STT_E2E=1 RUN_DSH_6HOST=1 RUN_6HOST_E2E=1 DEEPSEEK_API_KEY=<key> WHISPER_MODEL_PATH=/opt/whisper/models/ggml-base.bin ./node_modules/.bin/vitest run test/integration/{webpush_e2e,stt_e2e,dsh_6host,6host_e2e}.test.ts'` |
+| **U6** | 6 Funnel URL 路径 200 验证 | `for path in / /health /api/v1/tasks /api/v1/status/test /api/v1/worker/heartbeat /api/v1/push/subscribe; do curl -s -o /dev/null -w "https://harness-newvps.tail1b9878.ts.net${path} → %{http_code}\n" https://harness-newvps.tail1b9878.ts.net${path}; done` |
+| **U7** | Codex v0.7 formal 复审 | user 亲提 `npx codex review --model gpt-5.6-sol --reasoning-effort xhigh notes/codex-audit-scope-v1.1.1-v0.7-precommit-prompt.md`（预期 0C/0M/0m） |
+| **U8** | v1.1.1 patch tag + push via Clash | `git tag -a v1.1.1 -m "v1.1.1: server-side entrypoint cutover + 5 edge host provision draft + v0.7 audit-scope + dsh binary install" && git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin v1.1.1` |
+| **U9** | 5 edge host 真实 provision v1.1.1.1+ | per `deploy/runbook-edge-provision.md` §2 5 步骤 |
+
+#### 8. NEXT v1.1.1.1+ 周期（5 edge host 真实 provision）
+
+- 5× VPS 采购（east-1/west-1/asia-1/eu-1/sa-1）
+- 5× Tailscale 节点加入（持有 auth key，session 内 agent 无 key）
+- 5× Tailscale Funnel 配置（`tailscale funnel --bg 4001`）
+- 5× Docker Compose 部署（per runbook §2 step 4）
+- 5× env vars 填入（TAILSCALE_MAGIC_DNS_SUFFIX + DEEPSEEK_API_KEY + WORKER_ID）
+
 ### 文档索引
 
 - [`docs/v1.1-ga-team-plan.md`](docs/v1.1-ga-team-plan.md) — v1.1 GA 团队开发计划 (M0c/M1/M2/M3 阶段)
