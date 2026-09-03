@@ -24,12 +24,20 @@
  */
 
 import { spawn } from 'child_process';
-import { resolve } from 'path';
+import { dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
 import {
   type DshResponse,
   type ModelClass,
   PROFILE_YAML_MAP,
 } from './types.js';
+
+// ---------------------------------------------------------------------------
+// Module-level __dirname (resolved via import.meta.url; independent of cwd)
+// ---------------------------------------------------------------------------
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // ---------------------------------------------------------------------------
 // MagicDNS host names (6-host Tailscale network)
@@ -135,7 +143,7 @@ export function listAllHostFqdns(): string[] {
  * @param prompt     - task prompt
  */
 function buildArgs(modelClass: ModelClass, prompt: string): string[] {
-  const projectRoot = resolve(process.cwd(), '..');
+  const projectRoot = resolve(__dirname, '..', '..');
   const basePatch = resolve(projectRoot, 'docs', 'm0b', 'profile-override-base.yaml');
   const rolePatch = resolve(projectRoot, PROFILE_YAML_MAP[modelClass]);
 

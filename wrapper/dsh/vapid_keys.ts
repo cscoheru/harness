@@ -32,7 +32,15 @@
 
 import { createECDH, createPublicKey, createPrivateKey, createSign, generateKeyPairSync } from 'crypto';
 import { writeFileSync } from 'fs';
-import { resolve } from 'path';
+import { dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
+
+// ---------------------------------------------------------------------------
+// Module-level __dirname (resolved via import.meta.url; independent of cwd)
+// ---------------------------------------------------------------------------
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // ---------------------------------------------------------------------------
 // Key generation
@@ -218,7 +226,7 @@ export function signVapidJwt(input: string, privateKeyBase64url: string): string
  */
 function main(): void {
   const keyPair = generateVapidKeyPair();
-  const projectRoot = resolve(process.cwd(), '..');
+  const projectRoot = resolve(__dirname, '..', '..');
   const publicKeyPath = resolve(projectRoot, 'deploy', 'vapid_public.key');
 
   writeFileSync(publicKeyPath, keyPair.publicKey, 'utf8');

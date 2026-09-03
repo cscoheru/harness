@@ -14,7 +14,8 @@
  */
 
 import { readFileSync } from 'fs';
-import { resolve } from 'path';
+import { dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
 import {
   type Profile,
   type ProfileOverride,
@@ -29,12 +30,13 @@ import {
 /**
  * Absolute path to the project root.
  *
- * Resolution: `process.cwd()` is the wrapper/ directory (vitest default + npm run build),
- * so one `..` reaches the fish-harness project root containing docs/m0b/.
- *
- * This avoids `import.meta.dirname` ambiguity between src (wrapper/dsh/) and build (wrapper/build/dsh/).
+ * Resolved via import.meta.url — independent of process.cwd() so it works
+ * in both src (wrapper/dsh/) and build (wrapper/build/dsh/) layouts,
+ * regardless of working_dir in compose deployment.
  */
-const PROJECT_ROOT = resolve(process.cwd(), '..');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const PROJECT_ROOT = resolve(__dirname, '..', '..');
 
 /** dsh base profile override — enables A-class tools. */
 export const BASE_PATCH_PATH = resolve(PROJECT_ROOT, 'docs', 'm0b', 'profile-override-base.yaml');

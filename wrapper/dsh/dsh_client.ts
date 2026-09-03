@@ -15,7 +15,8 @@
  */
 
 import { spawn } from 'child_process';
-import { resolve } from 'path';
+import { dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
 import { readFileSync } from 'fs';
 import {
   type DshOpts,
@@ -29,8 +30,10 @@ import {
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Absolute path to the project root. Resolution: `process.cwd()` is the wrapper/ directory (vitest default + npm run build), so one `..` reaches the fish-harness project root containing docs/m0b/. This avoids `import.meta.dirname` ambiguity between src (wrapper/dsh/) and build (wrapper/build/dsh/). */
-const PROJECT_ROOT = resolve(process.cwd(), '..');
+/** Absolute path to the project root. Resolved via import.meta.url so it works correctly in both src (wrapper/dsh/) and build (wrapper/build/dsh/) layouts, regardless of process.cwd(). */
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const PROJECT_ROOT = resolve(__dirname, '..', '..');
 
 /** dsh base profile override — enables A-class tools. */
 const BASE_PATCH = resolve(PROJECT_ROOT, 'docs', 'm0b', 'profile-override-base.yaml');
