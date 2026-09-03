@@ -1,18 +1,19 @@
 # notes/deviation-v1.1.1-dsh-install.md — v1.1.1 dsh install deviation record
 
-> **Status**: Active — deviation document. Captures 7 deviations that emerged
-> during v1.1.1 commit 5 / commit 6 / commit 8 / commit 9 / U4 / U5 work on dsh
-> install, PROJECT_ROOT path resolution, isMain guard, Phase 1+2 deploy, and
-> E2E suite verification.
+> **Status**: Active — deviation document. Captures 8 deviations that emerged
+> during v1.1.1 commit 5 / commit 6 / commit 8 / commit 9 / U4 / U5 / U6 work on dsh
+> install, PROJECT_ROOT path resolution, isMain guard, Phase 1+2 deploy, E2E
+> suite verification, and Funnel URL probe.
 > Will be referenced by future v0.7+ audit-scope and by anyone doing dsh
-> install + wrapper build verification + Phase 1+2 deploy + U5 E2E on newvps.
+> install + wrapper build verification + Phase 1+2 deploy + U5 E2E + U6 Funnel
+> verification on newvps.
 >
 > **Cycle**: v1.1.1 (server-side cutover + 5 edge host provision draft)
 > **Date**: 2026-09-03
 
 ---
 
-## §1 Deviation summary (7 items)
+## §1 Deviation summary (8 items)
 
 | # | Deviation | Original (wrong) | Correct | Impact |
 |---|-----------|------------------|---------|--------|
@@ -23,14 +24,17 @@
 | **D-5** | PROJECT_ROOT 2-layer resolution fails in tsc-compiled `wrapper/build/dsh/` | `resolve(__dirname, '..', '..')` in src → fish-harness/ (correct); in build output `wrapper/build/dsh/foo.js` → `wrapper/build/` (WRONG, off by one level) | Conditional: `__dirname.includes('/build/') ? resolve(__dirname, '..', '..', '..') : resolve(__dirname, '..', '..')` | High — without fix, vapid_keys.js wrote public key to `wrapper/deploy/vapid_public.key` instead of `deploy/vapid_public.key`; profile.ts could not load `docs/m0b/profile-override-*.yaml` from compiled output |
 | **D-6** | U4 Phase 1+2 deploy — 3 environmental newvps issues | (a) port 3000 held by stale `next-server` (systemd-managed, respawns when killed); (b) kernel FROZEN — `python -m harness` only prints version (no HTTP server) per ADR 0010; (c) `env/newvps.env.example` missing on newvps (compose env_file path) | (a) bind wrapper to host port 3010 (local edit, not committed); (b) `--no-deps` flag to start wrappers bypassing kernel healthcheck; (c) `scp env/newvps.env.example` to newvps:deploy/env/ | Medium — all 7 wrapper/worker/push/stt services Up; kernel FROZEN excluded; Next.js port conflict needs user disposition |
 | **D-7** | U5 6host_e2e — 14 infrastructure-gated ENOTFOUND failures | `RUN_6HOST_E2E=1` test expects 5 edge hosts (`harness-edge[1-5].tail1b9878.ts.net`) to resolve via Tailscale MagicDNS and respond on Funnel | Document as v1.1.1.1+ cycle work (per plan §7.3); U5 partial PASS — dsh_6host ✓ + 6host_e2e §1-§4 18 passed (primary host) + §5/§6 edge-rejection 14 ENOTFOUND | Medium — test file is correct; suites are 1-pass + 1-infrastructure-gated. Edge provision (5 VPS + auth key + Funnel) deferred to v1.1.1.1+ |
+| **D-8** | U6 Funnel probe — 5 of 6 endpoints serve placeholder, not server.ts | Tailscale Funnel `harness-newvps.tail1b9878.ts.net` proxies to host port **4000** (`harness-wrapper-orchestrator` from 6host-compose.newvps.yml) — that container still runs the pre-v1.1.1 placeholder echo server. The real v1.1.1 server.ts runs on host port **3010** (`harness-wrapper` from newvps-compose.yml). | Option A: cut over wrapper-orchestrator to `node build/server.js` (operator decision needed on per-role endpoint split); Option B: reconfigure Funnel `tailscale serve --bg --https=443 http://localhost:3010` (lower risk — no container restart). U6 partial PASS: Funnel reachable + cert valid + 6 endpoints HTTP 200 + /health real JSON; 5/6 placeholder echo. | Medium — no code regression in server.ts (verified via direct `localhost:3010` probe); gap is purely in Funnel → port routing topology. v1.1.1 GA gate not directly blocked. |
 
-All seven deviations share a common root cause: **Plan was written without
+All eight deviations share a common root cause: **Plan was written without
 verifying the dsh project's actual distribution channel, without distinguishing
 puer-hk (puer-hub project) from newvps (fish-harness project), without
 re-checking PROJECT_ROOT resolution after tsc output is one level deeper than
 src, and without anticipating the newvps port-keeper (Next.js systemd) and the
-kernel FROZEN-no-server limitation, and without explicit edge-host provision
-sequencing (v1.1.1 = draft only, v1.1.1.1+ = real provision).**
+kernel FROZEN-no-server limitation, without explicit edge-host provision
+sequencing (v1.1.1 = draft only, v1.1.1.1+ = real provision), and without
+verifying which port Tailscale Funnel was already configured to proxy
+(pre-v1.1.1 Funnel → port 4000 placeholder, not v1.1.1 server.ts on port 3010).**
 
 ---
 
@@ -406,7 +410,109 @@ export RUN_DSH_6HOST=1 RUN_6HOST_E2E=1
 
 ---
 
-## §8 Hygiene check (per v0.7 audit-scope)
+## §8 D-8 U6 Funnel probe — 5 of 6 endpoints serve placeholder, not server.ts
+
+### Background
+
+U6 verifies the 6 server.ts endpoints respond 200 via the public Funnel
+URL `https://harness-newvps.tail1b9878.ts.net`. Plan §4 U6 lists 6 paths:
+`/`, `/health`, `/api/v1/tasks`, `/api/v1/status/test`,
+`/api/v1/worker/heartbeat`, `/api/v1/push/subscribe`.
+
+The v1.1.1 deploy (U4 Phase 1+2) deployed two compose stacks:
+
+1. `deploy/newvps-compose.yml` → `harness-wrapper` on host port **3010**
+   (mapped from container port 3000). This container's `command:` was
+   cut over to `node build/server.js` and runs the **real v1.1.1
+   server.ts** with all 8 endpoints. Verified via direct
+   `curl http://localhost:3010/health` returning
+   `{"status":"ok","version":"0.0.0-stub"}`.
+
+2. `deploy/6host-compose.newvps.yml` → `harness-wrapper-orchestrator`
+   on host port **4000** + `harness-wrapper-commander` on 4001 +
+   `harness-wrapper-frontend` on 4002. These three services were
+   deployed from a pre-v1.1.1 compose file with the
+   `sleep infinity`-style placeholder server (still showing
+   "fish-harness wrapper placeholder" + echo of request).
+
+Tailscale Funnel on `harness-newvps.tail1b9878.ts.net` was configured
+to proxy HTTPS traffic to **port 4000** (wrapper-orchestrator), per the
+pre-v1.1.1 deploy. The Funnel cert validates correctly (TLS 1.3, valid
+CA, `subjectAltName=*.tail1b9878.ts.net`).
+
+### Deviation
+
+U6 Funnel probe (2026-09-03 13:30 UTC):
+
+```
+METHOD  PATH                                     HTTP    RESPONSE_KIND
+------------------------------------------------------------------------------------
+GET     /                                        200     placeholder echo
+GET     /health                                  200     real JSON
+POST    /api/v1/tasks                            200     placeholder echo
+GET     /api/v1/status/test                      200     placeholder echo
+POST    /api/v1/worker/heartbeat                 200     placeholder echo
+POST    /api/v1/push/subscribe                   200     placeholder echo
+```
+
+**Only `/health` returns real JSON** (the placeholder server happens
+to expose `/health` returning orchestrator status). The other 5 paths
+return placeholder echo with `Request: METHOD /path` body.
+
+Real server.ts (port 3010) response shapes for comparison:
+- `GET /` → `<!DOCTYPE html>...PWA bundle injected in M2+`
+- `GET /health` → `{"status":"ok","version":"0.0.0-stub"}`
+- `POST /api/v1/tasks` → `400 {"status":"error","error":"prompt required (string)"}`
+- `GET /api/v1/status/test` → `200 {"status":"ok","test":true,"ts":"..."}`
+- `POST /api/v1/worker/heartbeat` → `200 {"status":"ok","heartbeat":true}`
+- `POST /api/v1/push/subscribe` → `400 {"status":"error","error":"subscription + payload required"}`
+
+Note: server.ts correctly returns 400 on empty-body POSTs (validation
+works). Funnel URL returns 200 with placeholder text (placeholder
+echoes all requests uniformly without validation).
+
+### Fix
+
+Two options to make U6 fully pass — operator decision required:
+
+**Option A: Cut over wrapper-orchestrator (port 4000) to server.ts**
+- Edit `deploy/6host-compose.newvps.yml` wrapper-orchestrator +
+  wrapper-commander + wrapper-frontend services: replace placeholder
+  `command:` with `["node", "build/server.js"]` (or appropriate
+  per-role handlers — server.ts currently serves all 8 endpoints on
+  one process; per-role split may require v1.1.1.1+ work)
+- `docker compose -f deploy/6host-compose.newvps.yml up -d` on newvps
+- Re-run U6 — expect all 6 endpoints to return real server.ts bodies
+
+**Option B: Reconfigure Tailscale Funnel to proxy to port 3010**
+- `tailscale serve --bg --https=443 http://localhost:3010` on newvps
+- `tailscale funnel --bg 4000 http://localhost:3010` (or equivalent)
+- Re-run U6 — Funnel now proxies to the wrapper that already runs
+  server.ts; expect all 6 endpoints to return real server.ts bodies
+
+Option B is lower risk (no compose change, no restart of 3 containers,
+no risk of breaking the placeholder contract if any external probes
+depend on placeholder echo). Option A is more "complete" but requires
+also deciding how to split the 8 endpoints across orch/commander/frontend
+roles (currently all 8 are in one server.ts process).
+
+### Impact
+
+- **U6 partial PASS**: Funnel HTTPS reachable + cert valid + /health
+  returns real orchestrator status + all 6 endpoints respond HTTP 200
+  (i.e., no 404/502/503 transport failures)
+- **U6 partial FAIL**: 5 of 6 endpoints are placeholder echo, not
+  real server.ts handlers (gap between deploy topology and plan §1.10
+  intent)
+- **v1.1.1 GA gate**: not directly blocked — server.ts itself is
+  proven correct via direct port 3010 probe in this session. The gap
+  is purely in which port Funnel proxies to.
+- **No code regressions** in server.ts (verified correct via
+  `localhost:3010` direct probe)
+
+---
+
+## §9 Hygiene check (per v0.7 audit-scope)
 
 - `grep -rE "Fable 5|GLM 5.3|MiniMax-M3" deploy/install-dsh.sh` → 0 (锁 lock pattern OK)
 - `grep -rE "sk-[a-zA-Z0-9]{32,}" deploy/install-dsh.sh` → 0 (no hardcoded secrets)
@@ -418,7 +524,7 @@ export RUN_DSH_6HOST=1 RUN_6HOST_E2E=1
 
 ---
 
-## §9 Forward-looking
+## §10 Forward-looking
 
 ### Plan hygiene
 - All future plans MUST distinguish `puer-hk` (puer-hub project server) from `newvps` (fish-harness project server) explicitly
@@ -438,7 +544,7 @@ export RUN_DSH_6HOST=1 RUN_6HOST_E2E=1
 
 ---
 
-## §10 References
+## §11 References
 
 - Plan: `~/.claude/plans/buzzing-humming-book.md` §3.4 U2-U8 (local-only, not in repo)
 - Commit 5: `fix(v1.1.1): install-dsh.sh npm registry rewrite + Usage ssh target correction`
