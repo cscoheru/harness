@@ -1,17 +1,17 @@
 # notes/deviation-v1.1.1-dsh-install.md — v1.1.1 dsh install deviation record
 
-> **Status**: Active — deviation document, not a plan. Captures 5 deviations
-> that emerged during v1.1.1 commit 5 / commit 6 / commit 8 work on dsh install
-> and PROJECT_ROOT path resolution.
+> **Status**: Active — deviation document. Captures 6 deviations that emerged
+> during v1.1.1 commit 5 / commit 6 / commit 8 / commit 9 / U4 work on dsh
+> install, PROJECT_ROOT path resolution, isMain guard, and Phase 1+2 deploy.
 > Will be referenced by future v0.7+ audit-scope and by anyone doing dsh
-> install + wrapper build verification on newvps.
+> install + wrapper build verification + Phase 1+2 deploy on newvps.
 >
 > **Cycle**: v1.1.1 (server-side cutover + 5 edge host provision draft)
 > **Date**: 2026-09-03
 
 ---
 
-## §1 Deviation summary (5 items)
+## §1 Deviation summary (6 items)
 
 | # | Deviation | Original (wrong) | Correct | Impact |
 |---|-----------|------------------|---------|--------|
@@ -20,11 +20,14 @@
 | **D-3** | deploy/install-dsh.sh Usage example | `ssh puer-hk '...'` | `ssh newvps '...'` | Low — example only, operator would have spotted |
 | **D-4** | U3 newvps build verify — 1 environmental vitest failure | test/unit/server.test.ts assumes "dsh missing" (200 or 500 if dsh missing); newvps has dsh installed at `/usr/local/bin/dsh`, so dsh runs in headless mode without `DEEPSEEK_API_KEY` and hangs test 30s | Document as environmental; U3 overall PASS (tsc exit 0 + 126 passed + 1 environmental failure) | Low — not a wrapper regression; test name explicit about "if dsh missing" |
 | **D-5** | PROJECT_ROOT 2-layer resolution fails in tsc-compiled `wrapper/build/dsh/` | `resolve(__dirname, '..', '..')` in src → fish-harness/ (correct); in build output `wrapper/build/dsh/foo.js` → `wrapper/build/` (WRONG, off by one level) | Conditional: `__dirname.includes('/build/') ? resolve(__dirname, '..', '..', '..') : resolve(__dirname, '..', '..')` | High — without fix, vapid_keys.js wrote public key to `wrapper/deploy/vapid_public.key` instead of `deploy/vapid_public.key`; profile.ts could not load `docs/m0b/profile-override-*.yaml` from compiled output |
+| **D-6** | U4 Phase 1+2 deploy — 3 environmental newvps issues | (a) port 3000 held by stale `next-server` (systemd-managed, respawns when killed); (b) kernel FROZEN — `python -m harness` only prints version (no HTTP server) per ADR 0010; (c) `env/newvps.env.example` missing on newvps (compose env_file path) | (a) bind wrapper to host port 3010 (local edit, not committed); (b) `--no-deps` flag to start wrappers bypassing kernel healthcheck; (c) `scp env/newvps.env.example` to newvps:deploy/env/ | Medium — all 7 wrapper/worker/push/stt services Up; kernel FROZEN excluded; Next.js port conflict needs user disposition |
 
-All five deviations share a common root cause: **Plan was written without
+All six deviations share a common root cause: **Plan was written without
 verifying the dsh project's actual distribution channel, without distinguishing
-puer-hk (puer-hub project) from newvps (fish-harness project), and without
-re-checking PROJECT_ROOT resolution after tsc output is one level deeper than src.**
+puer-hk (puer-hub project) from newvps (fish-harness project), without
+re-checking PROJECT_ROOT resolution after tsc output is one level deeper than
+src, and without anticipating the newvps port-keeper (Next.js systemd) and the
+kernel FROZEN-no-server limitation.**
 
 ---
 
@@ -239,7 +242,106 @@ After D-5 fix lands (commit 8) and is pushed via Clash, U4 can proceed:
 
 ---
 
-## §6 Hygiene check (per v0.7 audit-scope)
+## §6 D-6 U4 Phase 1+2 deploy — port conflict + kernel FROZEN + env file missing
+
+### Background
+
+U4 task: docker compose up Phase 1+2 (8 services across newvps-compose.yml +
+ 6host-compose.newvps.yml) on newvps. Goal: bring wrappers + worker + push +
+ stt online with kernel FROZEN-excluded (per ADR 0010).
+
+After D-5 + isMain guard landed (commits 8 + 9 + 10), U4 proceeded:
+1. docker build kernel image on newvps (per memory `newvps-deploy-fallback-gotchas.md`)
+   → `ghcr.io/cscoheru/fish-harness:1.0.0` tagged locally, sqlite3 gate OK 3.53.4
+2. Update `/opt/fish-harness/.env.local` with VAPID_PRIVATE_KEY + WHISPER_MODEL_PATH
+3. docker compose up both files
+
+### Deviation
+
+3 environmental issues blocked straight execution:
+
+**(a) Port 3000 held by stale `next-server`**
+
+```
+$ ss -ltnp | grep :3000
+LISTEN 0 511 127.0.0.1:3000 users:(("next-server (v1",pid=689460,fd=21))
+```
+
+`newvps-compose.yml` wrapper maps `ports: "${WRAPPER_PORT:-3000}:3000"` (host:
+container). Host port 3000 was occupied by a `next-server (v14.2.5)` from a
+prior puer-hub dev session. Two strategies tried:
+
+- `kill -9 <pid>`: succeeded momentarily, then a systemd-managed next-server
+  respawned it within seconds (pid 689460 → 689781 → new instance). The
+  parent (user 1001, started Jul 9) is owned by a long-running supervisor
+  that respawns the child whenever killed.
+- `kill -9 <systemd --user parent>`: same — fresh systemd --user instance
+  appears within 1-2 seconds with new child.
+
+Resolution: locally edit `deploy/newvps-compose.yml` to use host port 3010
+(`"3010:3000"`), scp to newvps, restart compose. **This edit is local-only
+(not committed) — pending user disposition: either (i) kill the supervisor
+permanently via `systemctl stop`, (ii) commit the port-mapping change, or
+(iii) document the workaround and proceed.**
+
+**(b) Kernel FROZEN — no HTTP server**
+
+```
+$ docker logs harness-kernel
+1.0.0
+1.0.0
+1.0.0
+... (restarting loop)
+```
+
+`harness/__main__.py` (per its docstring) only prints `harness.__version__`
+(per `docs/v1.0-ga-team-plan.md` §2 T-DO-1 smoke). It exits immediately,
+docker sees exit 0 + no main loop → restart loop. Healthcheck
+(`python -c "import sqlite3; c=sqlite3.connect('/data/harness.db'); c.close(); print('ok')"`)
+fails because `/data/harness.db` is never initialized by `python -m harness`.
+
+Per ADR 0010 + D-4: kernel is FROZEN, not deployed on newvps. Wrappers
+correctly fall back to `runDsh()` when `HARNESS_API_URL` is unreachable (per
+`wrapper/orchestrator/orchestrator.ts:dispatch()` log:
+`[orchestrator] health() — kernel unreachable, returning stub`).
+
+Resolution: `docker compose ... up -d --no-deps wrapper worker stt-worker
+web-push-gateway wrapper-orchestrator wrapper-commander wrapper-frontend`
+(specify service names explicitly to bypass kernel healthcheck dependency).
+All 7 wrappers/worker/push/stt containers start and pass `/health`.
+
+**(c) `env/newvps.env.example` missing on newvps**
+
+```
+$ docker compose -f deploy/6host-compose.newvps.yml up -d
+env file /opt/fish-harness/deploy/env/newvps.env.example not found
+```
+
+6host-compose.newvps.yml references `env_file: ../env/newvps.env.example`
+(relative to `deploy/`). The file was committed to the repo but never pushed
+to newvps (no prior clone / scp). Resolution: `scp env/newvps.env.example
+newvps:/opt/fish-harness/deploy/env/`.
+
+### Resolution summary
+
+After (a)+(b)+(c) fixes:
+- 7 services running, /health 200 on 5 (wrapper:3010, orch:4000, commander:4001,
+  frontend:4002; web-push:8081 listens but doesn't expose /health, expected);
+  stt-worker (port 8080) not host-exposed per compose — internal only.
+- Kernel container in Restarting loop — FROZEN per ADR 0010, expected.
+- Local compose edit (port 3010) **NOT committed**; needs user decision
+  (systemctl stop supervisor vs commit port-mapping change vs document).
+
+### U5/U6/U7/U9 follow-up (unchanged from plan §4)
+
+- U5: 4 E2E 套件真调 (webpush_e2e + stt_e2e + dsh_6host + 6host_e2e)
+- U6: 6 Funnel URL 路径 200 验证 (depends on Tailscale Funnel config)
+- U7: Codex v0.7 formal 复审 (user 亲提)
+- U9: 5 edge host 真实 provision (v1.1.1.1+ sub-cycle, user holds Tailscale auth key)
+
+---
+
+## §7 Hygiene check (per v0.7 audit-scope)
 
 - `grep -rE "Fable 5|GLM 5.3|MiniMax-M3" deploy/install-dsh.sh` → 0 (锁 lock pattern OK)
 - `grep -rE "sk-[a-zA-Z0-9]{32,}" deploy/install-dsh.sh` → 0 (no hardcoded secrets)
@@ -251,7 +353,7 @@ After D-5 fix lands (commit 8) and is pushed via Clash, U4 can proceed:
 
 ---
 
-## §7 Forward-looking
+## §8 Forward-looking
 
 ### Plan hygiene
 - All future plans MUST distinguish `puer-hk` (puer-hub project server) from `newvps` (fish-harness project server) explicitly
@@ -271,16 +373,20 @@ After D-5 fix lands (commit 8) and is pushed via Clash, U4 can proceed:
 
 ---
 
-## §8 References
+## §9 References
 
 - Plan: `~/.claude/plans/buzzing-humming-book.md` §3.4 U2-U8 (local-only, not in repo)
 - Commit 5: `fix(v1.1.1): install-dsh.sh npm registry rewrite + Usage ssh target correction`
 - Commit 6: `fix(plan): §3.4 U2-U8 ssh target puer-hk → newvps (deviation D-1)`
 - Commit 7: deviation note first commit (`notes/deviation-v1.1.1-dsh-install.md` with D-1/D-2/D-3)
 - Commit 8: `fix(v1.1.1): PROJECT_ROOT src/build conditional resolution (D-5)` — 4 dsh files + project_root.test.ts
+- Commit 9: `fix(v1.1.1): vapid_keys.ts isMain guard — prevent main() on import (newvps-adopted)`
+- Commit 10: `chore(v1.1.1): rotate VAPID public key (newvps-generated, RFC 8292 commit-safe)`
+- Commit 11: `docs(v1.1.1): add D-6 environmental record (port conflict + kernel FROZEN + env file missing)`
 - Audit-scope: `notes/codex-audit-scope-v1.1.1-v0.7-precommit.md` (v0.7 §3 v1.0 diff command守门; this deviation does not affect v1.0 runtime)
 - Runbook: `deploy/runbook-edge-provision.md` §3 (uses `ssh newvps` indirectly via edge host provisioning; not affected)
+- Memory: `~/.claude/projects/-Users-kjonekong/memory/newvps-deploy-fallback-gotchas.md` (kernel build locally + skip publish)
 
 ---
 
-*Deviation record archived (v1.1.1, 2026-09-03) — 5 deviations (D-1 ssh target, D-2 install method, D-3 Usage example, D-4 U3 environmental test, D-5 PROJECT_ROOT src/build mismatch) all resolved by commit 5 + commit 6 + commit 7 + commit 8. newvps dsh version still TBD (ssh instability). Future plans must distinguish puer-hk vs newvps AND verify PROJECT_ROOT resolution against both src and tsc build layouts before declaring wrapper/ code production-ready.*
+*Deviation record archived (v1.1.1, 2026-09-03) — 6 deviations (D-1 ssh target, D-2 install method, D-3 Usage example, D-4 U3 environmental test, D-5 PROJECT_ROOT src/build mismatch, D-6 U4 Phase 1+2 environmental) all resolved in execution. 7 wrapper/worker/push/stt services Up on newvps (kernel FROZEN excluded per ADR 0010). Future plans must distinguish puer-hk vs newvps AND verify PROJECT_ROOT resolution against both src and tsc build layouts AND verify newvps port-keeper (Next.js systemd) AND verify kernel FROZEN limitation before declaring wrapper/ code production-ready.*
