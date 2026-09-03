@@ -123,18 +123,22 @@ grep -E "PROJECT_ROOT\s*=\s*resolve\(process\.cwd\(\)\s*,\s*['\"]\.\.['\"]\)" wr
 grep -E "projectRoot\s*=\s*resolve\(process\.cwd\(\)\s*,\s*['\"]\.\.['\"]\)" wrapper/dsh/6host_client.ts wrapper/dsh/vapid_keys.ts | wc -l  # == 0
 ```
 
-期望：import.meta.url == 4 + PROJECT_ROOT 残留 == 0 + projectRoot 局部残留 == 0。
+期望：import.meta.url ≥ 4（formal 实测 8 = 4 文件 × src/build conditional 双路径 per D-5）+ PROJECT_ROOT 残留 == 0 + projectRoot 局部残留 == 0。
 
 ### §2.9 §4.9 dsh binary install 守门 NEW
 
 ```bash
 test -f deploy/install-dsh.sh
-grep -E "DSH_URL=.*\?:|set -e|chmod \+x" deploy/install-dsh.sh | wc -l  # ≥ 3
+grep -cF 'DSH_VERSION:-' deploy/install-dsh.sh  # ≥ 1（formal 实测 1；-F 字面匹配）
+grep -cF 'if [[ -z "${DSH_VERSION}" ]]' deploy/install-dsh.sh  # ≥ 1（formal 实测 1）
+grep -c "set -euo pipefail" deploy/install-dsh.sh  # ≥ 1（formal 实测 1）
+grep -c "npm install -g @deepseek-ai/dsh@" deploy/install-dsh.sh  # ≥ 1（版本 pin；formal 实测 1）
+grep -cE "dsh@latest" deploy/install-dsh.sh  # == 0（禁 latest 漂移）
 grep -E "https://github\.com/.*dsh.*releases/download" deploy/install-dsh.sh | wc -l  # == 0
-grep -E "DSH_VERSION=" deploy/install-dsh.sh | wc -l  # ≥ 1
+grep -E "DSH_VERSION=" deploy/install-dsh.sh | wc -l  # ≥ 1（formal 实测 2）
 ```
 
-期望：install-dsh.sh 存在 + 3 项核心守卫 ≥ 3 + GitHub URL 硬编码 == 0 + DSH_VERSION ≥ 1。
+期望（v0.7 formal GATE-CALIB per D-1/D-2/D-3 npm 渠道 deviation）：DSH_VERSION 强校验 ≥ 2 + set -euo pipefail ≥ 1 + npm 版本 pin ≥ 1 + @latest == 0 + GitHub URL 硬编码 == 0 + DSH_VERSION ≥ 1。
 
 ### §2.10 cc-ready.json 翻牌
 
@@ -171,7 +175,7 @@ jq -e '.task_id == "T-V1.1.1-DISPATCH-PASS"' docs/poll/cc-ready.json
 3. 前向交付物 grep 数字 — 引用 §1 第 1 条命令实测
 4. volumes 双修法（旧挂载 == 0 + 新挂载 ≥ 12）— 引用 §4.5.7 主表实测（per Codex v0.7 复审 F3 补条目）
 5. sleep infinity == 0 + harness-edge ≥ 5 — 引用 §4.5.7 主表实测
-6. import.meta.url == 4 — 引用 §4.8 主表实测
+6. import.meta.url ≥ 4（formal 实测 8，D-5 conditional 双路径）— 引用 §4.8 主表实测
 
 **禁止**：(a) 公式预测任何锚定数字；(b) 复制绝对数字（演进链除外，仅作历史）；(c) 「占位后填」模式（实测前不写报告）。
 

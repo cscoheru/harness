@@ -178,7 +178,7 @@ grep -rE "tag:harness-edge" deploy/tailscale-acl.yaml | wc -l
 # 期望: ≥ 1（ACL 扩展 tag:harness-edge tagOwners）
 
 grep -c "EDGE_REGION" deploy/6host-compose.edge[1-5].yml 2>/dev/null | awk -F: '{s+=$NF} END{print s}'
-# 期望: ≥ 10（5 edge compose 各含 EDGE_REGION env var + echo 验证 2 处；起草实测 10。v0.7 GATE-CALIB per Codex 复审 F4：原 `| wc -l` 数文件数恒 5——0 命中文件也占行假绿，已改 awk 真命中合计）
+# 期望: ≥ 5（5 edge compose 各含 EDGE_REGION env var 1 处；v0.7 formal 实测 5。GATE-CALIB 演进：起草实测 10 = env 1 + echo placeholder 字样 1/文件——echo 随 `sleep infinity` placeholder 同步删除（§4.5.7 第一条 == 0 的同一改动），期望按实施实况校准 ≥ 5；awk 真命中合计语义不变 per F4）
 
 grep -c "build/server.js" deploy/*.yml 2>/dev/null | awk -F: '{s+=$NF} END{print s}'
 # 期望: ≥ 8（newvps 2 + 6host 6 + edge 5 = 13 services 至少 8 切入口；起草实测 0 待实施。同 F4 校准：原 `| wc -l` 数 yml 文件数（共 7 文件）与命中无关——实施后必假红，已改 awk 真命中合计）
@@ -230,9 +230,9 @@ grep -rE "signVapidJwt" wrapper/ | wc -l  # ≥ 2
 grep -rE "createSign\s*\(\s*['\"]SHA256" wrapper/dsh/vapid_keys.ts | wc -l  # ≥ 1
 grep -rE "dsaEncoding\s*:\s*['\"]ieee-p1363['\"]" wrapper/dsh/vapid_keys.ts | wc -l  # ≥ 1
 
-# server.ts 8 endpoint 守门（v0.7 NEW §4.7.6）：
-grep -cE "app\.(get|post|use)\s*\(\s*['\"](\/|/health|/api/v1/tasks|/api/v1/status/:task_id|/api/v1/status/test|/api/v1/worker/heartbeat|/api/v1/push/subscribe|/api/stt/transcribe)" wrapper/server.ts | wc -l
-# 期望: ≥ 8（8 endpoint integration: GET /health + POST /api/v1/tasks + GET /api/v1/status/:task_id + GET /api/v1/status/test + POST /api/v1/worker/heartbeat + POST /api/v1/push/subscribe + POST /api/stt/transcribe + GET * SPA fallback）
+# server.ts 8 endpoint 守门（v0.7 NEW §4.7.6；v0.7 formal GATE-CALIB：SPA fallback 实施为 `app.use((_req, res) =>` 无路径兜底——Express 5 path-to-regexp v8 拒绝 `app.get('*')`（server.ts L168 注释已记），pattern 补 use-无路径分支）：
+grep -cE "app\.(get|post|use)\s*\(\s*['\"](\/|/health|/api/v1/tasks|/api/v1/status/:task_id|/api/v1/status/test|/api/v1/worker/heartbeat|/api/v1/push/subscribe|/api/stt/transcribe)|app\.use\(\s*\(\s*_req" wrapper/server.ts
+# 期望: ≥ 8（8 endpoint integration: GET /health + POST /api/v1/tasks + GET /api/v1/status/:task_id + GET /api/v1/status/test + POST /api/v1/worker/heartbeat + POST /api/v1/push/subscribe + POST /api/stt/transcribe + use-无路径 SPA fallback；v0.7 formal 实测 8 = 具名 7 + fallback 1）
 ```
 
 **含义**：v0.7 §4.7.6 NEW server.ts 8 endpoint 守门 — app.{get,post,use} 必须 ≥ 8 处，验证 server.ts 真整合 8 endpoint 而非 stub placeholder。
@@ -255,24 +255,32 @@ grep -E "projectRoot\s*=\s*resolve\(process\.cwd\(\)\s*,\s*['\"]\.\.['\"]\)" wra
 
 **含义**：v0.7 §4.8 NEW PROJECT_ROOT 路径 bug 修法守门 — volume mount 改法（`..:/app:ro`）+ 代码 4 文件 import.meta.url 模式必须同步落地；残留 `process.cwd() + '..'` 必须 == 0。
 
-## §4.9 dsh binary install 守门（v0.7 NEW — install-dsh.sh + URL env var 强校验）
+## §4.9 dsh binary install 守门（v0.7 NEW — install-dsh.sh + URL env var 强校验；**v0.7 formal GATE-CALIB per D-1/D-2/D-3 deviation（`838c2be`/`77f366b`）：官方分发渠道实为 npm 包 `@deepseek-ai/dsh`（bin: dsh），binary 下载 + DSH_URL/chmod 语义自然消失，守门按 npm 版校准**）
 
 ```bash
-# install-dsh.sh 脚本必含 URL env var 强校验（v0.7 NEW §4.9）：
+# install-dsh.sh 脚本必含 npm 版三核心守卫（v0.7 formal 校准）：
 test -f deploy/install-dsh.sh
-grep -E "DSH_URL=.*\?:|set -e|chmod \+x" deploy/install-dsh.sh | wc -l
-# 期望: ≥ 3（DSH_URL env var 强校验 + set -e fail-fast + chmod +x）
+grep -cF 'DSH_VERSION:-' deploy/install-dsh.sh
+# 期望: ≥ 1（DSH_VERSION env var 默认空声明，后接空值守卫；formal 实测 1。注：用 -F 字面匹配——ERE 版 `$`/`[`/`{` 元字符须逐个转义，字面版免坑）
+grep -cF 'if [[ -z "${DSH_VERSION}" ]]' deploy/install-dsh.sh
+# 期望: ≥ 1（空值守卫 fail-fast；formal 实测 1）
+grep -c "set -euo pipefail" deploy/install-dsh.sh
+# 期望: ≥ 1（fail-fast：未定义变量/管道错即退；formal 实测 1——涵盖起草版 set -e 语义）
+grep -c "npm install -g @deepseek-ai/dsh@" deploy/install-dsh.sh
+# 期望: ≥ 1（版本 pin 精确安装，禁 @latest 漂移；formal 实测 1）
 
-# install-dsh.sh 不含硬编码 binary URL（v0.7 NEW §4.9）：
+# install-dsh.sh 不含硬编码下载 URL（维持，双渠道皆禁）：
 grep -E "https://github\.com/.*dsh.*releases/download" deploy/install-dsh.sh | wc -l
-# 期望: == 0（URL 由 env var 注入；user 必须 verify GitHub release URL 后填入 DSH_URL）
+# 期望: == 0（GitHub release URL 不硬编码；npm 渠道同理无 URL 硬编码——registry 由 npm config 管）
+grep -cE "dsh@latest|@deepseek-ai/dsh@latest" deploy/install-dsh.sh
+# 期望: == 0（禁 latest 漂移；formal 实测 0）
 
-# dsh version 锁定守门（v0.7 NEW §4.9）：
+# dsh version 锁定守门（维持）：
 grep -E "DSH_VERSION=" deploy/install-dsh.sh | wc -l
-# 期望: ≥ 1（version 锁定到具体 release tag，不用 latest）
+# 期望: ≥ 1（version 锁定到具体 npm tag（如 0.1.2-rc.1，match GitHub release tag）；formal 实测 2）
 ```
 
-**含义**：v0.7 §4.9 NEW dsh binary install 守门 — install-dsh.sh 必须 fail-fast（set -e）+ URL env var 强校验 + version 锁定 + 不硬编码 GitHub URL；agent 写脚本，user 亲跑前必须 verify GitHub release URL。
+**含义**：v0.7 §4.9 dsh install 守门（npm 版）— install-dsh.sh 必须 fail-fast（set -euo pipefail）+ DSH_VERSION 强校验 + `npm install -g @deepseek-ai/dsh@<exact>` 版本 pin + 禁 @latest + 无 URL 硬编码；user 必须 `npm view @deepseek-ai/dsh versions` verify 版本后注入 DSH_VERSION 亲跑（U1/U2）。起草版 DSH_URL binary 路径经 D-1/D-2/D-3 deviation 转npm 渠道（deviation 记录 `838c2be`），守门同步校准——**实施 deviation 回写守门合同**（v0.5 disk 口径同型教训：口径首用即裂须同轮收口）。
 
 ## §5 v0.7 升级 24 文件 hygiene 自检表
 
@@ -421,8 +429,8 @@ grep -c "build/server.js" deploy/*.yml 2>/dev/null | awk -F: '{s+=$NF} END{print
 grep -rn -- "- ../wrapper:/app/wrapper" deploy/*.yml | wc -l  # == 0（起草实测 12 待改）
 grep -rn -- "- ..:/app:ro" deploy/*.yml | wc -l  # ≥ 12（起草实测 0 待实施）
 
-# 5. server.ts 8 endpoint 守门
-grep -cE "app\.(get|post|use)" wrapper/server.ts  # ≥ 8
+# 5. server.ts 8 endpoint 守门（formal 校准：含 use-无路径 SPA fallback 分支，per §4.7.6 GATE-CALIB）
+grep -cE "app\.(get|post|use)\s*\(\s*['\"](\/|/health|/api|/api/stt)|app\.use\(\s*\(\s*_req" wrapper/server.ts  # ≥ 8（formal 实测 8）
 
 # 6. PROJECT_ROOT 路径修法
 grep -E "import.meta.url" wrapper/dsh/dsh_client.ts wrapper/dsh/profile.ts wrapper/dsh/6host_client.ts wrapper/dsh/vapid_keys.ts | wc -l  # == 4
