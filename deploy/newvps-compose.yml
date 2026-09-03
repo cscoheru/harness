@@ -69,8 +69,10 @@ services:
     environment:
       # Points to the harness-kernel service inside the compose network.
       HARNESS_API_URL: "http://harness-kernel:8000"
-      # PWA server listens on WRAPPER_PORT (default 3000).
-      WRAPPER_PORT: "${WRAPPER_PORT:-3000}"
+      # PWA server listens on WRAPPER_PORT (default 3010; 3000 occupied by next-server).
+      # Hardcoded 3010 because compose env_file does NOT propagate to inline ${...}
+      # substitution reliably in this env file scope.
+      WRAPPER_PORT: "3010"
       WORKER_ID: "${WORKER_ID:-worker-001}"
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
       # Orchestrator class — not a specific SKU.
@@ -82,10 +84,11 @@ services:
     depends_on:
       harness-kernel:
         condition: service_healthy
-    # Port 3000: PWA server + health endpoint (mapped to host by compose).
-    # Tailscale Serve proxies harness.rana.asia:443 → wrapper:3000.
+    # Port 3010 (host) → 3000 (container). 3010 chosen because 3000 is occupied
+    # by next-server (puer-hub dev server). Tailscale Funnel proxies
+    # harness.rana.asia:443 → wrapper:3010.
     ports:
-      - "${WRAPPER_PORT:-3000}:3000"
+      - "3010:3000"
     command: ["node", "build/server.js"]
     mem_limit: 512m
     memswap_limit: 512m
