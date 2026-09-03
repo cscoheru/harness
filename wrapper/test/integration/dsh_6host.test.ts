@@ -75,7 +75,7 @@ describe('dsh_6host — real dsh CLI across 6 hosts', { skip: !shouldRun }, () =
 
     it('no hardcoded IP addresses in 6host_client source', async () => {
       const fs = await import('fs');
-      const sourcePath = new URL('../dsh/6host_client.ts', import.meta.url);
+      const sourcePath = new URL('../../dsh/6host_client.ts', import.meta.url);
       const source = fs.readFileSync(sourcePath, 'utf8');
 
       const ipPattern = /172\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+/;
@@ -247,7 +247,7 @@ describe('dsh_6host — real dsh CLI across 6 hosts', { skip: !shouldRun }, () =
   describe('§6 — dsh --profile headless enforcement', () => {
     it('6host_client.ts uses --profile headless (not web)', async () => {
       const fs = await import('fs');
-      const sourcePath = new URL('../dsh/6host_client.ts', import.meta.url);
+      const sourcePath = new URL('../../dsh/6host_client.ts', import.meta.url);
       const source = fs.readFileSync(sourcePath, 'utf8');
 
       expect(
