@@ -153,12 +153,14 @@ services:
     depends_on:
       wrapper:
         condition: service_started
-    ports:
-      - "3001:3000"
     # Real PWA entry: serves static/index.html + /api/pwa/* routes.
+    # Port 3011 (host) chosen because 3001 is occupied by rana-portal.
+    # Tailscale Funnel proxies Funnel URL /* → harness-frontend:3011.
     command: ["node", "build/orchestrator/pwa_server.js"]
     mem_limit: 384m
     memswap_limit: 384m
+    ports:
+      - "3011:3000"
 
 networks:
   harness_net:
