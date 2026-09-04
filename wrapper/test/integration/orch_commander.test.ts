@@ -67,7 +67,7 @@ describe.skipIf(SKIP_E2E)('orchestrator ↔ commander integration (v1.2.0a)', ()
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
     _resetTracker();
   });
 

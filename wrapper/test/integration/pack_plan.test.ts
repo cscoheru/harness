@@ -54,7 +54,7 @@ describe.skipIf(SKIP_E2E)('PackPlan DAG topology (v1.2.0a)', () => {
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   // ── 1. PackStep shape validation ────────────────────────────────────────
