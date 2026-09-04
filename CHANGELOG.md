@@ -90,6 +90,90 @@ Cross-ref: [notes/codex-audit-scope-v1.1.1-v0.7-precommit.md](notes/codex-audit-
 
 ---
 
+## [1.2.0a] - 2026-09-04
+
+v1.2.0a cycle scope — 3 层 dispatch 架构 commander 真实现 + workflow_pack 真实现 + dispatch 走 commander. v1.2 周期第一 sub-cycle（commander/worker 真实现 + 多机 LB + 防 OOM 大周期第 1 刀；v1.2.0b/c/d 排队中）.
+
+Cross-ref: [notes/codex-audit-scope-v1.2.0a-v0.1.md](notes/codex-audit-scope-v1.2.0a-v0.1.md) (v0.1 守门：§4.10 NEW commander 真实现守门 [TODO(M1) in commander.ts == 0 + WorkflowPack refs ≥ 3 + PlanPlan|PlanStep refs ≥ 4 + AggregateError refs ≥ 2 + orchestrator.ts 真走 commander ≥ 3 + workflow_pack.ts + workflow_packs/default.json file exists + loadManifest ≥ 1 + heuristic ≥ 2 + version="1.2.0a" ≥ 1 + plan_steps/plan_source ≥ 2 + 集成测试 gated ≥ 2 + 单测增量 ≥ 25] + §2.5 NEW wrapper/orchestrator/ API key 守门 + §4.8 NEW wrapper/orchestrator/ PROJECT_ROOT 守门 + §5 17 文件 hygiene 自检表 + §7 v1.2.0a NEW 教训记档) + [notes/codex-audit-scope-v1.2.0a-v0.1-prompt.md](notes/codex-audit-scope-v1.2.0a-v0.1-prompt.md) (v1.2.0a Codex 复审 prompt + 13 hygiene checklist + 6 处引用式机制落地验证).
+
+### Added
+
+- **commander.ts 真实现** (`wrapper/orchestrator/commander.ts`, REWRITE ~250 行, 4 函数 stub → real):
+  - `planStep(task)` → 调 `workflow_pack.plan(task)` 拿 PackPlan + 跟踪 steps 到内部 Map (`_stepTracker: Map<taskId, PlanStep[]>`)
+  - `dispatchStep(taskId, stepName)` → 分配 synthetic worker_id `stub-worker-${taskId}-${stepName}` + 更新 PlanStep status="dispatched"（v1.2.0a STUB 简化版, v1.2.0b 接 worker.run() 真实现）
+  - `aggregateResults(taskId)` → 收集所有 step 状态拼装 OrchestrationResult 含 `completed_steps`/`failed_steps`/`pending_steps` 三态字段
+  - `health()` → 返回 `{status, version: "1.2.0a", active_plans, total_steps, kernel_reachable, error}` (周期版本号标记)
+  - + test helpers `_recordStepResult` / `_recordStepFailure` / `_trackerSnapshot` / `_resetTracker`
+  - **stub 标志清零**：TODO(M1) in commander.ts = 0（v1.1.1 4 函数 stub 全消）
+- **workflow_pack.ts NEW** (`wrapper/orchestrator/workflow_pack.ts`, ~270 行, 真实现):
+  - `loadManifest(packName)` → 读 `workflow_packs/<name>.json` + 校验；unknown pack 返回 synthetic default
+  - `plan(task)` → 调 dsh with commander profile (60s timeout, model=`deepseek-v4-flash`) + `PLAN_JSON_RE` regex parser 提取 JSON step DAG + **catch dsh 错误时回退 1-step heuristic plan** (不依赖 DEEPSEEK_API_KEY, unit test 友好)
+  - `build(packName)` → 返回 WorkflowPack interface 对象含 manifest cache
+  - heuristic plan 字段: `{name: 'default-execute', capability: 'execute', input_ref: 'task.input_blob_id', output_kind: 'text', depends_on: [], timeout_seconds: 300}`
+- **types.ts 三契约** (`wrapper/orchestrator/types.ts`, Edit):
+  - `interface PlanStep extends PackStep` + `status: TaskStatus` + `worker_id: string | null` + `started_at: string | null` + `finished_at: string | null` + `result: Record<string, unknown> | null` + `error: string | null` 6 字段
+  - `interface PlanPlan {steps: readonly PlanStep[]; plan_metadata: Record<string, unknown>}`
+  - `class AggregateError extends Error` + `task_id: string` + `failed_steps: readonly string[]` + `partial_output: Record<string, unknown> | null` 字段
+- **orchestrator.ts 真走 commander** (`wrapper/orchestrator/orchestrator.ts`, Edit):
+  - `dispatch()` 加 commander.planStep(task) + commander.dispatchStep(taskId, step.name) × N + commander.aggregateResults(taskId) 三函数调链
+  - output 加 `plan_steps` (number) + `plan_source` (string, e.g. "heuristic" / "dsh") 字段
+  - 保留 backward-compat kernel + dsh 调用（不破坏现有调用方）
+- **workflow_packs/default.json** (`workflow_packs/default.json`, NEW):
+  - `{name: 'default', version: '1.0.0', description: 'Default workflow pack — single-step executor for general-purpose tasks. v1.2.0a NEW...', required_capabilities: ['read_local'], optional_capabilities: ['execute', 'write_local'], input_schema_ref: 'workflow_packs/schemas/default.input.json', output_kind: 'text'}`
+- **27 NEW 单测 + 2 NEW 集成测试 gated**:
+  - `wrapper/test/unit/commander.test.ts` (REWRITE 15 tests: health shape + active_plans + planStep heuristic + dispatchStep worker_id + aggregateResults AggregateError + _recordStepResult + _recordStepFailure)
+  - `wrapper/test/unit/workflow_pack.test.ts` (NEW 12 tests: loadManifest default + 合成 fallback + plan heuristic + step naming + capability 继承 + build() WorkflowPack interface + manifest cache)
+  - `wrapper/test/unit/orchestrator.test.ts` (Edit cleanup: 移除无效 `process.env` 行)
+  - `wrapper/test/unit/server.test.ts` (Edit cleanup: 移除 `process.env` + `describe.skip('GET * (SPA fallback)')') + TODO comment)
+  - `wrapper/test/integration/orch_commander.test.ts` (NEW ~150 行, 7 tests gated by `RUN_ORCH_COMMANDER_E2E=1`: dispatch → planStep → dispatchStep → aggregateResults e2e with mock dsh)
+  - `wrapper/test/integration/pack_plan.test.ts` (NEW ~150 行, 8 tests gated by `RUN_PACK_PLAN_E2E=1`: PackPlan DAG 拓扑 + depends_on 解析 + heuristic 1-step plan + build() WorkflowPack interface + manifest cache)
+- **wrapper/test/setup.ts env var hoist-safe 修法** (`wrapper/test/setup.ts`, Edit):
+  - 增加 `HARNESS_RUNTIME_URL=http://127.0.0.1:1` 默认值
+  - vitest `setupFiles: ['./test/setup.ts']` 在所有 test file 加载前执行
+  - 解决 ESM imports hoist 问题（orchestrator.ts KERNEL_URL 常量捕获 env 在 import 时已生效）
+
+### Hygiene 守门 v0.7 锚定维持 + v1.2.0a §4.10 NEW 守门启用
+
+- **§1 不锁型号 grep**：tracked = 117 / 49 文件 (v0.7 维持; v1.2.0a 不动 docs/adr/spec/capabilities/) + disk = 128 (tracked 117 + 本文件自伤实测 11) + 前向交付物 grep = 0 + wrapper/orchestrator/ grep = 0 (NEW §1 守门)
+- **§2 不硬编码 API key**：DEEPSEEK_API_KEY 字面 = 0 + VAPID 私钥字面 = 0 + Tailscale auth key 字面 = 0 + wrapper/orchestrator/ API key grep = 0 (NEW §2.5 守门)
+- **§3 v1.0 runtime 0 行 diff**：harness/spec/spikes/9 ADR/Dockerfile/docker-compose/pyproject = 0
+- **§4 dsh headless profile**：web profile = 0 + headless profile = 19 (v0.7 维持) + heuristic 字面 + plan_metadata.source='heuristic' 设值 (NEW §4 守门)
+- **§4.5 多 host**：IP 锁 = 0 + ts.net ≥ 6 + Funnel URL ≥ 6 + sleep infinity = 0 + harness-edge ≥ 5 + tag:harness-edge ≥ 1 (v0.7 §4.5.7 维持)
+- **§4.6 STT**：音频留盘 = 0 + 临时目录 = 0 + Whisper 模型路径合规 (v0.7 维持)
+- **§4.7 Web Push**：VAPID 私钥 = 0 + signVapidJwt ≥ 2 + dsaEncoding ≥ 1 + createSign ≥ 1 + server.ts 8 endpoint = 8 (v0.7 维持)
+- **§4.8 PROJECT_ROOT 路径修法**：4 dsh 文件 `import.meta.url` ≥ 4 + 残留 `process.cwd() + '..'` = 0 + **wrapper/orchestrator/workflow_pack.ts ≥ 1 (NEW §4.8 守门)**
+- **§4.9 dsh binary install**：DSH_VERSION 强校验 + set -euo pipefail + npm 版本 pin + @latest = 0 + GitHub URL 硬编码 = 0 (v0.7 维持)
+- **§4.10 commander 真实现守门 (v1.2.0a NEW)**：TODO(M1) in commander.ts = 0 + WorkflowPack refs = 3 + PlanPlan|PlanStep refs = 10 + AggregateError refs = 5 + orchestrator.ts 真走 commander ≥ 3 + workflow_pack.ts + workflow_packs/default.json file exists + loadManifest ≥ 1 + heuristic ≥ 2 + version="1.2.0a" ≥ 1 + plan_steps/plan_source ≥ 2 + 集成测试 gated ≥ 2 + 单测增量 ≥ 25 (起草实测 27 = commander 15 + workflow_pack 12)
+
+### 实测
+
+- `cd wrapper && ./node_modules/.bin/tsc --noEmit` → exit 0
+- `cd wrapper && ./node_modules/.bin/vitest run` → **146 passed | 96 skipped (242)** (含 27 NEW commander/workflow_pack unit tests; 15 gated integration tests skipped)
+- Hygiene §1-§4.10 全过 (per docs/poll/cc-ready.json `T-V1.2.0A-COMMANDER-PASS`)
+
+### Pending user (9 EXEC items per plan §7)
+
+- U1: TypeScript build on newvps — `ssh puer-hk 'cd /opt/fish-harness/wrapper && ./node_modules/.bin/tsc'`
+- U2: 双 gate 验证 — `ssh puer-hk 'cd /opt/fish-harness/wrapper && ./node_modules/.bin/tsc --noEmit && ./node_modules/.bin/vitest run'`
+- U3: docker compose 重启 (v1.2.0a 范围 — 不动 deploy; 仅重启 wrapper 容器)
+- U4: 真机 E2E 套件真调 — `RUN_ORCH_COMMANDER_E2E=1 RUN_PACK_PLAN_E2E=1 DEEPSEEK_API_KEY=<key> ssh puer-hk 'cd /opt/fish-harness/wrapper && ./node_modules/.bin/vitest run test/integration/{orch_commander,pack_plan}.test.ts'`
+- U5: 4 Funnel URL 路径 200 验证 (per sub-cycle — v1.2.0a 加 `/api/v1/commander/health`)
+- U6: Codex v1.2.0a formal 复审 — user 亲提 `npx codex review --model gpt-5.6-sol --reasoning-effort xhigh notes/codex-audit-scope-v1.2.0a-v0.1-prompt.md` (预期 0C/0M/0m + §4.10 commander 真实现守门全绿)
+- U7: v1.2.0a minor tag — `git tag -a v1.2.0a -m "v1.2.0a: commander 真实现 + workflow_pack 真实现 + dispatch 走 commander + 集成测试 gated" && git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin v1.2.0a`
+- U8: MacBook worker 真部署 (仅 v1.2.0c — v1.2.0a 不触发)
+- U9: 5 edge host 真 provision (仅 v1.2.0c — v1.2.0a 仅起草)
+
+### NEXT v1.2.0b sub-cycle (worker 真实现 + heartbeat 真接 worker + SQLite WorkerPool registry)
+
+- worker.ts 8 函数 stub → real (capability / run / interrupt / heartbeat / register / drain / getTaskStatus / health)
+- worker_pool.ts NEW ~150 行 (SQLite-backed registry per ADR 0007 WorkerInfo schema)
+- execution_driver.ts NEW ~180 行 (dsh subprocess spawn + interrupt + heartbeat during long run)
+- server.ts handleWorkerHeartbeat 真接 worker.heartbeat() (替换当前 stub `{status:"ok"}`)
+- 集成验证 worker_pool e2e + server_heartbeat HTTP test
+- 8-14 文件 + 2-3 commits + 5-7 user EXEC + 3-5 天 (per plan §3)
+
+---
+
 ## [1.1.0-M1c] - 2026-09-02
 
 M1c 阶段 — TypeScript wrapper 三档 profile 收口 + vitest 稳定化 + Codex formal PASS + iPhone Safari Funnel E2E 实测.

@@ -21,7 +21,8 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
-import { resolve } from 'path';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { callDshHeadless } from '../dsh/dsh_client.js';
 import type {
   PackManifest,
@@ -33,9 +34,25 @@ import type {
 
 // ─── Config ────────────────────────────────────────────────────────────────────
 
-/** Directory containing workflow pack manifests (JSON files). */
+/**
+ * Directory containing workflow pack manifests (JSON files).
+ *
+ * Resolution order (v1.2.0a review M2 fix — matches the v0.7 §4.8
+ * import.meta.url pattern used by the 4 dsh files, cwd-independent):
+ *   1. WORKFLOW_PACKS_DIR env var (explicit override, e.g. compose)
+ *   2. <project root>/workflow_packs derived from THIS FILE's location
+ *      (wrapper/orchestrator/ → ../../workflow_packs), which stays correct
+ *      regardless of process.cwd() — container working_dir, vitest, or src/build.
+ *
+ * Previously this was `resolve('workflow_packs')` (cwd-relative): inside the
+ * container (working_dir=/app/wrapper) that resolves to
+ * /app/wrapper/workflow_packs (nonexistent) → loadManifest silently fell back
+ * to the synthetic default manifest on every call, so
+ * workflow_packs/default.json was never actually loaded in production.
+ */
 const PACKS_DIR = resolve(
-  process.env['WORKFLOW_PACKS_DIR'] ?? 'workflow_packs',
+  process.env['WORKFLOW_PACKS_DIR'] ??
+    resolve(dirname(fileURLToPath(import.meta.url)), '../../workflow_packs'),
 );
 
 /** Default timeout for dsh plan generation (commander profile: 60s). */
