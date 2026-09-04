@@ -16,3 +16,11 @@ const envLocal = resolve(process.cwd(), '..', '.env.local');
 if (existsSync(envLocal)) {
   config({ path: envLocal, override: false });
 }
+
+// T-V1.2.0A-TEST-FIX: Point orchestrator.health() kernel probe at a dead port
+// for unit tests so it falls through to the stub response. (Local port 8000
+// may be bound by an unrelated process returning non-HealthResponse JSON.)
+// Integration tests with real kernel probe should override via .env.local.
+if (!process.env['HARNESS_RUNTIME_URL']) {
+  process.env['HARNESS_RUNTIME_URL'] = 'http://127.0.0.1:1';
+}

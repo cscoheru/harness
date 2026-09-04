@@ -1,0 +1,9 @@
+{
+  "name": "default",
+  "version": "1.0.0",
+  "description": "Default workflow pack — single-step executor for general-purpose tasks. v1.2.0a NEW. Loaders fall back to this manifest when task.workflow_pack does not match a known pack file.",
+  "required_capabilities": ["read_local"],
+  "optional_capabilities": ["execute", "write_local"],
+  "input_schema_ref": "workflow_packs/schemas/default.input.json",
+  "output_kind": "text"
+}

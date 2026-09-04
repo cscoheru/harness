@@ -379,6 +379,56 @@ export interface OrchestrationResult {
   error: string | null;
 }
 
+// ─── v1.2.0a NEW: Commander-side plan enrichment ──────────────────────────────
+
+/**
+ * PlanStep — PackStep enriched with commander-side lifecycle state.
+ * Inherits PackStep fields (name / capability / input_ref / output_kind /
+ * depends_on / timeout_seconds) and adds status / worker_id / timing / result.
+ */
+export interface PlanStep extends PackStep {
+  status: TaskStatus;
+  worker_id: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  result: Record<string, unknown> | null;
+  error: string | null;
+}
+
+/**
+ * PlanPlan — commander-side plan returned by commander.planStep().
+ * Wraps a list of enriched PlanSteps + plan-level metadata (source: dsh vs
+ * heuristic fallback, manifest version, etc.).
+ */
+export interface PlanPlan {
+  steps: readonly PlanStep[];
+  plan_metadata: Record<string, unknown>;
+}
+
+/**
+ * AggregateError — thrown by commander.aggregateResults() when one or more
+ * steps failed but the task can still return a partial result.
+ * Caller may inspect failed_steps and partial_output to decide retry policy.
+ */
+export class AggregateError extends Error {
+  public readonly task_id: string;
+  public readonly failed_steps: readonly string[];
+  public readonly partial_output: Record<string, unknown> | null;
+
+  constructor(
+    task_id: string,
+    failed_steps: readonly string[],
+    partial_output: Record<string, unknown> | null,
+    message: string,
+  ) {
+    super(message);
+    this.name = "AggregateError";
+    this.task_id = task_id;
+    this.failed_steps = failed_steps;
+    this.partial_output = partial_output;
+  }
+}
+
 // ─── PWA Dispatch Contract ─────────────────────────────────────────────────────
 
 /** PWA form → orchestrator: POST /api/pwa/dispatch */

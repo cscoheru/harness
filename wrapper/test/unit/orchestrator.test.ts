@@ -45,6 +45,10 @@ vi.mock('../../dsh/dsh_client', () => ({
   }),
 }));
 
+// T-V1.2.0A-TEST-FIX: HARNESS_RUNTIME_URL set to http://127.0.0.1:1 via test/setup.ts
+// (loaded before this file by vitest) so orchestrator.health() falls through to
+// its stub response. Local port 8000 may be bound by an unrelated process.
+
 import {
   health,
   dispatch,

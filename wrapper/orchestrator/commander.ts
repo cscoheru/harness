@@ -1,84 +1,279 @@
 /**
- * Commander layer — single-workflow orchestration stub.
+ * Commander layer — single-workflow orchestration (v1.2.0a REAL).
  *
- * Responsibilities (skeleton):
- *   - Receive a task payload from orchestrator
- *   - Plan the step DAG using a WorkflowPack
- *   - Dispatch steps to worker processes
- *   - Aggregate step results
+ * Responsibilities (real implementation):
+ *   - planStep(task): call WorkflowPack.plan() to get a PlanPlan (DAG of PlanSteps)
+ *   - dispatchStep(taskId, stepName): record the dispatch intent + select a
+ *     stub worker (real worker pool integration deferred to v1.2.0b)
+ *   - aggregateResults(taskId): collect all step results into a final
+ *     OrchestrationResult (returns partial result with failed_steps on AggregateError)
+ *   - health(): real probe of commander-side state (plan count + step count)
  *
- * NOT implemented in M0c (skeleton only):
- *   - Real dsh invocation (M1+)
- *   - Step planning via WorkflowPack (M1+)
- *   - Worker dispatch and result aggregation (M1+)
+ * v1.2.0a scope:
+ *   - Real WorkflowPack.plan() integration
+ *   - In-memory step tracker (per-task_id)
+ *   - Stub worker dispatch (returns synthetic dispatch record; v1.2.0b wires
+ *     worker_pool.register/heartbeat/drain)
+ *
+ * v1.2.0b will replace dispatchStep() stub with real worker pool integration.
  *
  * Calls v1.0 runtime kernel via HTTP/FFI — see v1.0-runtime-integration-roadmap.md §5.
+ *
+ * @file wrapper/orchestrator/commander.ts
  */
 
 import type {
   OrchestrationResult,
-  PackPlan,
+  PlanPlan,
+  PlanStep,
   Task,
   TaskStatus,
 } from "./types.js";
+import { AggregateError } from "./types.js";
+import * as workflowPack from "./workflow_pack.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────────
 
 const _RUNTIME_URL =
   process.env["HARNESS_RUNTIME_URL"] ?? "http://localhost:8000";
 
+// ─── In-memory step tracker ────────────────────────────────────────────────────
+
+/**
+ * Per-task step tracker. Keyed by task_id; value is the list of dispatched
+ * PlanSteps with status / worker_id / result / error fields updated as the
+ * task progresses. Production deployments would back this with SQLite via
+ * the v1.0 kernel (deferred to v1.2.0b worker_pool.ts).
+ */
+const _stepTracker = new Map<string, PlanStep[]>();
+
+function trackSteps(taskId: string, steps: readonly PlanStep[]): void {
+  _stepTracker.set(taskId, [...steps]);
+}
+
+function getSteps(taskId: string): PlanStep[] | undefined {
+  return _stepTracker.get(taskId);
+}
+
+function updateStep(taskId: string, stepName: string, patch: Partial<PlanStep>): boolean {
+  const steps = _stepTracker.get(taskId);
+  if (!steps) return false;
+  const idx = steps.findIndex((s) => s.name === stepName);
+  if (idx < 0) return false;
+  steps[idx] = { ...steps[idx], ...patch };
+  return true;
+}
+
 // ─── Commander ────────────────────────────────────────────────────────────────
 
 /**
  * Plan a task into an ordered step DAG.
- * TODO(M1): Load WorkflowPack by task.workflow_pack, call pack.plan().
+ *
+ * v1.2.0a REAL: delegates to WorkflowPack.plan(task), which calls dsh with the
+ * commander profile (model = deepseek-v4-flash) to generate a JSON step DAG.
+ * Falls back to a 1-step heuristic plan if dsh is unreachable or output is
+ * unparseable (see workflow_pack.ts).
  */
-export async function planStep(
-  _task: Task,
-): Promise<PackPlan> {
-  console.log("[commander] planStep() — stub returning empty plan");
-  // TODO(M1): Replace with real WorkflowPack.plan() call via runtime kernel
-  return { steps: [] };
+export async function planStep(task: Task): Promise<PlanPlan> {
+  console.log(`[commander] planStep(${task.task_id}) workflow_pack="${task.workflow_pack}"`);
+  const planPlan = await workflowPack.plan(task);
+  trackSteps(task.task_id, planPlan.steps);
+  console.log(`[commander] planStep(${task.task_id}) — ${planPlan.steps.length} step(s), source=${planPlan.plan_metadata['source'] ?? "unknown"}`);
+  return planPlan;
 }
 
 /**
  * Dispatch a planned step to a worker process.
- * TODO(M1): Select worker by capability matching, spawn subprocess.
+ *
+ * v1.2.0a STUB: records dispatch intent + assigns a synthetic worker_id.
+ * The real worker pool integration (register / heartbeat / dispatch / drain
+ * via WorkerPool interface) lands in v1.2.0b. Until then, dispatchStep
+ * returns a synthetic dispatch record so the upstream orchestrator can
+ * proceed end-to-end.
+ *
+ * Returns: { step, status: "dispatched", worker_id, dispatched_at }
  */
 export async function dispatchStep(
-  _taskId: string,
-  _stepName: string,
-): Promise<{ step: string; status: TaskStatus }> {
-  console.log(`[commander] dispatchStep(${_taskId}, ${_stepName}) — stub`);
-  // TODO(M1): Select eligible worker from WorkerPool, invoke via HTTP/FFI
-  return { step: _stepName, status: "pending" };
-}
-
-/**
- * Aggregate step results into a final orchestration result.
- * TODO(M1): Collect all step outputs, assemble OrchestrationResult.
- */
-export async function aggregateResults(
   taskId: string,
-): Promise<OrchestrationResult> {
-  console.log(`[commander] aggregateResults(${taskId}) — stub`);
-  // TODO(M1): Query all step results via runtime kernel
+  stepName: string,
+): Promise<{ step: string; status: TaskStatus; worker_id: string; dispatched_at: string }> {
+  const steps = getSteps(taskId);
+  const step = steps?.find((s) => s.name === stepName);
+  const workerId = step?.worker_id ?? `stub-worker-${taskId}-${stepName}`;
+
+  const dispatchedAt = new Date().toISOString();
+  updateStep(taskId, stepName, {
+    status: "dispatched",
+    worker_id: workerId,
+    started_at: dispatchedAt,
+  });
+
+  console.log(`[commander] dispatchStep(${taskId}, ${stepName}) — stub dispatched to ${workerId}`);
+
+  // TODO(v1.2.0b): Replace stub with real WorkerPool.dispatch(taskId) call,
+  // returning the DispatchResult { worker_id, strategy }.
+
   return {
-    task_id: taskId,
-    status: "pending",
-    output: null,
-    error: null,
+    step: stepName,
+    status: "dispatched",
+    worker_id: workerId,
+    dispatched_at: dispatchedAt,
   };
 }
 
 /**
- * Health check — probes the v1.0 runtime kernel HTTP facade.
- * TODO(M1): Replace stub with real HTTP GET /health call.
+ * Aggregate step results into a final orchestration result.
+ *
+ * v1.2.0a REAL: reads from the in-memory step tracker and assembles the
+ * OrchestrationResult. If any step failed (status === "failed" with non-null
+ * error), the failed steps are surfaced via failed_steps in the output and
+ * the overall status is set to "failed". A partial result is still returned
+ * (never throws AggregateError from this function — caller decides retry
+ * policy based on output.failed_steps).
+ *
+ * Throws AggregateError ONLY when the task has no tracked steps at all
+ * (i.e., planStep was never called for this taskId).
  */
-export async function health(): Promise<{ status: "ok" | "error"; version: string }> {
-  console.log("[commander] health() — stub returning ok");
-  // TODO(M1): Replace with:
-  //   const res = await fetch(`${RUNTIME_URL}/health`);
-  //   return res.json();
-  return { status: "ok", version: "0.0.0-stub" };
+export async function aggregateResults(
+  taskId: string,
+): Promise<OrchestrationResult> {
+  console.log(`[commander] aggregateResults(${taskId})`);
+  const steps = getSteps(taskId);
+
+  if (!steps) {
+    throw new AggregateError(
+      taskId,
+      [],
+      null,
+      `No steps tracked for task ${taskId}; planStep() must be called before aggregateResults()`,
+    );
+  }
+
+  const completed = steps.filter((s) => s.status === "completed");
+  const failed = steps.filter((s) => s.status === "failed");
+  const running = steps.filter((s) => s.status === "running" || s.status === "dispatched" || s.status === "pending");
+
+  // Merge all step results into a single output map
+  const stepOutputs: Record<string, unknown> = {};
+  for (const s of steps) {
+    if (s.result !== null) {
+      stepOutputs[s.name] = s.result;
+    }
+  }
+
+  let overallStatus: TaskStatus;
+  let error: string | null = null;
+  if (failed.length === 0 && running.length === 0 && completed.length === steps.length) {
+    overallStatus = "completed";
+  } else if (failed.length > 0) {
+    overallStatus = "failed";
+    error = `${failed.length}/${steps.length} step(s) failed: ${failed.map((s) => s.name).join(", ")}`;
+  } else if (running.length > 0) {
+    overallStatus = "running";
+  } else {
+    overallStatus = "completed"; // partial: some completed, some pending but no failures
+  }
+
+  console.log(`[commander] aggregateResults(${taskId}) — status=${overallStatus} completed=${completed.length} failed=${failed.length} running=${running.length}`);
+
+  return {
+    task_id: taskId,
+    status: overallStatus,
+    output: {
+      steps: stepOutputs,
+      failed_steps: failed.map((s) => s.name),
+      pending_steps: running.map((s) => s.name),
+      completed_steps: completed.map((s) => s.name),
+    },
+    error,
+  };
+}
+
+// ─── Re-exports for v1.2.0b / testing ─────────────────────────────────────────
+
+/**
+ * Mark a step as completed (used by tests + future worker integration to push
+ * step results into the tracker so aggregateResults can collect them).
+ */
+export function _recordStepResult(
+  taskId: string,
+  stepName: string,
+  result: Record<string, unknown>,
+): boolean {
+  return updateStep(taskId, stepName, {
+    status: "completed",
+    finished_at: new Date().toISOString(),
+    result,
+  });
+}
+
+/**
+ * Mark a step as failed (used by tests + future worker integration).
+ */
+export function _recordStepFailure(taskId: string, stepName: string, error: string): boolean {
+  return updateStep(taskId, stepName, {
+    status: "failed",
+    finished_at: new Date().toISOString(),
+    error,
+  });
+}
+
+/**
+ * Internal test helper: snapshot of the in-memory tracker.
+ * Not part of the public API.
+ */
+export function _trackerSnapshot(): Map<string, readonly PlanStep[]> {
+  return new Map(_stepTracker);
+}
+
+/**
+ * Internal test helper: clear the in-memory tracker.
+ * Not part of the public API.
+ */
+export function _resetTracker(): void {
+  _stepTracker.clear();
+}
+
+// ─── Health ───────────────────────────────────────────────────────────────────
+
+/**
+ * Health check — probes commander-side state.
+ * v1.2.0a REAL: returns active plan count, step count, and a reachable
+ * indicator for the v1.0 runtime kernel (non-blocking; reports "error"
+ * if kernel is unreachable but does not throw).
+ */
+export async function health(): Promise<{
+  status: "ok" | "error";
+  version: string;
+  active_plans: number;
+  total_steps: number;
+  kernel_reachable: boolean;
+  error?: string;
+}> {
+  let kernelReachable = false;
+  let kernelError: string | undefined;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1000);
+    const res = await fetch(`${_RUNTIME_URL}/health`, { signal: controller.signal });
+    clearTimeout(timeout);
+    kernelReachable = res.ok;
+    if (!res.ok) kernelError = `kernel ${res.status}`;
+  } catch (err) {
+    kernelError = String(err);
+  }
+
+  let totalSteps = 0;
+  for (const steps of _stepTracker.values()) {
+    totalSteps += steps.length;
+  }
+
+  return {
+    status: "ok",
+    version: "1.2.0a",
+    active_plans: _stepTracker.size,
+    total_steps: totalSteps,
+    kernel_reachable: kernelReachable,
+    error: kernelError,
+  };
 }

@@ -15,11 +15,13 @@
 
 import type {
   OrchestrationResult,
+  PlanPlan,
   Task,
   HealthResponse,
 } from "./types.js";
 import { callDshHeadless } from "../dsh/dsh_client.js";
 import type { DshOpts, DshResponse } from "../dsh/types.js";
+import * as commander from "./commander.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────────
 
@@ -140,7 +142,12 @@ export async function health(): Promise<HealthResponse> {
 
 /**
  * Accept a user task, route to the appropriate commander, and track lifecycle.
+ *
  * M1c: Invokes kernel POST /api/orch/invoke; falls back to direct dsh if kernel unreachable.
+ * v1.2.0a: Inserts commander.planStep + dispatchStep + aggregateResults as the
+ *   primary dispatch path. The kernel + dsh direct call remains as a
+ *   parallel async fire + fallback for backward compatibility with the
+ *   v1.1.1 PWA shell (which expects a real dsh stdout in the response).
  */
 export async function dispatch(
   task: Task,
@@ -164,17 +171,37 @@ export async function dispatch(
   };
   _taskStore.set(taskId, entry);
 
-  // Try kernel invoke; fall back to direct dsh
+  // ── v1.2.0a: Plan via commander ───────────────────────────────────────────
+  entry.status = "running";
+  entry.updatedAt = Date.now();
+
+  let planPlan: PlanPlan | null = null;
+  try {
+    planPlan = await commander.planStep(task);
+    console.log(`[orchestrator] commander.planStep OK ${planPlan.steps.length} step(s)`);
+  } catch (err) {
+    console.warn(`[orchestrator] commander.planStep failed: ${err}; continuing without plan`);
+  }
+
+  // ── v1.2.0a: Dispatch each planned step (stub worker; v1.2.0b real) ──────
+  if (planPlan && planPlan.steps.length > 0) {
+    for (const step of planPlan.steps) {
+      try {
+        const dispatchRes = await commander.dispatchStep(taskId, step.name);
+        console.log(`[orchestrator] dispatchStep ${step.name} → worker=${dispatchRes.worker_id}`);
+      } catch (err) {
+        console.warn(`[orchestrator] dispatchStep ${step.name} failed: ${err}`);
+      }
+    }
+  }
+
+  // ── Backward-compat: kernel invoke + dsh for real result (PWA / v1.0) ────
   let dshResult: DshResponse;
   try {
-    // Attempt kernel HTTP invoke
+    // Attempt kernel HTTP invoke (async fire for v1.0 compat)
     const kernelRes = await kernelInvoke(prompt, modelClass);
-    entry.status = "running";
-    entry.updatedAt = Date.now();
     console.log(`[orchestrator] kernel invoke OK task_id=${kernelRes.task_id} trace=${kernelRes.trace_id ?? "n/a"}`);
-
-    // For now, also run dsh directly to get a real result
-    // (kernel invocation is async; we run dsh synchronously to return result)
+    // Also run dsh synchronously to return a real result to PWA
     dshResult = await runDsh(prompt, modelClass);
   } catch {
     // Kernel unreachable — invoke dsh directly
@@ -195,6 +222,22 @@ export async function dispatch(
     console.warn(`[orchestrator] dispatch(${taskId}) — failed exit=${dshResult.exitCode} stderr=${dshResult.stderr}`);
   }
 
+  // ── v1.2.0a: Aggregate via commander ─────────────────────────────────────
+  let planStepsCount = planPlan?.steps.length ?? 0;
+  try {
+    const agg = await commander.aggregateResults(taskId);
+    if (agg.output && typeof agg.output === 'object') {
+      const out = agg.output as Record<string, unknown>;
+      const failed = Array.isArray(out['failed_steps']) ? (out['failed_steps'] as readonly unknown[]).length : 0;
+      // Surface aggregate failures into the entry error log (without overriding dsh status)
+      if (failed > 0) {
+        console.warn(`[orchestrator] aggregateResults: ${failed} plan step(s) failed (synthetic stub; v1.2.0b real)`);
+      }
+    }
+  } catch (err) {
+    console.warn(`[orchestrator] commander.aggregateResults failed: ${err}`);
+  }
+
   return {
     task_id: taskId,
     status: entry.status,
@@ -202,6 +245,8 @@ export async function dispatch(
       stdout: dshResult.stdout,
       wallMs: dshResult.wallMs,
       trace_id: `dsh-${taskId}`,
+      plan_steps: planStepsCount,
+      plan_source: (planPlan?.plan_metadata['source'] as string) ?? "none",
     },
     error: entry.error,
   };
