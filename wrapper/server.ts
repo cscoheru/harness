@@ -51,6 +51,28 @@ const __dirname = dirname(__filename);
 const WRAPPER_PORT = process.env['WRAPPER_PORT'] ?? '3000';
 
 // ---------------------------------------------------------------------------
+// Route registration helper
+// ---------------------------------------------------------------------------
+// Tailscale Serve `--set-path=/api/v1` semantically exposes the backend at the
+// `/api/v1` path prefix on the public Funnel URL, but STRIPS that prefix
+// before forwarding. So `https://funnel/api/v1/status/test` reaches the wrapper
+// as `GET /status/test`, NOT `GET /api/v1/status/test`.
+//
+// To support BOTH access modes from one server (direct curl :3010/api/v1/...
+// AND Funnel access with prefix stripping), each API route is registered at
+// both paths. Direct access still hits the conventional `/api/v1/*` paths;
+// Funnel access hits the same handlers at the stripped paths.
+type RouteHandler = (req: express.Request, res: express.Response) => void | Promise<void>;
+function registerApiRoute(method: 'get' | 'post', apiPath: string, handler: RouteHandler): void {
+  app[method](apiPath, handler);
+  // Strip the `/api/v1` prefix to get the Funnel-routed path.
+  const strippedPath = apiPath.replace(/^\/api\/v1/, '');
+  if (strippedPath !== apiPath && strippedPath.length > 0) {
+    app[method](strippedPath, handler);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Express app
 // ---------------------------------------------------------------------------
 
@@ -68,7 +90,7 @@ app.get('/health', async (_req, res) => {
 });
 
 // POST /api/v1/tasks — accept task, dispatch through orchestrator
-app.post('/api/v1/tasks', async (req, res) => {
+const handlePostTasks: RouteHandler = async (req, res) => {
   try {
     const body = req.body as { prompt?: unknown; workflowPack?: unknown };
     if (!body || typeof body.prompt !== 'string' || body.prompt.length === 0) {
@@ -97,20 +119,22 @@ app.post('/api/v1/tasks', async (req, res) => {
   } catch (err) {
     res.status(500).json({ status: 'error', error: String(err) });
   }
-});
+};
+registerApiRoute('post', '/api/v1/tasks', handlePostTasks);
 
 // GET /api/v1/status/test — inline connectivity check
 // MUST be registered BEFORE /api/v1/status/:task_id so the literal "test"
 // segment does not get captured as a task_id (Express matches routes in
 // registration order).
-app.get('/api/v1/status/test', (_req, res) => {
+const handleStatusTest: RouteHandler = (_req, res) => {
   res.json({ status: 'ok', test: true, ts: new Date().toISOString() });
-});
+};
+registerApiRoute('get', '/api/v1/status/test', handleStatusTest);
 
 // GET /api/v1/status/:task_id — query task status (in-memory store + kernel fallback)
-app.get('/api/v1/status/:task_id', async (req, res) => {
+const handleStatusById: RouteHandler = async (req, res) => {
   try {
-    const taskId = req.params['task_id'];
+    const taskId = req.params['task_id'] as string | undefined;
     if (!taskId) {
       res.status(400).json({ status: 'error', error: 'task_id required' });
       return;
@@ -124,15 +148,17 @@ app.get('/api/v1/status/:task_id', async (req, res) => {
   } catch (err) {
     res.status(500).json({ status: 'error', error: String(err) });
   }
-});
+};
+registerApiRoute('get', '/api/v1/status/:task_id', handleStatusById);
 
 // POST /api/v1/worker/heartbeat — stub (worker.ts M1+ skeleton; v1.2.0+ real impl)
-app.post('/api/v1/worker/heartbeat', (_req, res) => {
+const handleWorkerHeartbeat: RouteHandler = (_req, res) => {
   res.json({ status: 'ok', heartbeat: true });
-});
+};
+registerApiRoute('post', '/api/v1/worker/heartbeat', handleWorkerHeartbeat);
 
 // POST /api/v1/push/subscribe — single-subscription web push delivery
-app.post('/api/v1/push/subscribe', async (req, res) => {
+const handlePushSubscribe: RouteHandler = async (req, res) => {
   try {
     const body = req.body as { subscription?: PushSubscription; payload?: PushPayload };
     if (!body || !body.subscription || !body.payload) {
@@ -144,7 +170,8 @@ app.post('/api/v1/push/subscribe', async (req, res) => {
   } catch (err) {
     res.status(500).json({ status: 'error', error: String(err) });
   }
-});
+};
+registerApiRoute('post', '/api/v1/push/subscribe', handlePushSubscribe);
 
 // POST /api/stt/transcribe — STT worker (whisper.cpp + /dev/shm)
 // stt module is dynamically imported to defer its WHISPER_MODEL_PATH check
