@@ -9,18 +9,29 @@
 #   - Add Funnel ingress on ports 4001-4005 (one per edge host)
 #   - Cross-host routing rule: tag:harness (newvps) ↔ tag:harness-edge
 #
+# v1.1.1 FIX (vs M0c tag a0b25fa9, after web console validation 2026-09-04):
+#   - Identity format: klyliae → klyliae@gmail.com (Tailscale requires user@domain)
+#   - Removed redundant "SSH to harness" rule (rule 1's *:* already covers it,
+#     and bare tag in acls[].dst without port was a schema violation)
+#   - Removed bare hostname "harness-newvps" from src (use tag:harness instead;
+#     Tailscale ACL doesn't accept device hostnames as identities)
+#   - Port wildcard: tag:harness:*,* → tag:harness:* (single * per Tailscale spec;
+#     "*,*" was being parsed as port range with invalid first integer "*")
+#   - Removed explicit deny rule (Tailscale uses default-deny model;
+#     "action: deny" returned "is not supported" schema error)
+#
 # Device tags (assigned via `tailscale set --advertise-tags` on each host):
 #   tag:harness       — newvps host (kernel + wrapper + stt + web-push)
 #   tag:harness-edge  — edge hosts (wrapper orchestrator only)
 #   tag:admin         — owner device (full access)
 #
 # ACL structure:
-#   - user identity (klyliae) + tag:admin can access everything
+#   - user identity (klyliae@gmail.com) + tag:admin can access everything
 #   - newvps host serves HTTPS on 443 and internal 3000/4000-4002/8000/8080/8081
 #   - 5 edge hosts serve HTTPS on 443 and internal 4001
 #   - tag:harness (newvps) ↔ tag:harness-edge: cross-host routing allowed
 #   - All internal traffic within newvps allowed (kernel ↔ wrapper ↔ stt ↔ push)
-#   - Explicit deny all other traffic
+#   - All other traffic denied by default (Tailscale ACL default-deny model)
 #
 # PRD-v1.1 §4.1: Tailscale-only — no Basic Auth, no public HTTPS.
 # NORTH-STAR §7: Tailscale identity replaces Basic Auth.
@@ -31,21 +42,14 @@
     # Owner/admin full access to everything
     {
       "action": "accept",
-      "src": ["tag:admin", "klyliae"],
+      "src": ["tag:admin", "klyliae@gmail.com"],
       "dst": ["tag:harness:443,3000,4000,4001,4002,8000,8080,8081", "tag:harness-edge:443,4001", "*:*"]
-    },
-
-    # Owner can SSH to newvps host and any edge host
-    {
-      "action": "accept",
-      "src": ["tag:admin", "klyliae"],
-      "dst": ["tag:harness", "tag:harness-edge"]
     },
 
     # newvps host can serve on Tailscale ports (443 + internal 3000/4000-4002/8000/8080/8081)
     {
       "action": "accept",
-      "src": ["harness-newvps", "tag:harness"],
+      "src": ["tag:harness"],
       "dst": ["*:*"]
     },
 
@@ -69,28 +73,21 @@
     {
       "action": "accept",
       "src": ["tag:harness"],
-      "dst": ["tag:harness:*,*"]
-    },
-
-    # Explicit deny from public internet (belt-and-suspenders)
-    {
-      "action": "deny",
-      "src": ["*"],
-      "dst": ["*"]
+      "dst": ["tag:harness:*"]
     }
   ],
 
   "tagOwners": {
-    "tag:harness":      ["klyliae"],
-    "tag:harness-edge": ["klyliae"],
-    "tag:admin":        ["klyliae"]
+    "tag:harness":      ["klyliae@gmail.com"],
+    "tag:harness-edge": ["klyliae@gmail.com"],
+    "tag:admin":        ["klyliae@gmail.com"]
   },
 
   # SSH access for owner/admin
   "ssh": [
     {
       "action": "accept",
-      "src": ["tag:admin", "klyliae"],
+      "src": ["tag:admin", "klyliae@gmail.com"],
       "dst": ["tag:harness", "tag:harness-edge"],
       "users": ["ubuntu", "root"]
     }
