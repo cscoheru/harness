@@ -15,7 +15,7 @@
 #   tag:admin         — owner device (full access)
 #
 # ACL structure:
-#   - user identity (cscoheru) + tag:admin can access everything
+#   - user identity (klyliae) + tag:admin can access everything
 #   - newvps host serves HTTPS on 443 and internal 3000/4000-4002/8000/8080/8081
 #   - 5 edge hosts serve HTTPS on 443 and internal 4001
 #   - tag:harness (newvps) ↔ tag:harness-edge: cross-host routing allowed
@@ -31,14 +31,14 @@
     # Owner/admin full access to everything
     {
       "action": "accept",
-      "src": ["tag:admin", "cscoheru"],
+      "src": ["tag:admin", "klyliae"],
       "dst": ["tag:harness:443,3000,4000,4001,4002,8000,8080,8081", "tag:harness-edge:443,4001", "*:*"]
     },
 
     # Owner can SSH to newvps host and any edge host
     {
       "action": "accept",
-      "src": ["tag:admin", "cscoheru"],
+      "src": ["tag:admin", "klyliae"],
       "dst": ["tag:harness", "tag:harness-edge"]
     },
 
@@ -81,16 +81,16 @@
   ],
 
   "tagOwners": {
-    "tag:harness":      ["cscoheru"],
-    "tag:harness-edge": ["cscoheru"],
-    "tag:admin":        ["cscoheru"]
+    "tag:harness":      ["klyliae"],
+    "tag:harness-edge": ["klyliae"],
+    "tag:admin":        ["klyliae"]
   },
 
   # SSH access for owner/admin
   "ssh": [
     {
       "action": "accept",
-      "src": ["tag:admin", "cscoheru"],
+      "src": ["tag:admin", "klyliae"],
       "dst": ["tag:harness", "tag:harness-edge"],
       "users": ["ubuntu", "root"]
     }
