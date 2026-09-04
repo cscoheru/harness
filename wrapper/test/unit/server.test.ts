@@ -24,6 +24,17 @@ import { createServer, type Server } from 'http';
 // test/setup.ts (loaded before this file by vitest) so the wrapper's GET /health
 // handler (which calls orchestrator.health()) falls through to its stub response.
 
+// v1.2.0a review fix (M3, per audit-scope §7-2): unit tests must exercise the
+// deterministic heuristic plan path, NOT a real dsh spawn. When the developer
+// shell exports DEEPSEEK_API_KEY, POST /api/v1/tasks would otherwise fire a real
+// callDshHeadless (commander profile, 60s timeout) that can hang past the 30s
+// test timeout (flaky 1-failure observed on machines with dsh installed).
+// Deleting the key here (module body runs before any test) makes
+// WorkflowPack.plan() short-circuit to the heuristic 1-step plan → fast 200.
+// Real-key dsh planning stays covered by the gated integration tests
+// (orch_commander / pack_plan, RUN_*_E2E + explicit env injection).
+delete process.env['DEEPSEEK_API_KEY'];
+
 import { app, WRAPPER_PORT } from '../../server.js';
 
 // ─── Ephemeral server ─────────────────────────────────────────────────────────

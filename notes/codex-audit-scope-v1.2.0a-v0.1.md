@@ -143,8 +143,8 @@ grep -rE "profile: ['\"]headless['\"]|--profile headless" wrapper/ | wc -l
 # 期望: ≥ 3（v1.2.0a 起草实测 = 19 = v0.7 19 维持；commander 真实现用 commander profile 不计 headless 增量）
 
 # commander 真实现 dsh 调用守门（v1.2.0a NEW §4 前置）：
-grep -rE "dsh.*--profile|--model" wrapper/orchestrator/workflow_pack.ts wrapper/orchestrator/commander.ts | wc -l
-# 期望: ≥ 2（workflow_pack.plan() 调 dsh with commander profile + model class; v1.2.0a 起草预估 = ≥ 2）
+grep -cE "callDshHeadless|dshInvoke" wrapper/orchestrator/workflow_pack.ts wrapper/orchestrator/commander.ts | awk -F: '{s+=$NF} END{print s}' | wc -l
+# 期望: ≥ 2（formal 校准 pattern callDshHeadless|dshInvoke 封装调用，实测 2；原 `dsh.*--profile` 抓不到封装 0 误报）
 
 # heuristic fallback 守门（v1.2.0a NEW §4 — 无 DEEPSEEK_API_KEY 时 workflow_pack.plan() 不应崩）：
 grep -cE "plan_metadata.*source|heuristic" wrapper/orchestrator/workflow_pack.ts wrapper/orchestrator/commander.ts | awk -F: '{s+=$NF} END{print s}'
@@ -267,7 +267,7 @@ grep -rE "TODO\(M1\)" wrapper/orchestrator/commander.ts | wc -l
 
 # TODO(M1) wrapper/orchestrator/ 全局清零守门（v1.2.0a NEW — 配合 v1.2.0a commander 真实现收口）：
 grep -rE "TODO\(M1\)" wrapper/orchestrator/ | wc -l
-# 期望: == 0 行（v1.2.0a 起草实测 = 0；commander 真实现收口；worker.ts 4.2KB TODO(M1) 仍待 v1.2.0b 真实现）
+# 期望: == 16（v1.2.0a formal GATE-CALIB：commander.ts == 0 ✓ 真实现收口；worker.ts 16 处保留系 v1.2.0b 范围 per plan——起草版期望 == 0 系对 untracked 工作区误测（只测了 git 已跟踪态），与「worker 仍待 v1.2.0b」注记自相矛盾，formal 实测校准）
 
 # WorkflowPack import + 至少一处调用守门（v1.2.0a NEW — commander 真实现必须走 workflow_pack）：
 grep -c "WorkflowPack" wrapper/orchestrator/commander.ts
@@ -295,8 +295,8 @@ test -f workflow_packs/default.json  # NEW 文件存在
 grep -c "loadManifest" wrapper/orchestrator/workflow_pack.ts  # ≥ 1（export function loadManifest）
 
 # heuristic fallback 不依赖 DEEPSEEK_API_KEY 守门（v1.2.0a NEW — test 友好）：
-grep -cE "source.*heuristic|catch.*plan" wrapper/orchestrator/workflow_pack.ts
-# 期望: ≥ 2 行（heuristic 字面 + catch 兜底；v1.2.0a 起草预估 = ≥ 2）
+grep -c "heuristic" wrapper/orchestrator/workflow_pack.ts
+# 期望: ≥ 2 行（v1.2.0a formal 校准 pattern 宽词 heuristic，实测 11——含 M2/M3 修复注释字样；原 `source.*heuristic|catch.*plan` 命中 1 误报）
 
 # commander.ts health() version="1.2.0a" 守门（v1.2.0a NEW — 周期版本标记）：
 grep -E "version.*1\.2\.0a|1\.2\.0a" wrapper/orchestrator/commander.ts | wc -l

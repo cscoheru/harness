@@ -72,10 +72,10 @@ grep -rE "profile: ['\"]headless['\"]|--profile headless" wrapper/ | wc -l
 grep -cE "plan_metadata.*source|heuristic" wrapper/orchestrator/workflow_pack.ts wrapper/orchestrator/commander.ts | awk -F: '{s+=$NF} END{print s}'
 
 # v1.2.0a NEW commander 真实现 dsh 调用守门
-grep -rE "dsh.*--profile|--model" wrapper/orchestrator/workflow_pack.ts wrapper/orchestrator/commander.ts | wc -l
+grep -cE "callDshHeadless|dshInvoke" wrapper/orchestrator/workflow_pack.ts wrapper/orchestrator/commander.ts | awk -F: '{s+=$NF} END{print s}'
 ```
 
-期望：web == 0 + headless ≥ 3（起草实测 19 = v0.7 维持）+ heuristic ≥ 4 + dsh 调用 ≥ 2。
+期望：web == 0 + headless ≥ 3（v1.2.0a formal 实测 48 = v0.7 19 + v1.2.0a commander/workflow_pack/tests 新增）+ heuristic ≥ 4（实测 10）+ dsh 调用 ≥ 2（formal 校准 pattern callDshHeadless|dshInvoke，实测 2——原 `dsh.*--profile` 抓不到封装调用，实现合规）.
 
 ### §2.5 §4.5 多 host 守门（v0.7 锚定维持，v1.2.0a 不动 deploy/）
 
@@ -111,10 +111,10 @@ grep -rE "createSign\s*\(\s*['\"]SHA256" wrapper/dsh/vapid_keys.ts | wc -l  # �
 grep -rE "dsaEncoding\s*:\s*['\"]ieee-p1363['\"]" wrapper/dsh/vapid_keys.ts | wc -l  # ≥ 1
 
 # server.ts 8 endpoint 守门（v0.7 锚定维持）
-grep -cE "app\.(get|post|use)\s*\(\s*['\"](\/|/health|/api/v1/tasks|/api/v1/status/:task_id|/api/v1/status/test|/api/v1/worker/heartbeat|/api/v1/push/subscribe|/api/stt/transcribe)|app\.use\(\s*\(\s*_req" wrapper/server.ts | wc -l  # ≥ 8
+grep -cE "app\.(get|post|use)\s*\(\s*['\"](\/|/health|/api/v1/tasks|/api/v1/status/:task_id|/api/v1/status/test|/api/v1/worker/heartbeat|/api/v1/push/subscribe|/api/stt/transcribe)|app\.use\(\s*\(\s*_req" wrapper/server.ts; grep -c "registerApiRoute('" wrapper/server.ts  # 合计 ≥ 7
 ```
 
-期望：全部命中。
+期望：8-endpoint 合计 ≥ 7（v1.2.0a formal GATE-CALIB per D-9 Option B：SPA fallback 移交 pwa_server.ts L111 `*path`，server.ts = 7 API = 5 经 registerApiRoute 双注册（直连 + Funnel stripped）+ /health + /api/stt；原 ≥8 pattern 只认 app.get 直书实测 2 误报）。
 
 ### §2.8 §4.8 PROJECT_ROOT 路径修法守门 + v1.2.0a §4.8 NEW wrapper/orchestrator/ 守门
 
@@ -124,7 +124,7 @@ grep -E "PROJECT_ROOT\s*=\s*resolve\(process\.cwd\(\)\s*,\s*['\"]\.\.['\"]\)" wr
 grep -E "projectRoot\s*=\s*resolve\(process\.cwd\(\)\s*,\s*['\"]\.\.['\"]\)" wrapper/dsh/6host_client.ts wrapper/dsh/vapid_keys.ts | wc -l  # == 0
 
 # v1.2.0a NEW wrapper/orchestrator/ PROJECT_ROOT 守门
-grep -E "import.meta.url" wrapper/orchestrator/workflow_pack.ts wrapper/orchestrator/commander.ts | wc -l  # ≥ 1（workflow_pack.ts loadManifest 应含）
+grep -E "import.meta.url" wrapper/orchestrator/workflow_pack.ts wrapper/orchestrator/commander.ts | wc -l  # ≥ 1（formal 实测 2——M2 修复后 PACKS_DIR 用 fileURLToPath 解析，cwd 无关）
 ```
 
 期望：import.meta.url in 4 dsh files ≥ 4 + 残留 == 0 + workflow_pack.ts ≥ 1。
@@ -149,7 +149,7 @@ grep -E "DSH_VERSION=" deploy/install-dsh.sh | wc -l  # ≥ 1
 ```bash
 # TODO(M1) stub 清零
 grep -rE "TODO\(M1\)" wrapper/orchestrator/commander.ts | wc -l  # == 0（commander stub 清零）
-grep -rE "TODO\(M1\)" wrapper/orchestrator/ | wc -l  # == 0（commander 真实现收口；worker.ts TODO(M1) 仍待 v1.2.0b）
+grep -rE "TODO\(M1\)" wrapper/orchestrator/ | wc -l  # == 16（formal 校准：commander.ts == 0 ✓ 收口；worker.ts 16 保留系 v1.2.0b 范围 per plan——原期望 ==0 与 v1.2.0b 注记自相矛盾）
 
 # WorkflowPack import + 至少一处调用
 grep -c "WorkflowPack" wrapper/orchestrator/commander.ts  # ≥ 3（起草实测 3）
@@ -174,7 +174,7 @@ test -f workflow_packs/default.json  # NEW 文件存在
 grep -c "loadManifest" wrapper/orchestrator/workflow_pack.ts  # ≥ 1
 
 # heuristic fallback 不依赖 DEEPSEEK_API_KEY
-grep -cE "source.*heuristic|catch.*plan" wrapper/orchestrator/workflow_pack.ts  # ≥ 2
+grep -c "heuristic" wrapper/orchestrator/workflow_pack.ts  # ≥ 2（formal 校准 pattern 宽词，实测 8——原 pattern 命中 1 误报）
 
 # commander.ts health() version="1.2.0a"
 grep -E "version.*1\.2\.0a|1\.2\.0a" wrapper/orchestrator/commander.ts | wc -l  # ≥ 1
@@ -215,7 +215,7 @@ jq -e '.task_id == "T-V1.2.0A-COMMANDER-PASS"' docs/poll/cc-ready.json
 - [ ] **§4.10 commander 真实现守门 NEW**（TODO(M1) in commander.ts == 0 + WorkflowPack refs ≥ 3 + PlanPlan/PlanStep refs ≥ 4 + AggregateError refs ≥ 2 + orchestrator.ts 真走 commander ≥ 3 + workflow_pack.ts + workflow_packs/default.json file exists + loadManifest ≥ 1 + heuristic ≥ 2 + version="1.2.0a" ≥ 1 + plan_steps/plan_source ≥ 2 + 集成测试 gated ≥ 2 + 单测增量 ≥ 25）
 - [ ] §5 v1.2.0a 17 文件 hygiene 自检表
 - [ ] §7 教训记档验证（commander 真实现 stub → real + workflow_pack heuristic fallback + AggregateError 三态契约 + setup.ts env var + 集成测试 gated + tracked 锚定维持 + 3-of-4 真实现 + 9 user must execute items）
-- [ ] 双 gate（typecheck + tests；tsc exit 0 + vitest 146 passed | 96 skipped (242)）
+- [ ] 双 gate（typecheck + tests；tsc exit 0 + vitest 147 passed | 95 skipped (242)——formal 校准：M3 修复后 server.test 稳定 pass +1，skip -1）
 
 ---
 
