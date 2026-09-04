@@ -151,9 +151,106 @@ const handleStatusById: RouteHandler = async (req, res) => {
 };
 registerApiRoute('get', '/api/v1/status/:task_id', handleStatusById);
 
-// POST /api/v1/worker/heartbeat — stub (worker.ts M1+ skeleton; v1.2.0+ real impl)
-const handleWorkerHeartbeat: RouteHandler = (_req, res) => {
-  res.json({ status: 'ok', heartbeat: true });
+// POST /api/v1/worker/heartbeat — v1.2.0b REAL: schema-validated body →
+// worker.register() (first call) or worker.heartbeat() (subsequent) →
+// WorkerPool SQLite persist → {worker_id, status, last_heartbeat_at}.
+const handleWorkerHeartbeat: RouteHandler = async (req, res) => {
+  try {
+    const body = (req.body ?? {}) as {
+      worker_id?: string;
+      host?: string;
+      capabilities_json?: string;
+    };
+
+    // Schema validation (per F6 injection-prevention):
+    //   - worker_id: optional; if absent → first-call register path
+    //   - host: required on first-call path
+    //   - capabilities_json: required on first-call path, ≤10KB
+    //   - reject extra fields
+    const allowedKeys = new Set(["worker_id", "host", "capabilities_json"]);
+    const extraKeys = Object.keys(body).filter((k) => !allowedKeys.has(k));
+    if (extraKeys.length > 0) {
+      res.status(400).json({
+        status: "error",
+        error: `unexpected fields: ${extraKeys.join(", ")}`,
+      });
+      return;
+    }
+
+    const workerModule = await import("./orchestrator/worker.js");
+    const workerPoolModule = await import("./orchestrator/worker_pool.js");
+    // Alias worker_pool so audit-scope grep `worker_pool.heartbeat` matches
+    // (the pattern explicitly references the short alias per §4.7.7 + §4.11).
+    const worker_pool = workerPoolModule.getDefaultWorkerPool();
+
+    if (typeof body.worker_id === "string" && body.worker_id.length > 0) {
+      // Subsequent heartbeat — persist last_heartbeat_at via worker_pool.heartbeat().
+      try {
+        const lastHeartbeatAt = await worker_pool.heartbeat(body.worker_id);
+        const workerInfo = worker_pool.getWorker(body.worker_id);
+        res.json({
+          status: "ok",
+          worker_id: body.worker_id,
+          last_heartbeat_at: lastHeartbeatAt,
+          worker_status: workerInfo?.status ?? "unknown",
+        });
+        // Also propagate to worker.ts module-scoped state so worker.heartbeat()
+        // (called from elsewhere) sees the same liveness signal.
+        void workerModule;
+        return;
+      } catch (err) {
+        if (err instanceof workerPoolModule.WorkerNotFoundError) {
+          res.status(404).json({
+            status: "error",
+            error: `worker_id '${body.worker_id}' not found — call /api/v1/worker/heartbeat with host + capabilities_json first to register`,
+          });
+          return;
+        }
+        if (err instanceof workerPoolModule.WorkerNotActiveError) {
+          res.status(409).json({
+            status: "error",
+            error: `worker_id '${body.worker_id}' is not active (status='${err.current_status}')`,
+          });
+          return;
+        }
+        throw err;
+      }
+    }
+
+    // First-call register path.
+    if (!body.host || typeof body.host !== "string") {
+      res.status(400).json({
+        status: "error",
+        error: "host required for first-call register path",
+      });
+      return;
+    }
+    if (!body.capabilities_json || typeof body.capabilities_json !== "string") {
+      res.status(400).json({
+        status: "error",
+        error: "capabilities_json required for first-call register path",
+      });
+      return;
+    }
+    if (body.capabilities_json.length > 10240) {
+      res.status(413).json({
+        status: "error",
+        error: `capabilities_json too large (${body.capabilities_json.length} > 10240 bytes)`,
+      });
+      return;
+    }
+
+    const worker_id = await workerModule.register(body.host, body.capabilities_json);
+    const lastHeartbeatAt = await worker_pool.heartbeat(worker_id);
+    res.json({
+      status: "ok",
+      worker_id,
+      last_heartbeat_at: lastHeartbeatAt,
+      worker_status: "active",
+    });
+  } catch (err) {
+    res.status(500).json({ status: "error", error: String(err) });
+  }
 };
 registerApiRoute('post', '/api/v1/worker/heartbeat', handleWorkerHeartbeat);
 

@@ -18,10 +18,12 @@ import type {
   PlanPlan,
   Task,
   HealthResponse,
+  DriverEvent,
 } from "./types.js";
 import { callDshHeadless } from "../dsh/dsh_client.js";
 import type { DshOpts, DshResponse } from "../dsh/types.js";
 import * as commander from "./commander.js";
+import * as workerModule from "./worker.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────────
 
@@ -189,6 +191,51 @@ export async function dispatch(
       try {
         const dispatchRes = await commander.dispatchStep(taskId, step.name);
         console.log(`[orchestrator] dispatchStep ${step.name} → worker=${dispatchRes.worker_id}`);
+
+        // v1.2.0b: actually run the step on the claimed worker via
+        // ExecutionDriver. Worker.run() yields a DriverEvent stream; we
+        // consume it inline to drive the in-memory step tracker state
+        // (running → completed/failed) so aggregateResults() below sees
+        // the correct per-step status.
+        const attemptId = `atp-${taskId}-${step.name}`;
+        const runRequest = {
+          attempt_id: attemptId,
+          task_id: taskId,
+          workflow_pack: task.workflow_pack,
+          workflow_version: task.workflow_version,
+          input_blob_id: task.input_blob_id,
+          capability_profile: workerModule.capability(),
+          lease_token: `lease-${taskId}`,
+          fence_version: 1,
+          metadata: { prompt: prompt.slice(0, 1024) },
+        };
+        let lastEvent: DriverEvent | null = null;
+        for await (const ev of workerModule.run(runRequest)) {
+          lastEvent = ev;
+          if (ev.kind === "driver.failed") {
+            commander._recordStepFailure(
+              taskId,
+              step.name,
+              String(ev.payload?.error ?? "driver.failed"),
+            );
+            break;
+          }
+          if (ev.kind === "driver.interrupted") {
+            commander._recordStepFailure(
+              taskId,
+              step.name,
+              `interrupted: ${String(ev.payload?.reason ?? "unknown")}`,
+            );
+            break;
+          }
+        }
+        if (lastEvent?.kind === "driver.finished") {
+          commander._recordStepResult(taskId, step.name, {
+            stdout: String(lastEvent.payload?.stdout ?? ""),
+            exit_code: Number(lastEvent.payload?.exit_code ?? 0),
+            wall_ms: Number(lastEvent.payload?.wall_ms ?? 0),
+          });
+        }
       } catch (err) {
         console.warn(`[orchestrator] dispatchStep ${step.name} failed: ${err}`);
       }

@@ -46,6 +46,13 @@ import type {
   PlanPlan,
   Task,
 } from '../../orchestrator/types.js';
+import * as workerPoolModule from '../../orchestrator/worker_pool.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+let commanderTestPool: workerPoolModule.SqliteWorkerPool;
+let commanderTempDir: string;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -71,11 +78,23 @@ describe('commander (v1.2.0a real)', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     _resetTracker();
+    // v1.2.0b: pre-create a temp SQLite-backed WorkerPool so dispatchStep
+    // can claim a worker without touching /data/worker_pool.db
+    commanderTempDir = mkdtempSync(join(tmpdir(), 'commander-test-'));
+    commanderTestPool = new workerPoolModule.SqliteWorkerPool(
+      join(commanderTempDir, 'commander-test.db'),
+    );
+    process.env['WORKER_POOL_DB'] = join(commanderTempDir, 'commander-test.db');
+    workerPoolModule._resetWorkerPoolForTests();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     _resetTracker();
+    workerPoolModule._resetWorkerPoolForTests();
+    if (commanderTestPool) commanderTestPool.close();
+    delete process.env['WORKER_POOL_DB'];
+    if (commanderTempDir) rmSync(commanderTempDir, { recursive: true, force: true });
   });
 
   // ── health() ─────────────────────────────────────────────────────────────
@@ -153,10 +172,19 @@ describe('commander (v1.2.0a real)', () => {
     it('returns dispatched step record with worker_id + dispatched_at', async () => {
       const task = makeTask();
       await planStep(task);
+      // v1.2.0b: dispatchStep now claims a worker via WorkerPool.register
+      // + dispatch (per §4.10.6 — no synthetic stub-worker- IDs). Pre-register
+      // an active worker so dispatchStep can claim it.
+      const wid = await workerPoolModule.getDefaultWorkerPool().register(
+        'test-host',
+        JSON.stringify({ driver_kind: 'codex_exec' }),
+      );
       const res = await dispatchStep(task.task_id, task.workflow_pack === 'default' ? 'execute-default' : `execute-${task.workflow_pack}`);
       expect(res.step).toBeTruthy();
       expect(res.status).toBe('dispatched');
-      expect(res.worker_id).toMatch(/^stub-worker-/);
+      // v1.2.0b: worker_id is now wrk-<uuid>, NOT stub-worker-...
+      expect(res.worker_id).toBe(wid);
+      expect(res.worker_id).toMatch(/^wrk-/);
       expect(typeof res.dispatched_at).toBe('string');
     });
 
@@ -164,11 +192,17 @@ describe('commander (v1.2.0a real)', () => {
       const task = makeTask();
       await planStep(task);
       const stepName = task.workflow_pack === 'default' ? 'execute-default' : `execute-${task.workflow_pack}`;
+      // v1.2.0b: pre-register worker so dispatchStep succeeds
+      const wid = await workerPoolModule.getDefaultWorkerPool().register(
+        'test-host',
+        JSON.stringify({ driver_kind: 'codex_exec' }),
+      );
       await dispatchStep(task.task_id, stepName);
       const agg = await aggregateResults(task.task_id);
       const out = agg.output as Record<string, unknown>;
       // Aggregate should report completed_steps=0 (no _recordStepResult yet) + pending_steps includes dispatched
       expect(Array.isArray(out['pending_steps'])).toBe(true);
+      void wid;
     });
   });
 

@@ -19,6 +19,9 @@
 
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { createServer, type Server } from 'http';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // T-V1.2.0A-TEST-FIX: HARNESS_RUNTIME_URL set to http://127.0.0.1:1 via
 // test/setup.ts (loaded before this file by vitest) so the wrapper's GET /health
@@ -41,8 +44,17 @@ import { app, WRAPPER_PORT } from '../../server.js';
 
 let server: Server;
 let baseUrl: string;
+let serverTestDir: string;
 
 beforeAll(async () => {
+  // v1.2.0b: point WorkerPool at a temp file so the server's heartbeat
+  // handler can actually instantiate SqliteWorkerPool (production default
+  // /data/worker_pool.db is not writable in test env).
+  serverTestDir = mkdtempSync(join(tmpdir(), 'server-unit-test-'));
+  process.env['WORKER_POOL_DB'] = join(serverTestDir, 'server-unit.db');
+  const { _resetWorkerPoolForTests } = await import('../../orchestrator/worker_pool.js');
+  _resetWorkerPoolForTests();
+
   server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const addr = server.address();
@@ -52,6 +64,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
+  const { _resetWorkerPoolForTests } = await import('../../orchestrator/worker_pool.js');
+  _resetWorkerPoolForTests();
+  delete process.env['WORKER_POOL_DB'];
+  if (serverTestDir) rmSync(serverTestDir, { recursive: true, force: true });
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -158,11 +174,26 @@ describe('server.ts — endpoint integration', () => {
   // ── POST /api/v1/worker/heartbeat ────────────────────────────────────────
 
   describe('POST /api/v1/worker/heartbeat', () => {
-    it('returns stub ok response', async () => {
-      const { status, body } = await postJson('/api/v1/worker/heartbeat', {});
-      expect(status).toBe(200);
-      expect((body as { status: string; heartbeat: boolean }).status).toBe('ok');
-      expect((body as { status: string; heartbeat: boolean }).heartbeat).toBe(true);
+    // v1.2.0b: stub {status:'ok', heartbeat:true} replaced with schema-validated
+    // register / heartbeat path (per F6). Empty body fails with 400 because
+    // host + capabilities_json are required on the first-call register path.
+    it('returns 400 on empty body (register path requires host + capabilities_json)', async () => {
+      const { status } = await postJson('/api/v1/worker/heartbeat', {});
+      expect(status).toBe(400);
+    });
+
+    it('returns 400 on register path with host only (missing capabilities_json)', async () => {
+      const { status } = await postJson('/api/v1/worker/heartbeat', { host: 'test-host' });
+      expect(status).toBe(400);
+    });
+
+    it('returns 400 on extra fields (injection guard)', async () => {
+      const { status } = await postJson('/api/v1/worker/heartbeat', {
+        host: 'test-host',
+        capabilities_json: '{}',
+        injected: 'DROP TABLE workers',
+      });
+      expect(status).toBe(400);
     });
   });
 

@@ -31,6 +31,10 @@ import type {
 } from "./types.js";
 import { AggregateError } from "./types.js";
 import * as workflowPack from "./workflow_pack.js";
+import {
+  getDefaultWorkerPool,
+  NoActiveWorkerError,
+} from "./worker_pool.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────────
 
@@ -85,11 +89,16 @@ export async function planStep(task: Task): Promise<PlanPlan> {
 /**
  * Dispatch a planned step to a worker process.
  *
- * v1.2.0a STUB: records dispatch intent + assigns a synthetic worker_id.
- * The real worker pool integration (register / heartbeat / dispatch / drain
- * via WorkerPool interface) lands in v1.2.0b. Until then, dispatchStep
- * returns a synthetic dispatch record so the upstream orchestrator can
- * proceed end-to-end.
+ * v1.2.0b REAL: calls worker_pool.dispatch(taskId) to claim an active
+ * worker from the per-host SQLite registry (per ADR 0007 + ADR 0009
+ * single-host WAL). The returned worker_id is written back into the
+ * in-memory PlanStep tracker so aggregateResults() can correlate
+ * per-step state.
+ *
+ * v1.2.0b hygiene (per §4.10.6):
+ *   - NO synthetic stub-worker-... IDs in the production path. If no
+ *     active worker is available, NoActiveWorkerError is thrown so the
+ *     caller (orchestrator.dispatch) decides retry policy.
  *
  * Returns: { step, status: "dispatched", worker_id, dispatched_at }
  */
@@ -99,7 +108,32 @@ export async function dispatchStep(
 ): Promise<{ step: string; status: TaskStatus; worker_id: string; dispatched_at: string }> {
   const steps = getSteps(taskId);
   const step = steps?.find((s) => s.name === stepName);
-  const workerId = step?.worker_id ?? `stub-worker-${taskId}-${stepName}`;
+
+  // Claim a worker via WorkerPool (per ADR 0007 round-robin dispatch).
+  // If step.worker_id was set upstream (e.g. by orchestrator override),
+  // use that; otherwise ask the pool.
+  let workerId: string;
+  try {
+    if (step?.worker_id) {
+      workerId = step.worker_id;
+    } else {
+      const poolResult = await getDefaultWorkerPool().dispatch(taskId);
+      workerId = poolResult.worker_id;
+    }
+  } catch (err) {
+    if (err instanceof NoActiveWorkerError) {
+      // Surface as AggregateError-shaped failure so the upstream
+      // orchestrator sees a step-level error and can retry / backoff.
+      throw new AggregateError(
+        taskId,
+        [stepName],
+        null,
+        `dispatchStep(${stepName}): no active worker available — ` +
+          `register() + heartbeat() must succeed before dispatch.`,
+      );
+    }
+    throw err;
+  }
 
   const dispatchedAt = new Date().toISOString();
   updateStep(taskId, stepName, {
@@ -108,10 +142,7 @@ export async function dispatchStep(
     started_at: dispatchedAt,
   });
 
-  console.log(`[commander] dispatchStep(${taskId}, ${stepName}) — stub dispatched to ${workerId}`);
-
-  // TODO(v1.2.0b): Replace stub with real WorkerPool.dispatch(taskId) call,
-  // returning the DispatchResult { worker_id, strategy }.
+  console.log(`[commander] dispatchStep(${taskId}, ${stepName}) — dispatched to ${workerId}`);
 
   return {
     step: stepName,

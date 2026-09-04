@@ -42,6 +42,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# v1.2.0b (per F2 + audit-scope §4.11): pre-install build tools so a future
+# wrapper image build (better-sqlite3 native compile via npm install) can run
+# in this base. Currently the wrapper image is NOT built from this Dockerfile
+# (wrapper deploys via bind mount in deploy/6host-compose.newvps.yml using
+# node:22-alpine directly), but the build tools are here as a defensive
+# guard for the eventual unified wrapper image. node-gyp requires
+# python3 + make + g++ on alpine.
+RUN apk add --no-cache python3 make g++
+
 # Order matters: setuptools' packages.find resolves at install time, so
 # harness/ MUST be present BEFORE `pip install .` runs. Splitting COPY
 # into two steps lets the install layer (everything above this line)
