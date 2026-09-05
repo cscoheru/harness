@@ -455,3 +455,34 @@ export interface StatusResponse {
   error?: string;
   wallMs?: number;
 }
+
+// ─── v1.2.0d NEW: Queue backpressure types (per D8 + F26) ──────────────────
+
+/** QueueOverflowError — thrown when queue exceeds max_in_flight (per D8 + F26). */
+export class QueueOverflowError extends Error {
+  public readonly task_id: string;
+  public readonly retry_after_seconds: number;
+
+  constructor(task_id: string, retry_after_seconds: number = 30) {
+    super(
+      `queue_store: queue overflow for task_id='${task_id}'; retry after ${retry_after_seconds}s`,
+    );
+    this.name = "QueueOverflowError";
+    this.task_id = task_id;
+    this.retry_after_seconds = retry_after_seconds;
+  }
+}
+
+/** QueueAcceptedResult — returned when task lands in SQLite overflow queue (per F26). */
+export interface QueueAcceptedResult {
+  task_id: string;
+  status: "accepted";
+  location: string; // /api/v1/status/{task_id} for client polling
+}
+
+/** QueueThrottledResult — returned when 429 Retry-After emitted (per F26). */
+export interface QueueThrottledResult {
+  task_id: string;
+  status: "throttled";
+  retry_after: number; // seconds
+}

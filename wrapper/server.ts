@@ -282,6 +282,28 @@ const handleCommanderHealth: RouteHandler = async (_req, res) => {
 };
 registerApiRoute("get", "/api/v1/commander/health", handleCommanderHealth);
 
+// GET /metrics — v1.2.0d NEW: Prometheus scrape endpoint (per D9 + F25 + F28).
+// Per Tailscale ACL §4.16 hygiene gate, this endpoint is intended to be reached
+// only from inside the tailnet (100.64.0.0/8) by the Prometheus server.
+// We do NOT bind to 0.0.0.0 — Express listens on 0.0.0.0 by default but the
+// Tailnet ACL limits which peers can route to this port at the network layer.
+// content-type per Prometheus exposition format spec (v0.0.4).
+const handleMetrics: RouteHandler = async (_req, res) => {
+  try {
+    const { renderMetrics, startMetricsSampling } = await import(
+      "./orchestrator/metrics.js"
+    );
+    // Lazy-start the 15s RSS sampler on first scrape (idempotent)
+    startMetricsSampling();
+    const text = await renderMetrics();
+    res.set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+    res.send(text);
+  } catch (err) {
+    res.status(500).json({ status: "error", error: `metrics render failed: ${String(err)}` });
+  }
+};
+registerApiRoute("get", "/metrics", handleMetrics);
+
 // POST /api/v1/push/subscribe — single-subscription web push delivery
 const handlePushSubscribe: RouteHandler = async (req, res) => {
   try {

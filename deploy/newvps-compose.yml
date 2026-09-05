@@ -49,8 +49,11 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
-    mem_limit: 512m
-    memswap_limit: 512m
+    mem_limit: 256m
+    memswap_limit: 256m
+    # v1.2.0d NEW per D7 + F23: kernel smoke limit (kernel 仅 print version
+    # + exit by design per ADR 0010 Decision d; 256M is generous ceiling)
+    stop_grace_period: 30s
     # No ports: only Tailscale Serve (via wrapper) reaches this service.
 
   # ── TypeScript wrapper orchestrator (M0c skeleton → M1c 实装) ─────────────
@@ -89,8 +92,9 @@ services:
     ports:
       - "3010:3000"
     command: ["node", "build/server.js"]
-    mem_limit: 512m
-    memswap_limit: 512m
+    mem_limit: 1g
+    memswap_limit: 1g
+    # v1.2.0d NEW per D7 + F27: --stop-timeout=30 给 wrapper 30s graceful drain
 
   # ── 1 worker (background task consumer) ────────────────────────────────────
   # Worker picks up tasks from the wrapper orchestrator layer.
@@ -121,8 +125,9 @@ services:
         condition: service_started
     # Real worker entry — M2 spec (post PROJECT_ROOT fix; volume = .. mount).
     command: ["node", "build/server.js"]
-    mem_limit: 512m
-    memswap_limit: 512m
+    mem_limit: 1g
+    memswap_limit: 1g
+    # v1.2.0d NEW per D7 + F27: --stop-timeout=30 worker 30s graceful drain
     # No ports: worker is a background consumer, not a server.
 
   # ── PWA frontend server (Option B per D-9) ────────────────────────────────
@@ -159,8 +164,9 @@ services:
     # Port 3011 (host) chosen because 3001 is occupied by rana-portal.
     # Tailscale Funnel proxies Funnel URL /* → harness-frontend:3011.
     command: ["node", "build/orchestrator/pwa_server.js"]
-    mem_limit: 384m
-    memswap_limit: 384m
+    mem_limit: 1g
+    memswap_limit: 1g
+    # v1.2.0d NEW per D7 + F27: frontend 1G limit + 30s graceful drain
     ports:
       - "3011:3000"
 

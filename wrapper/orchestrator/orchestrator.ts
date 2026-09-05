@@ -28,6 +28,13 @@ import { callDshHeadless } from "../dsh/dsh_client.js";
 import type { DshOpts, DshResponse } from "../dsh/types.js";
 import * as commander from "./commander.js";
 import * as workerModule from "./worker.js";
+import { getDefaultQueueStore } from "./queue_store.js";
+import {
+  activeTaskCount,
+  queueDepth,
+  workerCount,
+  startMetricsSampling,
+} from "./metrics.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────────
 
@@ -171,6 +178,53 @@ export async function health(): Promise<HealthResponse> {
 }
 
 /**
+ * v1.2.0d (per D8 + F26): queue backpressure at dispatch entry.
+ * Returns a failed OrchestrationResult if the queue is saturated; otherwise null.
+ * Server.ts wraps this to emit 429 + Retry-After header (per F26).
+ */
+function tryEnqueueOrThrottle(
+  taskId: string,
+  payload: Record<string, unknown>,
+): OrchestrationResult | null {
+  const queueStore = getDefaultQueueStore();
+  const result = queueStore.enqueue(taskId, payload);
+  if (result.status === "throttled") {
+    console.warn(
+      `[orchestrator] dispatch(${taskId}) — throttled, retry_after=${result.retry_after}s`,
+    );
+    return {
+      task_id: taskId,
+      status: "failed",
+      output: {
+        stdout: "",
+        wallMs: 0,
+        trace_id: `queue-throttled-${taskId}`,
+        queue_location: `/api/v1/status/${taskId}`,
+        retry_after_seconds: result.retry_after,
+      },
+      error: `queue saturated, retry after ${result.retry_after}s`,
+    };
+  }
+  return null;
+}
+
+/**
+ * v1.2.0d (per F26): reclaim path — after task completes, pull pending tasks
+ * back from SQLite overflow queue into the in-memory hot path.
+ */
+function reclaimAndUpdateMetrics(): number {
+  const queueStore = getDefaultQueueStore();
+  const reclaimed = queueStore.reclaim();
+  if (reclaimed > 0) {
+    console.log(`[orchestrator] reclaimed ${reclaimed} pending task(s) from SQLite`);
+  }
+  // F25: update Prometheus gauges after each dispatch
+  activeTaskCount.set(queueStore.inFlightCount());
+  queueDepth.set(queueStore.pendingCount());
+  return reclaimed;
+}
+
+/**
  * Accept a user task, route to the appropriate commander, and track lifecycle.
  *
  * M1c: Invokes kernel POST /api/orch/invoke; falls back to direct dsh if kernel unreachable.
@@ -178,6 +232,8 @@ export async function health(): Promise<HealthResponse> {
  *   primary dispatch path. The kernel + dsh direct call remains as a
  *   parallel async fire + fallback for backward compatibility with the
  *   v1.1.1 PWA shell (which expects a real dsh stdout in the response).
+ * v1.2.0d (per D8 + F26): adds queue backpressure check at entry + reclaim path at exit
+ *   (per F26 429 Retry-After + 202 Accepted Location semantics).
  */
 export async function dispatch(
   task: Task,
@@ -187,6 +243,21 @@ export async function dispatch(
   const modelClass = task.workflow_pack ?? "orch";
 
   console.log(`[orchestrator] dispatch(${taskId}) — modelClass=${modelClass}, prompt=${prompt.slice(0, 60)}…`);
+
+  // ── v1.2.0d F26: queue backpressure at entry ──────────────────────────────
+  const throttleResult = tryEnqueueOrThrottle(taskId, {
+    prompt: prompt.slice(0, 1024),
+    modelClass,
+  });
+  if (throttleResult) {
+    reclaimAndUpdateMetrics();
+    return throttleResult;
+  }
+
+  // ── v1.2.0d F25: start metrics sampling (idempotent) + update gauges ──────
+  startMetricsSampling();
+  activeTaskCount.set(getDefaultQueueStore().inFlightCount());
+  queueDepth.set(getDefaultQueueStore().pendingCount());
 
   // Store task in memory
   const entry: InMemoryTask = {
@@ -312,6 +383,9 @@ export async function dispatch(
   } catch (err) {
     console.warn(`[orchestrator] commander.aggregateResults failed: ${err}`);
   }
+
+  // ── v1.2.0d F26: reclaim SQLite pending → in-memory hot path ──────────────
+  reclaimAndUpdateMetrics();
 
   return {
     task_id: taskId,

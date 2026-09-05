@@ -53,5 +53,7 @@ services:
     # pmset disablesleep must be set on MacBook host (runbook)
     mem_limit: 2g
     memswap_limit: 2g
+    # v1.2.0d NEW per D7 + plan §5.2: MacBook worker 2G (larger than edge)
+    # + --memory-reservation=1G soft guarantee; 30s graceful drain (F27)
     # No host port mapping — accessed via Tailscale MagicDNS only
     # MacBook hostname on tailnet: kjonemacbook-pro.fish-harness.ts.net

@@ -50,8 +50,11 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
-    mem_limit: 512m
-    memswap_limit: 512m
+    mem_limit: 256m
+    memswap_limit: 256m
+    # v1.2.0d NEW per D7 + F23: kernel smoke limit (kernel 仅 print version
+    # + exit by design per ADR 0010 Decision d; 256M is generous ceiling)
+    stop_grace_period: 30s
     # No host ports: internal only via compose network
 
   # ── STT worker (M2 newvps only; whisper.cpp audio→text) ─────────────────────
@@ -83,8 +86,9 @@ services:
       harness-kernel:
         condition: service_started
     command: ["node", "build/server.js"]
-    mem_limit: 1024m
-    memswap_limit: 1024m
+    mem_limit: 2g
+    memswap_limit: 2g
+    # v1.2.0d NEW per D7 + F27: stt 2G (whisper.cpp) + 30s graceful drain
     # whisper.cpp CPU-bound; no host ports needed
 
   # ── Web Push gateway (M2 newvps only; VAPID private key centralized) ─────────
@@ -112,8 +116,9 @@ services:
     ports:
       - "8081:8081"
     command: ["node", "build/server.js"]
-    mem_limit: 256m
-    memswap_limit: 256m
+    mem_limit: 1g
+    memswap_limit: 1g
+    # v1.2.0d NEW per D7 + F27: web-push 1G + 30s graceful drain
 
   # ── wrapper orchestrator (port 4000) ─────────────────────────────────────────
   wrapper-orchestrator:
@@ -168,8 +173,9 @@ services:
     ports:
       - "4001:4001"
     command: ["node", "build/server.js"]
-    mem_limit: 512m
-    memswap_limit: 512m
+    mem_limit: 1g
+    memswap_limit: 1g
+    # v1.2.0d NEW per D7 + F27: wrapper-commander 1G (3 commanders × 1G) + 30s graceful drain
 
   # ── wrapper frontend/PWA (port 4002) — D-9 Option B: real PWA ──────────────
   # Repurposed from server.ts placeholder to pwa_server.ts (D-9 Option B):
@@ -204,8 +210,9 @@ services:
       - "4002:4002"
     # Real PWA entry: serves static/index.html + /api/pwa/* routes.
     command: ["node", "build/orchestrator/pwa_server.js"]
-    mem_limit: 512m
-    memswap_limit: 512m
+    mem_limit: 1g
+    memswap_limit: 1g
+    # v1.2.0d NEW per D7 + F27: wrapper-frontend 1G + 30s graceful drain
 
 networks:
   harness_net:

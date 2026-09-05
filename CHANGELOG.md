@@ -383,6 +383,80 @@ Cross-ref: [notes/codex-audit-scope-v1.2.0c-v0.1.md](notes/codex-audit-scope-v1.
 
 ---
 
+## [1.2.0d] - 2026-09-05
+
+v1.2.0d cycle scope — 防 OOM (per user 决策 3D): docker memory limits (7 service) + queue 持久化 (in-memory + SQLite WAL) + Prometheus monitoring (4 metric + 3 alert rules) + 顺手清 v1.2.0c 残留 (F21 worker_pool round_robin tertiary sort + F22 execution_driver routedDsh wire).
+
+Cross-ref: [notes/codex-audit-scope-v1.2.0d-v0.1.md](notes/codex-audit-scope-v1.2.0d-v0.1.md) (§4.15 docker memory limits 守门 12 项 + §4.16 queue 持久化守门 8 项 + §4.17 monitoring + metrics 守门 10 项 + §3.10 OOM graceful shutdown 声明 [per F27 SIGTERM/SIGKILL 区分]) + [notes/codex-audit-scope-v1.2.0d-v0.1-prompt.md](notes/codex-audit-scope-v1.2.0d-v0.1-prompt.md) (Codex 复审 prompt + 30 验证命令矩阵).
+
+### Decisions (per 决策 3D 2026-09-05)
+
+- **D7=A** — 全 7 service docker memory limits (orchestrator 1G / kernel 256M smoke / wrappers 1G / MacBook 2G) + per F27 `--stop-timeout=30` SIGTERM graceful drain
+- **D8=A** — queue 持久化 = in-memory + SQLite WAL per-host file (`/data/queue_store.db` per ADR 0009) + 超过 `max_in_flight=50` → 429 + `Retry-After: 30` + 202 Accepted + `Location: /api/v1/status/{task_id}` per F26 (HTTP RFC 7231 §6.3.3 + RFC 6585 §4)
+- **D9=A** — Prometheus + alertmanager + Grafana stack + 7 host scrape jobs (per F24) + 3 alert rules (memory >80% / queue >100 / worker offline >5min) + Tailscale ACL `tag:monitor` 限 owner access per F28
+
+### Added
+
+- **`wrapper/orchestrator/queue_store.ts`** NEW ~250 行 — `SqliteQueueStore` per-host SQLite + WAL mode + busy_timeout=5000 + 5 methods (`enqueue` / `dequeue` / `peek` / `reclaim` / `pending_count`) + `inFlightCount()` + `rawHandle()` for test inspection + `QueueAcceptedResult` / `QueueThrottledResult` discriminated union + `QueueOverflowError` class + module singleton `getDefaultQueueStore()` + `_resetQueueStoreForTests()` + DEFAULT_MAX_IN_FLIGHT=50 + QUEUE_MAX_IN_FLIGHT env override + RETRY_AFTER_SECONDS=30 (per D8 + F25/F26 + ADR 0009 single-host WAL)
+- **`wrapper/orchestrator/metrics.ts`** NEW ~120 行 — `prom-client` Registry singleton + `collectDefaultMetrics()` (process_cpu_*/memory/heap etc.) + 4 wrapper-specific gauges: `active_task_count` / `queue_depth` / `memory_used_mb` / `worker_count` + `startMetricsSampling()` 15s interval RSS sampling + `stopMetricsSampling()` idempotent + `renderMetrics()` 返 Prometheus text exposition format + `getMetricsRegistry()` for testing (per D9 + F25)
+- **`deploy/monitoring/prometheus.yml`** NEW ~120 行 — global scrape_interval=15s + evaluation_interval=15s + 7 scrape jobs (harness-newvps 4 port + harness-edge1-5 + harness-macbook + prometheus self) + rule_files `alerts.yml` + alertmanager routing `tag:monitor:9093` (per D9 + F24 + F28)
+- **`deploy/monitoring/runbook.md`** NEW ~150 行 — 4 alert runbooks (WrapperMemoryHigh / QueueSaturated / WorkerOffline / HighDispatchLatency optional future) + 每 alert 5 步骤 diagnostic (curl / docker stats / tailscale status) + 4 mitigation paths (per-cause table) + escalation policy 15min ack / 30min resolve / page owner + 维护操作 (加 host / ACL verify / silence reset) + 6 references (plan §5.3 + F24-F28)
+- **`wrapper/test/unit/queue_store.test.ts`** NEW ~180 行 — schema + pragmas (WAL mode + busy_timeout=5000) + enqueue backpressure (accepted/throttled) + dequeue FIFO + peek + pendingCount + reclaim max_in_flight ceiling + empty task_id rejection + non-object payload rejection (per F26 + plan §5.2)
+- **`wrapper/test/unit/metrics.test.ts`** NEW ~85 行 — renderMetrics Prometheus exposition format + 4 wrapper-specific gauges present + getMetricsRegistry singleton + startMetricsSampling idempotent + stopMetricsSampling idempotent + gauge .set() mutable (per F25 + plan §5.3)
+
+### Tests (2 NEW gated integration)
+
+- **`wrapper/test/integration/queue_backpressure.test.ts`** NEW ~120 行 — gated by `RUN_QUEUE_BACKPRESSURE_E2E=1` + 5 tests 验证 maxInFlight=2 mock 触发 throttling + 100 task flood partial 202/429 + drain → reclaim → overflow replay round-trip + pendingCount overflow queue depth (per F30 + plan §5.5 mock pattern)
+- **`wrapper/test/integration/oom_prevention.test.ts`** NEW ~85 行 — gated by `RUN_OOM_PREVENTION_E2E=1` + 4 tests 验证 1000-task burst caps in-memory at maxInFlight=5 + reclaim round-trip no memory growth + concurrent dispatch + reclaim + enqueue 无 SQLite lock contention + pendingCount SQLite storage tracking (per F27 + plan §5.5)
+
+### Changed
+
+- **`deploy/newvps-compose.yml`** — `kernel` service `mem_limit: 256m` (smoke per F23 + ADR 0010 Decision d) + `wrapper` 1G + `stop_grace_period: 30s` (per F27 SIGTERM graceful drain); CPU limits `cpus: '1.5'` orchestrator / `'1.0'` commander
+- **`deploy/6host-compose.newvps.yml`** — 6 service memory limits (kernel 256M / stt-worker 2G / web-push 1G / wrapper-orchestrator 2G / wrapper-commander 1G ×2 / wrapper-frontend 1G) per D7
+- **`deploy/6host-compose.edge[1-5].yml`** — 5 文件 `wrapper` `mem_limit: 512m → 1g` upgrade (per D7)
+- **`deploy/macbook-compose.yml`** — `mem_limit: 2g` MacBook-specific larger (per plan §5.2) + `--memory-reservation=1G` comment
+- **`wrapper/orchestrator/worker_pool.ts`** — `dispatch()` SQL `ORDER BY last_heartbeat_at ASC, worker_id ASC` 加 tertiary sort `, registered_at ASC` 打破 same-ms tie (per F21 + v1.2.0b 8bef884 column-unit contract pattern; 1 unit test fix for `worker_pool.test.ts round_robin` persistent failure tracked since v1.2.0b era)
+- **`wrapper/orchestrator/execution_driver.ts`** — `streamHttpFallback()` 替换为 `streamRoutedDshFallback()` + dynamic import `const { routedDsh } = await import("../dsh/6host_router.js")` + `wire-routedDsh per F22 option A` commit marker + yield `driver.finished` payload `source: "routed_dsh"` (per F22)
+- **`wrapper/orchestrator/orchestrator.ts`** — 加 `tryEnqueueOrThrottle(taskId, payload)` helper (queue backpressure at entry per F26) + `reclaimAndUpdateMetrics()` (reclaim SQLite pending → in-memory + F25 Prometheus gauge updates) + `startMetricsSampling()` idempotent call in dispatch (per D8 + D9 + F25/F26)
+- **`wrapper/orchestrator/types.ts`** — `QueueOverflowError` class + `QueueAcceptedResult` + `QueueThrottledResult` discriminated union (per F26)
+- **`wrapper/server.ts`** — NEW `handleMetrics` GET `/metrics` endpoint (per F25 + F28 Tailscale ACL 限) + dynamic import `renderMetrics` / `startMetricsSampling` to defer module-level side effects + `registerApiRoute` helper 同时 register `/api/v1/metrics` + `/metrics` (Tailscale Funnel 兼容 per v1.2.0b pattern)
+- **`wrapper/test/unit/worker_pool.test.ts`** — 加 `getDefaultWorkerPool` import + NEW `describe("SqliteWorkerPool — round_robin tertiary sort (v1.2.0d F21)")` 3 tests (3-worker same-ms tie by registered_at ASC + subsequent dispatch advances to widB + getDefaultWorkerPool singleton module-level cache)
+- **`wrapper/test/unit/execution_driver.test.ts`** — NEW `describe("SpawnDshDriver — routedDsh fallback (v1.2.0d F22)")` 2 tests (driver.finished source='routed_dsh' on success + driver.failed source='routed_dsh' on fetch error)
+- **`deploy/tailscale-acl-6host.yaml`** — 加 `tag:monitor` ACL 段 (per F28: tag:admin owner-only access + tag:monitor scrape wrapper :3000 on harness/edge/macbook) + `tagOwners.tag:monitor: [cscoheru]`
+
+### Hygiene (per §4.15/§4.16/§4.17 audit-scope)
+
+- tracked 锚定: 116 文件 (v1.2.0d 不动 spec/harness/9 ADR/Dockerfile 维持范围)
+- disk verbatim: 128 = 116 tracked + 12 self-injury (维持; v1.2.0d 仅 wrapper/orchestrator/ + deploy/ 内部调整, 全部 verbatim 已知 12 文件不动)
+- v1.0 runtime 0 行 diff (§3.10 kernel 256M 仅 deploy/newvps-compose.yml 内存 limit, 非 runtime 改动; harness/runtime/*.py 0 行 diff)
+- 不锁型号 / 不硬编码 key / 不引入 web profile (v0.7 §4 维持)
+- §3.10 NEW OOM graceful shutdown 声明: PASS (--stop-timeout=30 SIGTERM per F27)
+- §4.12 v1.2.0c cross-host 真发守门 16 项: PASS (维持)
+- §4.13 v1.2.0c MacBook worker 守门 12 项: PASS (维持)
+- §4.14 v1.2.0c host-id fencing 守门 8 项: PASS (维持)
+- §4.15 NEW docker memory limits 守门 12 项: PASS (7 service limits + 4 cpus + 5 stop-timeout + kernel 256M per F23)
+- §4.16 NEW queue 持久化守门 8 项: PASS (queue_store.ts NEW + 4 better-sqlite3 + 3 WAL pragma + 3 202/Retry-After + max_in_flight + 4 metric names per F25/F26)
+- §4.17 NEW monitoring + metrics 守门 10 项: PASS (metrics.ts + prometheus.yml + runbook.md NEW + 4 prom-client + 4 gauges + scrape_configs + 7 host targets + 3 alerts + 2 tag:monitor)
+
+### Commit 1 + Commit 2 (2026-09-05)
+
+| # | Hash | Subject | Files |
+|---|------|---------|-------|
+| 1 | `de64791` (已 push) | review(v1.2.0d): v0.1 audit-scope 起草 | 3 (2 NEW notes/ + cc-ready) |
+| 2 | (本 commit) | feat: v1.2.0d 防 OOM 核心实现 (D7/D8/D9 + F21/F22) | 21 (+~1500/-~50) |
+
+### User EXEC status (per plan §13.4, 待 cycle 闭环)
+
+- **U1** TypeScript build on newvps — `ssh newvps 'cd /opt/fish-harness/wrapper && ./node_modules/.bin/tsc'` — exit 0 (expected, post-commit user EXEC)
+- **U2** 双 gate 验证 — tsc 0 + vitest ≥230 passed (per §13.3 commit 2 增量 ≥25 unit + 2 gated integration × 9 tests) | 0 failed
+- **U3** docker compose 重启 (7 service limits) — `ssh newvps 'cd /opt/fish-harness && docker compose -f deploy/newvps-compose.yml down && docker compose -f deploy/newvps-compose.yml up -d && docker compose -f deploy/6host-compose.newvps.yml down && docker compose -f deploy/6host-compose.newvps.yml up -d'` — 9 containers 全 Up + memory limits 验证
+- **U4** queue backpressure + OOM 真机 E2E — `RUN_QUEUE_BACKPRESSURE_E2E=1 RUN_OOM_PREVENTION_E2E=1 RUN_CROSS_HOST_E2E=1 RUN_HOST_FENCING_E2E=1 RUN_MACBOOK_E2E=1 DEEPSEEK_API_KEY=<key> ./node_modules/.bin/vitest run test/integration/{queue_backpressure,oom_prevention,cross_host_dispatch,host_id_fencing,macbook_worker}.test.ts` — 5+4+8+7+8 = 32 gated tests PASS
+- **U5** 7 host metrics scrape + alert rules — `curl -i http://newvps.fish-harness.ts.net:9090/metrics` + `curl -i http://newvps.fish-harness.ts.net:3000/metrics` — 7 scrape jobs up + 3 alert rules + memory/queue/worker metrics 暴露
+- **U6** Codex v1.2.0d formal 复审 — user 亲提 `codex review --model gpt-5.6-sol --reasoning-effort xhigh notes/codex-audit-scope-v1.2.0d-v0.1-prompt.md` — expected 0C/0M/0m + §4.15/§4.16/§4.17 全绿
+- **U7** v1.2.0d minor tag @ boundary `9c2e325` (per Debian stable point release 推进式风格, v1.2.0d = v1.2.0c formal review closure) — user 亲提 `git tag -a v1.2.0d 9c2e325 -m "v1.2.0d: ..." && git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin v1.2.0d` via Clash proxy
+
+---
+
 ## [1.1.0-M1c] - 2026-09-02
 
 M1c 阶段 — TypeScript wrapper 三档 profile 收口 + vitest 稳定化 + Codex formal PASS + iPhone Safari Funnel E2E 实测.

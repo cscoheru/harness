@@ -96,6 +96,23 @@
       "dst": ["tag:macbook:*"]
     },
 
+    # v1.2.0d NEW per F28: monitor hosts (Prometheus + alertmanager) reachable
+    # only by tag:admin (owner). Edge/macbook/harness cannot scrape metrics
+    # nor push alerts — they only emit /metrics on their wrapper port (3000).
+    {
+      "action": "accept",
+      "src": ["tag:admin", "cscoheru"],
+      "dst": ["tag:monitor:9090,9093,*"]
+    },
+
+    # Monitor hosts can scrape wrapper /metrics on all harness/edge/macbook
+    # (port 3000 — Prometheus scrapes, NOT data-plane).
+    {
+      "action": "accept",
+      "src": ["tag:monitor"],
+      "dst": ["tag:harness:3000,*", "tag:edge:3000,*", "tag:macbook:3000,*"]
+    },
+
     # iPhone Safari device: Funnel 443 only (no internal port access)
     # Replace "iphone-safari-device-id" with actual Tailscale device ID
     # Get via: tailscale status | grep iPhone
@@ -117,7 +134,8 @@
     "tag:harness": ["cscoheru"],
     "tag:edge":    ["cscoheru"],
     "tag:macbook": ["cscoheru"],
-    "tag:admin":  ["cscoheru"]
+    "tag:admin":  ["cscoheru"],
+    "tag:monitor": ["cscoheru"]
   },
 
   "ssh": [

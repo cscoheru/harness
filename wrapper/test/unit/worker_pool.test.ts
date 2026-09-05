@@ -26,6 +26,7 @@ import {
   WorkerNotFoundError,
   WorkerNotActiveError,
   NoActiveWorkerError,
+  getDefaultWorkerPool,
 } from "../../orchestrator/worker_pool.js";
 
 let tempDir: string;
@@ -309,5 +310,44 @@ describe("SqliteWorkerPool — countActive() + getWorker()", () => {
 
   it("getWorker returns null for unknown id", () => {
     expect(pool.getWorker("wrk-00000000-0000-0000-0000-000000000000")).toBeNull();
+  });
+});
+
+// ─── v1.2.0d NEW (per F21): round_robin tertiary sort ───────────────────────
+// Tie-break by registered_at when 3+ workers register in the same
+// millisecond AND last_heartbeat_at is also identical. Without the
+// tertiary sort (worker_pool.ts:146
+// `ORDER BY last_heartbeat_at ASC, worker_id ASC, registered_at ASC`)
+// SQLite falls back to undefined order — leading to intermittent
+// test failures ("widA expected, widB got") at tight intervals.
+
+describe("SqliteWorkerPool — round_robin tertiary sort (v1.2.0d F21)", () => {
+  it("dispatch breaks 3-worker same-ms tie by registered_at ASC", async () => {
+    const widA = await pool.register("host-a", SAMPLE_CAPABILITIES);
+    const widB = await pool.register("host-b", SAMPLE_CAPABILITIES);
+    const widC = await pool.register("host-c", SAMPLE_CAPABILITIES);
+
+    // All 3 registered in tight succession — last_heartbeat_at may be
+    // identical. dispatch() must pick the FIRST registered (widA).
+    const result = await pool.dispatch("task-001");
+    expect(result.worker_id).toBe(widA);
+  });
+
+  it("subsequent dispatch advances to widB then (rd_robin natural order)", async () => {
+    const widA = await pool.register("host-a", SAMPLE_CAPABILITIES);
+    const widB = await pool.register("host-b", SAMPLE_CAPABILITIES);
+
+    const r1 = await pool.dispatch("task-001");
+    expect(r1.worker_id).toBe(widA);
+    // Heartbeat widA so dispatch picks widB next (least-recently-heartbeated)
+    await pool.heartbeat(widA);
+    const r2 = await pool.dispatch("task-002");
+    expect(r2.worker_id).toBe(widB);
+  });
+
+  it("getDefaultWorkerPool returns singleton (module-level cache)", () => {
+    const a = getDefaultWorkerPool();
+    const b = getDefaultWorkerPool();
+    expect(a).toBe(b);
   });
 });

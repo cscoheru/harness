@@ -211,8 +211,67 @@ export class SpawnDshDriver implements ExecutionDriver {
       return;
     }
 
-    // ── Fallback path: fetch HTTP ─────────────────────────────────────────
-    yield* this.streamHttpFallback(handle, attempt_id, timeoutMs);
+    // ── Fallback path: routedDsh() 真发远程 (wire-routedDsh per F22 option A) ─
+    // F22 (v1.2.0d): replaced HTTP stub with routedDsh() call so cross-host
+    // dispatch 真发到 MagicDNS 远程 host (per F12 wired into 6host_router.ts).
+    yield* this.streamRoutedDshFallback(handle, attempt_id, timeoutMs);
+  }
+
+  /**
+   * v1.2.0d NEW (per F22 option A): HTTP fallback path replaced with
+   * routedDsh() call. routedDsh() handles 6host_router route decision + fetch.
+   * wire-routedDsh comment marker for hygiene §3.11 audit-scope grep.
+   */
+  private async *streamRoutedDshFallback(
+    handle: DriverHandle,
+    attempt_id: string,
+    timeoutMs: number,
+  ): AsyncIterable<DriverEvent> {
+    const { routedDsh } = await import("../dsh/6host_router.js");
+    const prompt = stringifyRequestForDsh({
+      attempt_id: handle.attempt_id,
+      task_id: handle.attempt_id,
+      workflow_pack: "fallback",
+      workflow_version: "1.0",
+      input_blob_id: null,
+      capability_profile: this.capability(),
+      lease_token: `lease-${handle.attempt_id}`,
+      fence_version: 1,
+      metadata: { source: "execution_driver_fallback" },
+    });
+
+    try {
+      const resp = await routedDsh(prompt, "worker");
+      const stdout = typeof resp === "string"
+        ? resp
+        : JSON.stringify(resp);
+      handle.finished = true;
+      yield {
+        kind: "driver.finished",
+        attempt_id,
+        payload: {
+          exit_code: 0,
+          stdout,
+          wall_ms: Date.now() - handle.startMs,
+          source: "routed_dsh",
+        },
+      };
+    } catch (err) {
+      const message = (err as Error).message ?? String(err);
+      yield {
+        kind: handle.controller.signal.aborted
+          ? "driver.interrupted"
+          : "driver.failed",
+        attempt_id,
+        payload: {
+          error: message,
+          wall_ms: Date.now() - handle.startMs,
+          source: "routed_dsh",
+        },
+      };
+    } finally {
+      handleRegistry.delete(handle.cancel_token);
+    }
   }
 
   private async *streamSpawnSubprocess(

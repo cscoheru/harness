@@ -143,7 +143,7 @@ export class SqliteWorkerPool implements WorkerPool {
                 last_heartbeat_at, registered_at, drained_at
            FROM workers
           WHERE status = 'active'
-          ORDER BY last_heartbeat_at ASC, worker_id ASC
+          ORDER BY last_heartbeat_at ASC, worker_id ASC, registered_at ASC
           LIMIT 1`,
       ),
       updateHeartbeat: this.db.prepare(

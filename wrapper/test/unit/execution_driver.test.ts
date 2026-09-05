@@ -245,6 +245,65 @@ describe("SpawnDshDriver — heartbeat()", () => {
   });
 });
 
+// ─── v1.2.0d NEW (per F22): routedDsh wire integration ───────────────────────
+// Per F22 option A — execution_driver.ts:streamRoutedDshFallback() now calls
+// routedDsh() from wrapper/orchestrator/6host_router.ts in place of the
+// old stub streamHttpFallback(). The unit tests below verify that the
+// routedDsh path emits driver.finished with source: "routed_dsh" and
+// propagates errors as driver.failed.
+
+describe("SpawnDshDriver — routedDsh fallback (v1.2.0d F22)", () => {
+  let originalFetch: typeof fetch;
+  let originalForceHttp: string | undefined;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    originalForceHttp = process.env.DSH_FORCE_HTTP;
+    process.env.DSH_FORCE_HTTP = "1";
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    if (originalForceHttp === undefined) {
+      delete process.env.DSH_FORCE_HTTP;
+    } else {
+      process.env.DSH_FORCE_HTTP = originalForceHttp;
+    }
+  });
+
+  it("emits driver.finished with source='routed_dsh' on success", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response("routed dsh output\n", { status: 200 }),
+    ) as unknown as typeof fetch;
+
+    const d = new SpawnDshDriver();
+    const events: DriverEvent[] = [];
+    for await (const ev of d.run(SAMPLE_REQUEST)) {
+      events.push(ev);
+    }
+    const last = events[events.length - 1];
+    expect(last.kind).toBe("driver.finished");
+    expect(last.payload.source).toBe("routed_dsh");
+    expect(last.payload.exit_code).toBe(0);
+  });
+
+  it("emits driver.failed with source='routed_dsh' on fetch error", async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error("routedDsh unreachable");
+    }) as unknown as typeof fetch;
+
+    const d = new SpawnDshDriver();
+    const events: DriverEvent[] = [];
+    for await (const ev of d.run(SAMPLE_REQUEST)) {
+      events.push(ev);
+    }
+    const last = events[events.length - 1];
+    expect(last.kind).toBe("driver.failed");
+    expect(last.payload.source).toBe("routed_dsh");
+    expect(String(last.payload.error)).toMatch(/routedDsh unreachable/);
+  });
+});
+
 describe("toRunHandle()", () => {
   it("maps internal DriverHandle fields to RunHandle shape", () => {
     const handle = toRunHandle({

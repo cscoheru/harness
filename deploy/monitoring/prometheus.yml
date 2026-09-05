@@ -1,0 +1,127 @@
+# Prometheus monitoring stack for fish-harness (v1.2.0d, per D9 + F24 + F25 + F28)
+#
+# Deployed via:
+#   docker compose -f deploy/monitoring/prometheus.yml up -d
+#
+# Binds:
+#   - 9090 → 100.64.0.0/8 (Tailscale tailnet range only, per F28 ACL)
+#   - 9090 NOT exposed to public internet
+#
+# Scrape targets (7 hosts per F24):
+#   - newvps (kernel/orchestrator)
+#   - edge1-5 (worker fleet)
+#   - macbook (MacBook worker)
+#
+# Each target exposes /metrics with 4 wrapper-specific gauges:
+#   - active_task_count
+#   - queue_depth
+#   - memory_used_mb
+#   - worker_count
+#
+# Alert rules (per §5.3):
+#   - memory > 80% for 5min
+#   - queue > 100 for 5min
+#   - worker offline > 5min
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    harness_version: "1.2.0d"
+    network: "fish-harness-ts-net"
+
+# ─── Scrape jobs (per F24: 7 hosts) ───────────────────────────────────────────
+
+scrape_configs:
+  # newvps: kernel + orchestrator + commander wrappers (single host, multi-port)
+  - job_name: harness-newvps
+    metrics_path: /metrics
+    scheme: http
+    static_configs:
+      - targets:
+          - "newvps.fish-harness.ts.net:3000"   # orchestrator
+          - "newvps.fish-harness.ts.net:3001"   # commander
+          - "newvps.fish-harness.ts.net:3002"   # commander-2
+          - "newvps.fish-harness.ts.net:3003"   # commander-3
+        labels:
+          host: newvps
+          host_class: "newvps-control"
+          region: "primary"
+
+  # edge1-5: 5 edge worker fleet (per F24)
+  - job_name: harness-edge1
+    metrics_path: /metrics
+    scheme: http
+    static_configs:
+      - targets: ["edge1.fish-harness.ts.net:3000"]
+        labels:
+          host: edge1
+          host_class: "edge-worker"
+          region: "edge-1"
+
+  - job_name: harness-edge2
+    metrics_path: /metrics
+    scheme: http
+    static_configs:
+      - targets: ["edge2.fish-harness.ts.net:3000"]
+        labels:
+          host: edge2
+          host_class: "edge-worker"
+          region: "edge-2"
+
+  - job_name: harness-edge3
+    metrics_path: /metrics
+    scheme: http
+    static_configs:
+      - targets: ["edge3.fish-harness.ts.net:3000"]
+        labels:
+          host: edge3
+          host_class: "edge-worker"
+          region: "edge-3"
+
+  - job_name: harness-edge4
+    metrics_path: /metrics
+    scheme: http
+    static_configs:
+      - targets: ["edge4.fish-harness.ts.net:3000"]
+        labels:
+          host: edge4
+          host_class: "edge-worker"
+          region: "edge-4"
+
+  - job_name: harness-edge5
+    metrics_path: /metrics
+    scheme: http
+    static_configs:
+      - targets: ["edge5.fish-harness.ts.net:3000"]
+        labels:
+          host: edge5
+          host_class: "edge-worker"
+          region: "edge-5"
+
+  # MacBook worker (per F24 + v1.2.0c MacBook compose)
+  - job_name: harness-macbook
+    metrics_path: /metrics
+    scheme: http
+    static_configs:
+      - targets: ["kjonemacbook-pro.fish-harness.ts.net:3000"]
+        labels:
+          host: kjonemacbook-pro
+          host_class: "macbook-main"
+          region: "local-mac"
+
+  # Prometheus self-scrape (sanity check)
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+# ─── Alert rules (per §5.3) ───────────────────────────────────────────────────
+
+rule_files:
+  - "alerts.yml"
+
+# Alertmanager routing (separate container)
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager.fish-harness.ts.net:9093"]
