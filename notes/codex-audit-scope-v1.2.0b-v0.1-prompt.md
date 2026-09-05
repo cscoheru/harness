@@ -40,7 +40,7 @@ grep -rE "Fable 5|GLM 5.3|MiniMax-M3" CHANGELOG.md README.md spec/capabilities/w
 grep -rE "Fable 5|GLM 5.3|MiniMax-M3" wrapper/orchestrator/ | wc -l
 ```
 
-期望：tracked == §1.5 主表合计（v1.2.0a 收口 289e7eb 实测 = 引用式不复制数字）+ disk == §1.5 主表 disk 行（同引用式）+ 前向交付物 == 0 + wrapper/orchestrator/ == 0。
+期望：tracked == §1.5 主表合计（v1.2.0a 收口 289e7eb 实测 116 = 引用式不复制数字）+ disk == §1.5 主表 disk 行（v1.2.0b 实测 129 = 116 tracked + 13 本周期自伤；**m2 GATE-CALIB：引用式 ≠ 免实测换算** — 起草时误引 v1.2.0a 127（116+11），自伤源随周期切换须重跑）+ 前向交付物 == 0 + wrapper/orchestrator/ == 0。
 
 ### §2.2 §2 不硬编码 API key 守门（含 v1.2.0b §2.7 NEW worker_pool path 默认值守门）
 
@@ -83,10 +83,10 @@ grep -cE "fetch.*api/v1" wrapper/orchestrator/execution_driver.ts
 grep -cE "plan_metadata.*source|heuristic" wrapper/orchestrator/workflow_pack.ts wrapper/orchestrator/commander.ts | awk -F: '{s+=$NF} END{print s}'
 
 # v1.2.0a §4 commander 真实现 dsh 调用守门维持
-grep -cE "callDshHeadless|dshInvoke" wrapper/orchestrator/workflow_pack.ts wrapper/orchestrator/commander.ts | awk -F: '{s+=$NF} END{print s}' | wc -l
+grep -cE "callDshHeadless|dshInvoke" wrapper/orchestrator/workflow_pack.ts wrapper/orchestrator/commander.ts | awk -F: '{s+=$NF} END{print s}'
 ```
 
-期望：web == 0 + headless ≥ 3（实测 ≥ 19）+ ExecutionDriver dsh ≥ 3 + HTTP fallback ≥ 1 + heuristic ≥ 4 + commander dsh ≥ 2。
+期望：web == 0 + headless ≥ 3（实测 50）+ ExecutionDriver dsh ≥ 3 + HTTP fallback ≥ 1 + heuristic ≥ 4 + commander dsh ≥ 2（m3 GATE-CALIB：原命令尾部多套 `| wc -l` 使 awk 输出恒 1 — 管道套管道恒假门）。
 
 ### §2.5 §4.5 多 host 守门（v0.7 + v1.2.0a 锚定维持，v1.2.0b 不动 deploy/）
 
@@ -122,7 +122,7 @@ grep -rE "createSign\s*\(\s*['\"]SHA256" wrapper/dsh/vapid_keys.ts | wc -l  # �
 grep -rE "dsaEncoding\s*:\s*['\"]ieee-p1363['\"]" wrapper/dsh/vapid_keys.ts | wc -l  # ≥ 1
 
 # server.ts 8 endpoint 守门（v0.7 + v1.2.0a 锚定维持）
-grep -cE "app\.(get|post|use)\s*\(\s*['\"](\/|/health|/api/v1/tasks|/api/v1/status/:task_id|/api/v1/status/test|/api/v1/worker/heartbeat|/api/v1/push/subscribe|/api/stt/transcribe)|app\.use\(\s*\(\s*_req" wrapper/server.ts; grep -c "registerApiRoute('" wrapper/server.ts  # 合计 ≥ 8
+grep -cE "app\.(get|post|use)\s*\(\s*['\"](\/|/health|/api/v1/tasks|/api/v1/status/:task_id|/api/v1/status/test|/api/v1/worker/heartbeat|/api/v1/push/subscribe|/api/stt/transcribe)|app\.use\(\s*\(\s*_req" wrapper/server.ts; grep -cE "registerApiRoute\(['\"]" wrapper/server.ts  # 合计 ≥ 8
 
 # v1.2.0b §4.7.7 NEW server.ts handleWorkerHeartbeat 真接 worker.heartbeat() 守门（per F6）
 grep -cE "worker\.heartbeat|worker_pool\.heartbeat" wrapper/server.ts
@@ -175,7 +175,7 @@ grep -c "heuristic" wrapper/orchestrator/workflow_pack.ts  # ≥ 2
 grep -E "version.*1\.2\.0a|1\.2\.0a" wrapper/orchestrator/commander.ts | wc -l  # ≥ 1
 grep -cE "plan_steps|plan_source" wrapper/orchestrator/orchestrator.ts  # ≥ 2
 grep -cE "RUN_ORCH_COMMANDER_E2E|RUN_PACK_PLAN_E2E" wrapper/test/integration/orch_commander.test.ts wrapper/test/integration/pack_plan.test.ts  # ≥ 2
-grep -c "describe|it(" wrapper/test/unit/commander.test.ts wrapper/test/unit/workflow_pack.test.ts | awk -F: '{s+=$NF} END{print s}'  # ≥ 25
+grep -c "describe\|it(" wrapper/test/unit/commander.test.ts wrapper/test/unit/workflow_pack.test.ts | awk -F: '{s+=$NF} END{print s}'  # ≥ 25（m4 GATE-CALIB：v1.2.0b 抄写丢 `\|` 反斜杠 — BRE 下 `|` 为字面恒 0 假门；实测 39）
 
 # v1.2.0b §4.10.5 NEW commander.ts:113-114 TODO(v1.2.0b) 替换守门（per F5）
 grep -rE "TODO\(v1\.2\.0b\)" wrapper/orchestrator/commander.ts | wc -l
@@ -197,13 +197,13 @@ grep -rE "TODO\(M1\)" wrapper/orchestrator/ | wc -l  # == 0（v1.2.0a 实测 16 
 grep -cE "ExecutionDriver|worker_pool" wrapper/orchestrator/worker.ts  # ≥ 6
 
 # worker_pool SQLite 持久化
-grep -c "better-sqlite3|Database" wrapper/orchestrator/worker_pool.ts  # ≥ 4
+grep -c "better-sqlite3\|Database" wrapper/orchestrator/worker_pool.ts  # ≥ 4
 
 # WAL mode + busy_timeout
-grep -c "WAL|busy_timeout|journal_mode" wrapper/orchestrator/worker_pool.ts  # ≥ 3
+grep -c "WAL\|busy_timeout\|journal_mode" wrapper/orchestrator/worker_pool.ts  # ≥ 3
 
 # ExecutionDriver subprocess spawn + HTTP fallback
-grep -c "child_process|callDshHeadless" wrapper/orchestrator/execution_driver.ts  # ≥ 3
+grep -c "child_process\|callDshHeadless" wrapper/orchestrator/execution_driver.ts  # ≥ 3
 grep -cE "fetch.*api/v1" wrapper/orchestrator/execution_driver.ts  # ≥ 1
 
 # server.ts handleWorkerHeartbeat 真接 worker.heartbeat()
@@ -220,7 +220,7 @@ grep -E "version.*1\.2\.0b|1\.2\.0b" wrapper/orchestrator/worker.ts | wc -l  # �
 grep -c "deepseek-v4-flash" spec/capabilities/worker.json  # ≥ 1
 
 # 单测增量
-grep -c "describe|it(" wrapper/test/unit/worker.test.ts wrapper/test/unit/worker_pool.test.ts wrapper/test/unit/execution_driver.test.ts | awk -F: '{s+=$NF} END{print s}'  # ≥ 40
+grep -c "describe\|it(" wrapper/test/unit/worker.test.ts wrapper/test/unit/worker_pool.test.ts wrapper/test/unit/execution_driver.test.ts | awk -F: '{s+=$NF} END{print s}'  # ≥ 40（m4 同型 GATE-CALIB：BRE `\|` 恢复后实测 89）
 
 # 集成测试 gated
 grep -cE "RUN_WORKER_POOL_E2E|RUN_SERVER_HEARTBEAT_E2E" wrapper/test/integration/worker_pool.test.ts wrapper/test/integration/server_heartbeat.test.ts  # ≥ 2
@@ -259,7 +259,7 @@ jq -e '.task_id == "T-V1.2.0B-WORKER-PASS"' docs/poll/cc-ready.json
 - [ ] §4.9 dsh binary install 守门（DSH_VERSION 强校验 ≥ 2 + set -euo pipefail ≥ 1 + npm 版本 pin ≥ 1 + @latest == 0 + GitHub URL 硬编码 == 0）
 - [ ] **§4.10 v1.2.0a commander 真实现守门维持**（TODO(M1) in commander.ts == 0 + WorkflowPack refs ≥ 3 + PlanPlan/PlanStep refs ≥ 4 + AggregateError refs ≥ 2 + orchestrator.ts 真走 commander ≥ 3 + workflow_pack.ts + workflow_packs/default.json file exists + loadManifest ≥ 1 + heuristic ≥ 2 + version="1.2.0a" ≥ 1 + plan_steps/plan_source ≥ 2 + 集成测试 gated ≥ 2 + 单测增量 ≥ 25）
 - [ ] **§4.10.5 NEW commander.ts:113-114 TODO(v1.2.0b) 替换守门**（per F5 — TODO marker == 0）
-- [ ] **§4.10.6 NEW commander.ts synthetic stub-worker 替换守门**（per F5 — stub-worker-${taskId} 字面 == 0）
+- [ ] **§4.10.6 NEW commander.ts synthetic stub-worker 替换守门**（per F5 — stub-worker-${taskId} 字面 == 0；m5 GATE-CALIB 注释豁免：commander.ts L99 hygiene 注释「NO synthetic stub-worker-... IDs」自身提及字面 — 生产路径 0 处，v0.6 DER 注释豁免同型）
 - [ ] **§4.11 v1.2.0b worker 真实现守门 NEW**（TODO(M1) in worker.ts == 0 + TODO(M1) wrapper/orchestrator/ == 0 + ExecutionDriver|worker_pool refs ≥ 6 + better-sqlite3|Database refs ≥ 4 + WAL|busy_timeout|journal_mode ≥ 3 + child_process|callDshHeadless ≥ 3 + fetch.*api/v1 ≥ 1 + server.ts worker.heartbeat|worker_pool.heartbeat ≥ 2 + worker.health() version="1.2.0b" ≥ 1 + spec/capabilities/worker.json deepseek-v4-flash ≥ 1 + 单测增量 ≥ 40 + 集成测试 gated ≥ 2 + worker_pool.ts + execution_driver.ts file exists + better-sqlite3 dep ≥ 1 + Dockerfile apk add ≥ 1）
 - [ ] §5 v1.2.0b 20 文件 hygiene 自检表
 - [ ] §7 教训记档验证（worker 真实现 stub → real + better-sqlite3 per-host WAL + ExecutionDriver both 模型 + server.ts heartbeat 真接 + M4 hygiene fix 合并 commit 2 + spec 校准 + 7 user must execute items）

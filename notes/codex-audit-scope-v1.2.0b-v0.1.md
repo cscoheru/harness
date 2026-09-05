@@ -20,11 +20,11 @@ git ls-files docs/ adr/ spec/capabilities/ | xargs grep -cE "Fable 5|GLM 5.3|Min
 
 # 历史文档豁免口径锚定（disk 口径 == tracked + 本 audit-scope 自伤）：
 grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/ adr/ spec/capabilities/ notes/codex-audit-scope-v1.2.0b-v0.1.md | wc -l
-# 期望: == audit-scope §1.5 主表 disk 行（**引用 v1.2.0a §1.5 主表 disk 行**）
+# 期望: == audit-scope §1.5 主表 disk 行（**v1.2.0b 实测 129 = 116 tracked + 13 本周期自伤**；m2 GATE-CALIB：起草时误引 v1.2.0a 127 — 自伤源随周期切换，引用式须重跑换算）
 
 # notes/ 范围自伤豁免（本文件含 grep pattern 字面）：
 grep -rE "Fable 5|GLM 5.3|MiniMax-M3" notes/codex-audit-scope-v1.2.0b-v0.1.md | wc -l
-# 期望: == 自伤实测（v1.2.0b 起草预估 ≥ 11，按实测校准）
+# 期望: == 自伤实测 13（v1.2.0b 起草预估 ≥ 11 已按实测校准落定）
 
 # wrapper/orchestrator/ 不锁型号守门（继承 v1.2.0a §1 NEW — worker/commander 真实现绝不锁型号）：
 grep -rE "Fable 5|GLM 5.3|MiniMax-M3" wrapper/orchestrator/ | wc -l
@@ -71,7 +71,7 @@ git ls-files docs/ adr/ spec/capabilities/ | xargs grep -cE "Fable 5|GLM 5.3|Min
 
 # disk 验收命令
 grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/ adr/ spec/capabilities/ notes/codex-audit-scope-v1.2.0b-v0.1.md | wc -l
-# v1.2.0b 实测: 引用 v1.2.0a §1.5 主表 disk 行（v1.2.0a 收口 289e7eb 实测 = 127 disk）
+# v1.2.0b 实测: **129 disk = 116 tracked + 13 本周期自伤**（m2 GATE-CALIB per v1.2.0b formal：起草误引 v1.2.0a 127（116+11）未换算自伤源切换 — v0.5「disk 口径首用即裂」同型复发，引用式 ≠ 免实测）
 ```
 
 **v1.2.0b 主表新增条目**（v1.2.0b 增量实测；引用式不复制数字）：
@@ -167,8 +167,8 @@ grep -cE "plan_metadata.*source|heuristic" wrapper/orchestrator/workflow_pack.ts
 # 期望: ≥ 4（v1.2.0a formal 校准实测 ≥ 4 maintained；v1.2.0b 不动 commander 真实现）
 
 # commander 真实现 dsh 调用守门（v1.2.0a §4 维持 — v1.2.0b 不破坏）：
-grep -cE "callDshHeadless|dshInvoke" wrapper/orchestrator/workflow_pack.ts wrapper/orchestrator/commander.ts | awk -F: '{s+=$NF} END{print s}' | wc -l
-# 期望: ≥ 2（v1.2.0a formal 校准实测 2 maintained）
+grep -cE "callDshHeadless|dshInvoke" wrapper/orchestrator/workflow_pack.ts wrapper/orchestrator/commander.ts | awk -F: '{s+=$NF} END{print s}'
+# 期望: ≥ 2（v1.2.0a formal 校准实测 2 maintained；m3 GATE-CALIB：v1.2.0b 抄写多套尾部 `| wc -l` 使输出恒 1 — 假门已去）
 ```
 
 ## §4.5 M2 多 host 守门正式启用（多 host 拓扑漂移风险；继承 v0.7 §4.5 + v1.2.0a §4.5）
@@ -499,9 +499,9 @@ grep -c "apk add.*python3.*make.*g++" Dockerfile
 git ls-files docs/ adr/ spec/capabilities/ | xargs grep -cE "Fable 5|GLM 5.3|MiniMax-M3" 2>/dev/null | grep -v ":0$" | awk -F: '{s+=$NF} END{print s}'
 # 期望: == §1.5 主表合计（v1.2.0b 引用 v1.2.0a §1.5 主表合计）
 
-# 2. disk 锚定（v1.2.0b 实测 — 引用式 v1.2.0a §1.5 主表 disk 行）
+# 2. disk 锚定（v1.2.0b 实测 — m2 GATE-CALIB 129 = 116 + 13 自伤）
 grep -rE "Fable 5|GLM 5.3|MiniMax-M3" docs/ adr/ spec/capabilities/ notes/codex-audit-scope-v1.2.0b-v0.1.md | wc -l
-# 期望: == §1.5 主表 disk 行（v1.2.0b 引用 v1.2.0a §1.5 主表 disk 行）
+# 期望: == §1.5 主表 disk 行（v1.2.0b 实测 129；起草误引 v1.2.0a 127 已校准）
 
 # 3. v1.0 runtime 0 行 diff（§3.7 Dockerfile 例外声明）
 git diff v1.0.0..HEAD -- harness/ spec/kernel-schema.sql spikes/ 'adr/000[1-9]-*.md' docker-compose.yml pyproject.toml | wc -l
@@ -522,16 +522,16 @@ grep -rE "stub-worker-\\\$\\{taskId\\}" wrapper/orchestrator/commander.ts | wc -
 grep -rE "TODO\(M1\)" wrapper/orchestrator/worker.ts | wc -l  # == 0
 grep -rE "TODO\(M1\)" wrapper/orchestrator/ | wc -l  # == 0（v1.2.0a 实测 16 系 worker.ts 16 处保留；v1.2.0b 替换后 == 0）
 grep -cE "ExecutionDriver|worker_pool" wrapper/orchestrator/worker.ts  # ≥ 6
-grep -c "better-sqlite3|Database" wrapper/orchestrator/worker_pool.ts  # ≥ 4
-grep -c "WAL|busy_timeout|journal_mode" wrapper/orchestrator/worker_pool.ts  # ≥ 3
-grep -c "child_process|callDshHeadless" wrapper/orchestrator/execution_driver.ts  # ≥ 3
+grep -c "better-sqlite3\|Database" wrapper/orchestrator/worker_pool.ts  # ≥ 4
+grep -c "WAL\|busy_timeout\|journal_mode" wrapper/orchestrator/worker_pool.ts  # ≥ 3
+grep -c "child_process\|callDshHeadless" wrapper/orchestrator/execution_driver.ts  # ≥ 3
 grep -cE "fetch.*api/v1" wrapper/orchestrator/execution_driver.ts  # ≥ 1
 grep -cE "worker\.heartbeat|worker_pool\.heartbeat" wrapper/server.ts  # ≥ 2（§4.7.7 NEW）
 grep -rE "vapid_private_key|sk-[a-z0-9]{32,}" wrapper/orchestrator/worker.ts wrapper/orchestrator/worker_pool.ts wrapper/orchestrator/execution_driver.ts | wc -l  # == 0
 grep -rE "Fable 5|GLM 5.3|MiniMax-M3" wrapper/orchestrator/ | wc -l  # == 0
 grep -E "version.*1\.2\.0b|1\.2\.0b" wrapper/orchestrator/worker.ts | wc -l  # ≥ 1
 grep -c "deepseek-v4-flash" spec/capabilities/worker.json  # ≥ 1
-grep -c "describe|it(" wrapper/test/unit/worker.test.ts wrapper/test/unit/worker_pool.test.ts wrapper/test/unit/execution_driver.test.ts | awk -F: '{s+=$NF} END{print s}'  # ≥ 40
+grep -c "describe\|it(" wrapper/test/unit/worker.test.ts wrapper/test/unit/worker_pool.test.ts wrapper/test/unit/execution_driver.test.ts | awk -F: '{s+=$NF} END{print s}'  # ≥ 40（m4 同型：BRE `\|` 恢复实测 89）
 grep -cE "RUN_WORKER_POOL_E2E|RUN_SERVER_HEARTBEAT_E2E" wrapper/test/integration/worker_pool.test.ts wrapper/test/integration/server_heartbeat.test.ts  # ≥ 2
 test -f wrapper/orchestrator/worker_pool.ts  # NEW
 test -f wrapper/orchestrator/execution_driver.ts  # NEW
