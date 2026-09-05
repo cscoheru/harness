@@ -60,23 +60,28 @@ describeIf("OOM prevention: queue backpressure protects wrapper (per F27)", () =
     expect(store.inFlightCount()).toBe(5);
   });
 
-  it("reclaim round-trip drains 1000-task burst without memory growth", () => {
-    // 1000 enqueues → 5 in-memory, 0 SQLite-pending (throttled returns early)
+  it("reclaim recovers dispatched-but-not-completed tasks after in-memory drain (crash recovery)", () => {
+    // 1000 enqueues with maxInFlight=5:
+    //   - first 5: in-memory push + SQLite INSERT pending
+    //   - next 995: throttled, NOT written to SQLite
     for (let i = 0; i < 1000; i++) {
       store.enqueue(`task-${i}`, { i });
     }
+    expect(store.inFlightCount()).toBe(5);
+    expect(store.pendingCount()).toBe(5); // SQLite pending = 5 (the 5 originally accepted)
 
-    // Drain all in-memory
+    // Drain all in-memory (dequeue marks 'dispatched' in SQLite — NOT 'completed')
     while (store.dequeue() !== null) {
       // drain
     }
     expect(store.inFlightCount()).toBe(0);
 
-    // reclaim pulls from SQLite pending (should be 0 since all were throttled)
-    // But this verifies the round-trip completes without error / unbounded memory
+    // reclaim() finds the 5 dispatched rows (status != 'completed') and re-pushes
+    // them to in-memory — this is the crash recovery invariant: a wrapper that
+    // crashes after dequeue but before completion must re-dispatch the task.
     const reclaimed = store.reclaim();
-    expect(reclaimed).toBe(0);
-    expect(store.inFlightCount()).toBe(0);
+    expect(reclaimed).toBe(5);
+    expect(store.inFlightCount()).toBe(5);
   });
 
   it("queue store survives concurrent dispatch + reclaim (no SQLite lock contention)", () => {
