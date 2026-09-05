@@ -27,6 +27,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import express, { type Express } from "express";
+import { _resetForTests as _resetWorkerForTests } from "../../orchestrator/worker.js";
 import { _resetWorkerPoolForTests, SqliteWorkerPool } from "../../orchestrator/worker_pool.js";
 
 let tempDir: string;
@@ -126,6 +127,7 @@ afterEach(async () => {
   if (!RUN_GATED) return;
   if (server) server.close();
   _resetWorkerPoolForTests();
+  _resetWorkerForTests(); // worker.ts has its own currentWorkerPool singleton
   delete process.env["WORKER_POOL_DB"];
   testPool.close();
   rmSync(tempDir, { recursive: true, force: true });
