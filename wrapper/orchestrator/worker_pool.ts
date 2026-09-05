@@ -12,7 +12,10 @@
  *   - host TEXT NOT NULL (MagicDNS hostname, e.g. fish-harness-newvps.tail1b9878.ts.net)
  *   - capabilities_json TEXT NOT NULL (raw JSON of spec/capabilities/worker.json)
  *   - status TEXT NOT NULL CHECK IN ('active','draining','drained','reaped')
- *   - last_heartbeat_at INTEGER NOT NULL (unix epoch seconds)
+ *   - last_heartbeat_at INTEGER NOT NULL (unix epoch milliseconds;
+ *     sub-second precision needed so that 3+ rapid dispatches don't tie
+ *     on ORDER BY last_heartbeat_at ASC and always pick the first-registered
+ *     worker — secondary sort by worker_id ASC breaks remaining ties)
  *   - registered_at INTEGER NOT NULL (unix epoch seconds)
  *   - drained_at INTEGER (unix epoch seconds, nullable)
  *
@@ -140,7 +143,7 @@ export class SqliteWorkerPool implements WorkerPool {
                 last_heartbeat_at, registered_at, drained_at
            FROM workers
           WHERE status = 'active'
-          ORDER BY last_heartbeat_at ASC
+          ORDER BY last_heartbeat_at ASC, worker_id ASC
           LIMIT 1`,
       ),
       updateHeartbeat: this.db.prepare(
@@ -211,14 +214,14 @@ export class SqliteWorkerPool implements WorkerPool {
     validateCapabilitiesJson(capabilities_json);
 
     const worker_id = `wrk-${randomUUID()}`;
-    const nowSec = unixNowSeconds();
+    const nowMs = unixNowMillis();
 
     this.stmts.insertWorker.run(
       worker_id,
       host,
       capabilities_json,
-      nowSec,
-      nowSec,
+      nowMs,
+      nowMs,
     );
 
     return worker_id;
@@ -259,8 +262,8 @@ export class SqliteWorkerPool implements WorkerPool {
 
   async heartbeat(worker_id: string): Promise<string> {
     validateWorkerId(worker_id);
-    const nowSec = unixNowSeconds();
-    const info = this.stmts.updateHeartbeat.run(nowSec, worker_id);
+    const nowMs = unixNowMillis();
+    const info = this.stmts.updateHeartbeat.run(nowMs, worker_id);
     if (info.changes === 0) {
       const existing = this.getWorker(worker_id);
       if (!existing) {
@@ -268,13 +271,13 @@ export class SqliteWorkerPool implements WorkerPool {
       }
       throw new WorkerNotActiveError(worker_id, existing.status);
     }
-    return new Date(nowSec * 1000).toISOString();
+    return new Date(nowMs).toISOString();
   }
 
   async drain(worker_id: string): Promise<string> {
     validateWorkerId(worker_id);
-    const nowSec = unixNowSeconds();
-    const info = this.stmts.updateDrain.run(nowSec, worker_id);
+    const nowMs = unixNowMillis();
+    const info = this.stmts.updateDrain.run(nowMs, worker_id);
     if (info.changes === 0) {
       const existing = this.getWorker(worker_id);
       if (!existing) {
@@ -298,11 +301,11 @@ export class SqliteWorkerPool implements WorkerPool {
       );
     }
 
-    const nowSec = Math.floor(new Date(now_iso).getTime() / 1000);
-    if (!Number.isFinite(nowSec)) {
+    const nowMs = new Date(now_iso).getTime();
+    if (!Number.isFinite(nowMs)) {
       throw new Error(`worker_pool.reap_stale: now_iso is not parseable (got ${now_iso})`);
     }
-    const cutoffSec = nowSec - threshold_seconds;
+    const cutoffSec = nowMs - threshold_seconds;
 
     const staleRows = this.stmts.selectStale.all(cutoffSec) as { worker_id: string }[];
     if (staleRows.length === 0) return 0;
@@ -380,8 +383,12 @@ function ensureParentDir(filePath: string): void {
   }
 }
 
-function unixNowSeconds(): number {
-  return Math.floor(Date.now() / 1000);
+function unixNowMillis(): number {
+  // Sub-second precision so that 3+ workers registered within the same
+  // second don't tie on `ORDER BY last_heartbeat_at ASC` (would always pick
+  // the first-registered worker). Secondary sort by worker_id ASC breaks
+  // any remaining ms-level ties.
+  return Date.now();
 }
 
 function validateHost(host: string): void {
