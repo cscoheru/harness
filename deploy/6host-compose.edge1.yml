@@ -22,7 +22,7 @@ services:
   # class: orchestrator (not a specific SKU)
   edge-wrapper:
     container_name: harness-edge1-wrapper
-    image: node:22-alpine
+    image: node:22-slim
     restart: unless-stopped
     working_dir: /app/wrapper
     volumes:

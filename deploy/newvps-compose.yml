@@ -59,7 +59,7 @@ services:
   # Entrypoint: npm run dev or npm start (M1c BE-1 + TG-1 产出)
   wrapper:
     container_name: harness-wrapper
-    image: node:22-alpine
+    image: node:22-slim
     restart: unless-stopped
     working_dir: /app/wrapper
     volumes:
@@ -98,7 +98,7 @@ services:
   # class: worker (not a specific SKU — NORTH-STAR A-4 equivalence class)
   worker:
     container_name: harness-worker
-    image: node:22-alpine
+    image: node:22-slim
     restart: unless-stopped
     working_dir: /app/wrapper
     volumes:
@@ -134,7 +134,7 @@ services:
   #   /*        → frontend:3001 (PWA + /api/pwa/* form handlers)
   frontend:
     container_name: harness-frontend
-    image: node:22-alpine
+    image: node:22-slim
     restart: unless-stopped
     working_dir: /app/wrapper
     volumes:
