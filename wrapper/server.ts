@@ -6,7 +6,9 @@
  *   POST /api/v1/tasks                    → orchestrator.dispatch()
  *   GET  /api/v1/status/:task_id          → orchestrator.getTaskStatus()
  *   GET  /api/v1/status/test              → inline {status:"ok",test:true,ts}
- *   POST /api/v1/worker/heartbeat         → stub {status:"ok"} (worker.ts M1+ skeleton)
+ *   POST /api/v1/worker/heartbeat         → worker.register() / worker_pool.heartbeat()
+ *   GET  /api/v1/worker/health            → worker.health() (v1.2.0b NEW)
+ *   GET  /api/v1/commander/health         → commander.health() (v1.2.0b NEW)
  *   POST /api/v1/push/subscribe           → webpush.sendPush()
  *   POST /api/stt/transcribe              → stt.transcribe()
  *   GET  *                                → SPA fallback (PWA shell)
@@ -253,6 +255,32 @@ const handleWorkerHeartbeat: RouteHandler = async (req, res) => {
   }
 };
 registerApiRoute('post', '/api/v1/worker/heartbeat', handleWorkerHeartbeat);
+
+// GET /api/v1/worker/health — v1.2.0b: proxy to worker.health() (workers_count
+// + version + per-driver liveness). 400 if kernel/DSH unavailable.
+const handleWorkerHealth: RouteHandler = async (_req, res) => {
+  try {
+    const workerModule = await import("./orchestrator/worker.js");
+    const h = await workerModule.health();
+    res.json(h);
+  } catch (err) {
+    res.status(500).json({ status: "error", error: String(err) });
+  }
+};
+registerApiRoute("get", "/api/v1/worker/health", handleWorkerHealth);
+
+// GET /api/v1/commander/health — v1.2.0a NEW: proxy to commander.health()
+// (active task count + version + step-DAG plan-cache liveness).
+const handleCommanderHealth: RouteHandler = async (_req, res) => {
+  try {
+    const commanderModule = await import("./orchestrator/commander.js");
+    const h = await commanderModule.health();
+    res.json(h);
+  } catch (err) {
+    res.status(500).json({ status: "error", error: String(err) });
+  }
+};
+registerApiRoute("get", "/api/v1/commander/health", handleCommanderHealth);
 
 // POST /api/v1/push/subscribe — single-subscription web push delivery
 const handlePushSubscribe: RouteHandler = async (req, res) => {
