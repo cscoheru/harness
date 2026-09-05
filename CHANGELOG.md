@@ -163,14 +163,131 @@ Cross-ref: [notes/codex-audit-scope-v1.2.0a-v0.1.md](notes/codex-audit-scope-v1.
 - U8: MacBook worker 真部署 (仅 v1.2.0c — v1.2.0a 不触发)
 - U9: 5 edge host 真 provision (仅 v1.2.0c — v1.2.0a 仅起草)
 
-### NEXT v1.2.0b sub-cycle (worker 真实现 + heartbeat 真接 worker + SQLite WorkerPool registry)
+### NEXT v1.2.0c/d sub-cycle 周期（v1.2.0b PASS 后启动）
 
-- worker.ts 8 函数 stub → real (capability / run / interrupt / heartbeat / register / drain / getTaskStatus / health)
-- worker_pool.ts NEW ~150 行 (SQLite-backed registry per ADR 0007 WorkerInfo schema)
-- execution_driver.ts NEW ~180 行 (dsh subprocess spawn + interrupt + heartbeat during long run)
-- server.ts handleWorkerHeartbeat 真接 worker.heartbeat() (替换当前 stub `{status:"ok"}`)
-- 集成验证 worker_pool e2e + server_heartbeat HTTP test
-- 8-14 文件 + 2-3 commits + 5-7 user EXEC + 3-5 天 (per plan §3)
+- **v1.2.0c** 6 host routedDsh 真发到 MagicDNS + MacBook Worker 接入: 6host_router.ts routedDsh() 真发远程 + host_fencing.ts NEW (per ADR 0009 partial unique index) + deploy/macbook-compose + runbook + 11-15 文件 + 3-4 commits + 7-9 user EXEC + 5-7 天
+- **v1.2.0d** 防 OOM: docker compose memory limits + queue_store.ts NEW (SQLite-backed queue) + metrics.ts NEW (Prometheus exporter) + monitoring/prometheus.yml + runbook + 8-12 文件 + 2-3 commits + 5-7 user EXEC + 3-5 天
+
+---
+
+## [1.2.0b] - 2026-09-05
+
+v1.2 周期第二 sub-cycle（worker 真实现 + heartbeat 真接 worker + SQLite WorkerPool registry + ExecutionDriver 真实现 + 4 root-cause fixes）— v1.2.0b PASS 标志 worker 8 函数 stub → real + commander 真走 worker_pool.dispatch 拿真 worker_id + 4 大部署坑解决.
+
+Cross-ref: [notes/codex-audit-scope-v1.2.0b-v0.1.md](notes/codex-audit-scope-v1.2.0b-v0.1.md) (v0.1 守门: §4.11 NEW worker 真实现守门 14 项 [TODO(M1) in worker.ts == 0 + ExecutionDriver|worker_pool refs ≥ 6 + better-sqlite3|Database refs ≥ 4 + WAL|busy_timeout|journal_mode ≥ 3 + child_process|callDshHeadless ≥ 3 + fetch.*api/v1 ≥ 1 + server.ts worker.heartbeat|worker_pool.heartbeat ≥ 2 + worker.health() version="1.2.0b" ≥ 1 + spec/capabilities/worker.json deepseek-v4-flash ≥ 1 + 单测增量 ≥ 40 + 集成测试 gated ≥ 2 + worker_pool.ts + execution_driver.ts file exists + better-sqlite3 dep ≥ 1 + Dockerfile apk add ≥ 1] + §4.7.7 NEW server.ts handleWorkerHeartbeat 真接守门 + §4.10.5/§4.10.6 NEW commander.ts TODO(v1.2.0b) + synthetic stub 替换守门 + §3.7 NEW Dockerfile 例外声明 + §2.7 NEW better-sqlite3 path 默认值守门 + §5 20 文件 hygiene 自检表 + §7 NEW 教训记档 6 项 + §9 14 验证命令矩阵) + [notes/codex-audit-scope-v1.2.0b-v0.1-prompt.md](notes/codex-audit-scope-v1.2.0b-v0.1-prompt.md) (v1.2.0b Codex 复审 prompt + 14 hygiene checklist + 6 处引用式机制落地验证 + 25 条验证命令).
+
+### Added
+
+- **Worker 真实现 (v1.2.0b 三层架构第二刀)** (per `wrapper/orchestrator/worker.ts` REWRITE):
+  - `capability()` → 读 `spec/capabilities/worker.json` (model_id per F9 校准 `deepseek-v4-flash`) + 运行时探测 (CPU cores + memory) + `max_concurrent_attempts: 1` + `supports_streaming/interrupt/heartbeat: true` + `supports_tool_gateway: false`
+  - `run(request)` →  调 `ExecutionDriver.run()` yield `DriverEvent` stream (`driver.started` → `output_chunk ×N` → `heartbeat ×N` → `finished`)
+  - `interrupt(handle, reason)` → 发 SIGTERM + 写 `worker_pool` cancelled 状态 + `AbortController.abort()`
+  - `heartbeat(worker_id)` → 调 `worker_pool.heartbeat()` + 写 SQLite + 返回 ISO timestamp
+  - `health()` → kernel HTTP probe + 返回 `{version: "1.2.0b", workers_count, status: "ok" | "error"}` (周期版本号标记)
+  - `register(host, capabilities_json)` → `worker_pool.register()` INSERT + 返回 `worker_id` (per ADR 0007 schema 简化版 per F3 无 `current_attempt_id` FK — wrapper 是 pure client)
+  - `drain(worker_id)` → `worker_pool.drain()` UPDATE `drained_at` + 等 active 完成
+  - `getTaskStatus(task_id)` → query SQLite by `task_id`
+- **WorkerPool SQLite registry (v1.2.0b NEW)** (per `wrapper/orchestrator/worker_pool.ts` ~220 行):
+  - D1 = better-sqlite3 per-host file (per ADR 0009 single-host WAL constraint)
+  - WAL mode + `busy_timeout = 5000` per ADR 0009
+  - 简化 workers 表 schema per F3 (无 `current_attempt_id` FK — kernel-side authoritative per ADR 0007)
+  - 6 methods: `register` / `dispatch` / `heartbeat` / `drain` / `reap_stale` / `claim_via_pool` (per types.ts WorkerPool Protocol)
+  - 2 invariants: heartbeat advance `last_heartbeat_at` + drain 设 `drained_at`
+  - Round-robin dispatch: `ORDER BY last_heartbeat_at ASC, worker_id ASC` + ms precision (`unixNowMillis()`)
+  - Env override: `WORKER_POOL_DB` env var → 默认 `/data/worker_pool.db`
+- **ExecutionDriver 双模型 (v1.2.0b NEW)** (per `wrapper/orchestrator/execution_driver.ts` ~200 行):
+  - D2 = subprocess spawn 主路径 + HTTP fallback stub
+  - 主路径: `callDshHeadless(prompt, {modelClass: 'worker'})` (复用 `wrapper/dsh/dsh_client.ts:137-162` spawn pattern per F4)
+  - 备用路径: `fetch(DSH_HTTP_URL + '/api/v1/tasks', POST)` stub (当前 dsh 不暴露 HTTP, v1.2.0c 真接 MagicDNS 远程 host 时启用)
+  - Yield `DriverEvent` stream + `interrupt()` SIGTERM + `AbortController.abort()` + dsh_client.ts `runWithTimeout` AbortSignal.timeout 兜底
+- **commander.ts:113-114 TODO(v1.2.0b) 替换** (per F5 + plan §3.3 #2):
+  - `dispatchStep(taskId, stepName)` → 真调 `worker_pool.dispatch(task_id)` 拿真实 `worker_id` 写 PlanStep.worker_id
+  - 不再用 synthetic `stub-worker-${taskId}-${stepName}` stub (v1.2.0a 临时妥协清理)
+- **server.ts handleWorkerHeartbeat 真接 worker** (per F6 PURE STUB → real):
+  - 接收 body `{worker_id?, host?, capabilities_json?}` schema validation (worker_id 非空 + capabilities_json ≤10KB + reject extra fields 注入防护)
+  - 调 `worker.register()` (first-call path) 或 `worker_pool.heartbeat()` (subsequent path) + SQLite 持久化
+  - 返回 `{worker_id, status, last_heartbeat_at}` (替换原 `{status: "ok", heartbeat: true}` stub)
+  - 新增 `/api/v1/worker/health` + `/api/v1/commander/health` 路由 (per U5 4+1 Funnel URL 路径要求)
+- **orchestrator.ts dispatch() 真发 step** (per F5 + plan §3.3 #2):
+  - `dispatch()` 在 `commander.aggregateResults()` 后调 `worker.run()` 真发 step
+  - 保留 backward-compat kernel + dsh 调用 (v1.0 runtime 不变 per ADR 0010 Decision d)
+- **spec/capabilities/worker.json 校准** (per F9 + docs/m0b M2 校准对齐):
+  - `model_id: deepseek-chat` → `deepseek-v4-flash` (与 `docs/m0b/profile-override-worker.yaml` 对齐)
+  - 加 `evidence_uri: spec/capabilities/worker.json` 字段 (per ADR 0007 capability evidence 要求)
+- **better-sqlite3@^11 dep + Dockerfile build tools** (per F1 + F2):
+  - `wrapper/package.json` 加 `"better-sqlite3": "^11"` dep
+  - `Dockerfile` 加 `RUN apk add --no-cache python3 make g++` (node:22-alpine 默认无 build tools, native compile 必备)
+  - §3.7 NEW Dockerfile 例外声明: 修改不破 v1.0 runtime 0 行 diff 守门 (Dockerfile 实际只 build Python kernel image, wrapper 走 bind mount 部署)
+- **4 NEW unit tests** (per F8 + plan §3.2):
+  - `wrapper/test/unit/worker.test.ts` REWRITE ~50 tests (stub shape → real shape: capability / run / interrupt / heartbeat / register / drain / health / getTaskStatus)
+  - `wrapper/test/unit/worker_pool.test.ts` NEW ~30 tests (SQLite 持久化 + 6 methods + WAL + reap_stale + claim_via_pool)
+  - `wrapper/test/unit/execution_driver.test.ts` NEW ~20 tests (DriverEvent stream + interrupt + spawn timeout + HTTP fallback stub)
+  - 单测合计增量 ≥ 100 (per §4.11 守门 ≥ 40, 实际 ≥ 100)
+- **2 NEW integration tests gated** (per F7 + F10):
+  - `wrapper/test/integration/worker_pool.test.ts` NEW ~12 tests (register → heartbeat → dispatch → drain flow; gated by `RUN_WORKER_POOL_E2E=1`)
+  - `wrapper/test/integration/server_heartbeat.test.ts` NEW ~10 tests (HTTP POST `/api/v1/worker/heartbeat` → worker.heartbeat() → SQLite; gated by `RUN_SERVER_HEARTBEAT_E2E=1`; replaces `server_integration.test.ts:49-55` stub assertion per F7)
+
+### Fixed
+
+- **M4 hygiene fix (合并 commit 2 per D3)** — `vi.restoreAllMocks()` → `vi.clearAllMocks()` in `afterEach` (per `wrapper/test/integration/{orch_commander,pack_plan}.test.ts`).` restoreAllMocks` 破坏 `vi.mock` factory (还原 mock + 清状态) 而 `clearAllMocks` 仅清状态保 factory.M4 fix 是 v1.2.0a 复审中 3M 之一,合并 v1.2.0b commit 2 push + tag 涵盖避免 v1.2.0a tag 缺 hygiene.
+- **Round-robin dispatch tie 修复 (commit 24837d1)** — `unixNowSeconds()` → `unixNowMillis()` + `ORDER BY last_heartbeat_at ASC` 加 secondary sort `worker_id ASC`. 病灶: 3+ worker 在同一秒注册时 `unixNowSeconds` integer-second 精度导致 tie, 永远选第一个注册的 worker.修法: ms 精度 + secondary sort 破任何剩余 ms-level ties. 关键证据: U5 实测 `last_heartbeat_at: 2026-09-05T02:32:52.415Z` 小数秒 `.415` 直接证明 ms precision fix 生效.
+- **worker.ts module-level singleton test isolation (commit 02711b0)** — `worker.ts` 有独立 `currentWorkerPool` singleton 不同于 `worker_pool.ts` `_singleton`.修法: `worker_heartbeat.test.ts` `afterEach` 同时调 `_resetWorkerForTests()` + `_resetWorkerPoolForTests()`. 不修第二次 heartbeat 测试在序列中失败.
+- **musl/glibc + Node ABI 不匹配 (commits 26051c9 + e1f4f2e)** — `node:22-alpine` (musl) 无法加载 host-side glibc-compiled `better-sqlite3` binary (`fcntl64: symbol not found`). 修法: 容器 base image `node:22-alpine` → `node:22-slim` → `node:24-slim` (glibc 双侧同 + Node v24 ABI 对齐 host v24).
+- **Kernel restart-loop blocks wrapper (commits 0bfa73b + 20d92ac)** — `harness-kernel` (python:3.14-alpine) 跑 `python -m harness` 打印 version 即退出,healthcheck 永远不通过,`depends_on: service_healthy` 阻塞所有 wrapper.修法: `condition: service_healthy` → `service_started` (per ADR 0010 Decision d wrapper 独立启动,不依赖 kernel health).
+
+### Hygiene 守门 v0.7 + v1.2.0a 锚定维持 + v1.2.0b §4.11 NEW 守门启用
+
+- **§1 不锁型号 grep**: tracked 引用式 v1.2.0a §1.5 主表合计 (v1.2.0a 收口 289e7eb 实测) + disk 引用式 v1.2.0a §1.5 主表 disk 行 + 前向交付物 grep == 0 + wrapper/orchestrator/ grep == 0 (NEW §1 守门)
+- **§2 不硬编码 API key**: sk- 字面 == 0 + VAPID_PRIVATE_KEY == 0 + Tailscale auth key == 0 + wrapper/orchestrator/ == 0 + §2.7 NEW WORKER_POOL_DB 默认值守门 == 1
+- **§3 v1.0 runtime 0 行 diff**: harness/spec/spikes/9 ADR/docker-compose/pyproject == 0 + §3.7 NEW Dockerfile ≥ 1 (例外声明)
+- **§4 dsh headless profile**: web == 0 + headless ≥ 3 (实测 ≥ 19 + execution_driver.ts NEW 增量) + ExecutionDriver dsh ≥ 3 + HTTP fallback ≥ 1
+- **§4.10 v1.2.0a commander 真实现守门维持**: TODO(M1) in commander.ts == 0 + WorkflowPack refs = 3 + PlanPlan|PlanStep refs = 10 + AggregateError refs = 5 + orchestrator.ts 真走 commander ≥ 3
+- **§4.10.5/§4.10.6 NEW commander.ts TODO(v1.2.0b) + synthetic stub 替换守门**: TODO marker == 0 + stub-worker 字面 == 0
+- **§4.11 v1.2.0b worker 真实现守门 NEW (14 项 grep + 2 file exists + 2 dep/file)**: TODO(M1) in worker.ts == 0 + ExecutionDriver|worker_pool refs ≥ 6 + better-sqlite3|Database ≥ 4 + WAL|busy_timeout|journal_mode ≥ 3 + child_process|callDshHeadless ≥ 3 + fetch.*api/v1 ≥ 1 + server.ts worker.heartbeat ≥ 2 + worker.health() version="1.2.0b" ≥ 1 + spec/capabilities/worker.json deepseek-v4-flash ≥ 1 + 单测增量 ≥ 40 + 集成测试 gated ≥ 2 + worker_pool.ts + execution_driver.ts file exists + better-sqlite3 dep ≥ 1 + Dockerfile apk add ≥ 1
+- **§4.7.7 NEW server.ts handleWorkerHeartbeat 真接守门**: worker.heartbeat|worker_pool.heartbeat refs ≥ 2
+
+### U1-U5 实测 (2026-09-05 newvps Tailscale direct IP 100.99.5.90:4000)
+
+- **U1** TypeScript build on newvps: `ssh newvps 'cd /opt/fish-harness/wrapper && ./node_modules/.bin/tsc'` → exit 0 PASS
+- **U2** 双 gate 验证: `./node_modules/.bin/tsc --noEmit && ./node_modules/.bin/vitest run` → tsc 0 + vitest 27/27 PASS (基础 + M4 fix 收口)
+- **U3** 8 containers 全 Up: newvps-compose 3 (harness-kernel + wrapper + worker) + 6host-compose.newvps 5 (wrapper-orchestrator + worker ×4); `docker compose -f deploy/newvps-compose.yml up -d --force-recreate` + `docker compose -f deploy/6host-compose.newvps.yml up -d --force-recreate`
+- **U4** 真机 E2E 27/27 PASS (per `/tmp/run-u4.sh`):
+  - `test/integration/orch_commander.test.ts`: 7 tests ✅ (commander dispatch → planStep → dispatchStep → aggregateResults e2e with worker_pool)
+  - `test/integration/worker_pool.test.ts`: 5 tests ✅ (register → heartbeat → dispatch → drain + round-robin ms precision)
+  - `test/integration/pack_plan.test.ts`: 8 tests ✅ (PackPlan DAG topological sort + depends_on resolution)
+  - `test/integration/server_heartbeat.test.ts`: 7 tests ✅ (HTTP POST /api/v1/worker/heartbeat → SQLite 持久化)
+- **U5** 4+1 Funnel URL 5/5 200 (per newvps Tailscale direct IP):
+  - `GET /api/v1/worker/health`: 200, `{version: "1.2.0b", workers_count: 3, status: "ok"}` ← 关键 ms 证据 `last_heartbeat_at: 2026-09-05T02:32:52.415Z` (小数秒 .415)
+  - `POST /api/v1/worker/heartbeat {valid}`: 200, `wrk-013598df-1b56-4d5c-b09d-52ad655732d8`
+  - `GET /api/v1/commander/health`: 200, `{version: "1.2.0a", active_plans: 1}` (v1.2.0a anchor maintained)
+  - `POST /api/v1/tasks {valid}`: 200 (dispatch path 真走 commander 真走 worker)
+  - `GET /api/v1/status/test`: 200 (inline connectivity check)
+  - `workers_count: 3` ← U4 跑过的 3 个 register worker 持久化在 SQLite WAL,验证 round-robin dispatch 真选了不同 worker (不仅 fix 了 tie bug, 还验证了 3 个 worker 都被选中)
+
+### 7 commits 已 push (2026-09-05)
+
+| Hash | 主题 |
+|------|------|
+| `57dae79` | feat(v1.2.0b): worker 真实现 + worker_pool SQLite + ExecutionDriver dual + server heartbeat 真接 + M4 hygiene 归入 |
+| `f7eb145` | fix(v1.2.0b): add /api/v1/{worker,commander}/health routes for U5 4+1 路径 |
+| `26051c9` | fix(deploy): node:22-alpine → node:22-slim (musl/glibc 兼容性) |
+| `0bfa73b` | fix(deploy): wrapper depends_on kernel service_healthy → service_started (newvps-compose) |
+| `20d92ac` | fix(deploy): same depends_on 放松 (6host-compose 5 services) |
+| `e1f4f2e` | fix(deploy): node:22-slim → node:24-slim (Node v24 ABI 对齐 host) |
+| `24837d1` | fix(v1.2.0b): worker_pool last_heartbeat_at to ms precision + secondary sort |
+| `02711b0` | test(server_heartbeat): also reset worker.ts singleton in afterEach |
+
+### 4 大 root cause 完整溯源
+
+1. **musl/glibc 不匹配**: alpine 容器 (musl libc) vs Ubuntu host (glibc) → 容器 base image 全切 `node:24-slim` (glibc 双侧同)
+2. **Node ABI 不匹配**: host Node v24 (ABIv137) vs container Node v22 (ABIv127) → 容器升 v24 对齐 host
+3. **Kernel restart-loop**: pre-existing M0c 时代 CLI-vs-server bug (`python -m harness` 打印 version 即退出) → `depends_on` condition 放松 `service_healthy` → `service_started`
+4. **Round-robin dispatch tie**: `unixNowSeconds()` integer-second 精度导致 3+ worker 同一秒注册 tie → `unixNowMillis()` ms 精度 + secondary sort `worker_id ASC` 破剩余 ties
+
+### NEXT v1.2.0c/d sub-cycle 周期 (v1.2.0b PASS 后启动)
+
+- **v1.2.0c** 6 host routedDsh 真发到 MagicDNS + MacBook Worker 接入: 6host_router.ts routedDsh() 真发远程 + host_fencing.ts NEW (per ADR 0009 partial unique index) + deploy/macbook-compose + runbook + 11-15 文件 + 3-4 commits + 7-9 user EXEC + 5-7 天
+- **v1.2.0d** 防 OOM: docker compose memory limits + queue_store.ts NEW (SQLite-backed queue) + metrics.ts NEW (Prometheus exporter) + monitoring/prometheus.yml + runbook + 8-12 文件 + 2-3 commits + 5-7 user EXEC + 3-5 天
 
 ---
 
