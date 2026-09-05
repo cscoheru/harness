@@ -685,7 +685,7 @@ class AggregateError extends Error {
 - **v1.2.0c** 6 host routedDsh 真发到 MagicDNS + MacBook Worker 接入: 6host_router.ts routedDsh() 真发远程 + host_fencing.ts NEW (per ADR 0009 partial unique index) + deploy/macbook-mpose + runbook + 11-15 文件 + 3-4 commits + 7-9 user EXEC + 5-7 天
 - **v1.2.0d** 防 OOM: docker compose memory limits + queue_store.ts NEW (SQLite-backed queue) + metrics.ts NEW (Prometheus exporter) + monitoring/prometheus.yml + runbook + 8-12 文件 + 2-3 commits + 5-7 user EXEC + 3-5 天
 
-### v1.2.0c cycle scope（2026-09-05 — cross-host routedDsh 真发到 MagicDNS + MacBook Worker 接入 + host-id fencing per ADR 0009 + MagicDNS 命名裂痕修复）✅ v1.2.0c commit 1 起草 PASS
+### v1.2.0c cycle scope（2026-09-05 — cross-host routedDsh 真发到 MagicDNS + MacBook Worker 接入 + host-id fencing per ADR 0009 + MagicDNS 命名裂痕修复）✅ v1.2.0c formal PASS 0C/0M/0m + tag pushed @ `b5a1d07`
 
 v1.2 周期第三 sub-cycle（commander/worker 真实现 + 多机 LB + 防 OOM 大周期第 3 刀）: `6host_router.ts` HostId union 扩到 7 host (加 `macbook` per F20) + `MACBOOK_HOST` 常量 + `parseHostId()` 接受 `macbook.fish-harness.ts.net` + `routedDsh()` L277 替换 `callDshHeadless()` → 真发 `fetch(${getHostUrl(targetHost, 4001)}/api/v1/tasks)` 远程 host (per F12) + `getHostUrl()` 默认 port 改 4001 + `findAvailableHost()` worker candidate pool 加 MACBOOK_HOST + `orchestrator.ts` NEW `isWorkingHours(date)` 周一-周五 09:00-22:00 本地时间 + NEW `scoreMacBookWorker(baseScore, date)` 工作时段 +100 (per D6 + F14) + `host_fencing.ts` NEW ~140 行 `HostFence` per-host SQLite + `recordDispatch(task, host_id)` + `checkFencing(task)` + `completeDispatch(task, host, status)` + `HostIdFencingError` 类 (per F13 + ADR 0009 line 68) + `worker.ts` `resolveCapabilityPath()` 按 `WORKER_HOST` env 路由 `spec/capabilities/worker.json` 或 `macbook.json` + `WORKER_VERSION` 升到 `1.2.0c` + `spec/capabilities/macbook.json` NEW (`host_class: macbook-main` + `working_hours: true` per F14) + `spec/kernel-schema.sql` NEW `dispatches` 表 + `host_id` 列 + `CREATE UNIQUE INDEX idx_dispatches_task_host ON dispatches(task_id, host_id) WHERE status='active'` partial unique index (per F13) + `harness/runtime/worker_pool.py` `dispatch(task_id, host_id)` 加 host_id 参数 + INSERT dispatches + `HostIdFencingError` 类 + 失败 rollback (per F13) + `deploy/macbook-compose.yml` NEW (per F15) + `deploy/runbook-macbook-worker.md` NEW 11 步骤 + 6 troubleshooting + `tailscale-acl-6host.yaml` 加 `tag:macbook` 段 (per F16) + `tagOwners.tag:macbook: [cscoheru]` + 11 deploy 文件 MagicDNS rename `.tail1b9878.ts.net` → `.fish-harness.ts.net` canonical (per D5 + F11 命名裂痕修复) + 1 NEW unit test (`6host_router.test.ts` 14 tests) + 3 NEW integration tests gated (`cross_host_dispatch` 8 tests gated `RUN_CROSS_HOST_E2E=1` + `host_id_fencing` 7 tests gated `RUN_HOST_FENCING_E2E=1` + `macbook_worker` 8 tests gated `RUN_MACBOOK_E2E=1`).
 
@@ -723,12 +723,23 @@ v1.2 周期第三 sub-cycle（commander/worker 真实现 + 多机 LB + 防 OOM �
 - **routedDsh() defined but NOT wired into production dispatch flow** (intentional per F12) — exported + public surface ready; production `dispatch() → commander.dispatchStep() → worker_pool.dispatch() → worker.run()` chain 不调 routedDsh(); integration is future work (execution_driver.ts HTTP fallback stub 待 v1.2.0d 真接 MagicDNS 远程 host)
 - **harness-kernel is smoke container** (per ADR 0010 Decision d) — `python -m harness` prints version + exits; restart loop by design
 
-#### Pending 4 user EXEC (per plan §12.4)
+#### 6 commits 收口 (2026-09-05)
 
-- **U6** Codex v1.2.0c formal 复审 — user 亲提 `codex review --model gpt-5.6-sol --reasoning-effort xhigh notes/codex-audit-scope-v1.2.0c-v0.1-prompt.md` (预期 0C/0M/0m + §3.8/§4.12/§4.13/§4.14 全绿)
-- **U7** v1.2.0c minor tag @ boundary `b5a1d07` — user 亲提 via Clash proxy (per Debian stable point release 风格 v1.2.0a/b/c 同 boundary)
-- **U8** MacBook worker 真部署 per `deploy/runbook-macbook-worker.md` 11 步骤
-- **U9** 5 edge host 真 provision + ACL sync per F16 (Tailscale admin console 7 host ACL push)
+| # | Hash | Subject |
+|---|------|---------|
+| 1 | `e735a8d` | review(v1.2.0c): v0.1 prompt-review — drafting-contract 0C/2M/5m same-round closed (3 files) |
+| 2 | `3844243` | feat: v1.2.0c cross-host dispatch + MacBook + host-id fencing (D4/D5/D6) (26 files +1266/-86) |
+| 3 | `a6d6e06` | fix(wrapper): orchestrator.health() version 0.0.0-stub → 1.2.0c (1 file) |
+| 4 | `e08fe9d` | chore(v1.2.0c): cc-ready + CHANGELOG + README 簿记翻牌 (3 files +58/-3) |
+| 5 | `d8c8929` | chore(deploy): U8 + U9 execution checklists for v1.2.0c (2 NEW files +313) |
+| 6 | `9c2e325` | review(v1.2.0c): v0.1 formal PASS — same-round closure 0C/0M/5m → 0/0/0 (1 NEW review report) |
+
+#### User EXEC status (per plan §12.4, post cycle 闭环)
+
+- **U6** Codex v1.2.0c formal 复审 — **✅ PASS 0C/0M/0m** (user 亲提 `gpt-5.6-sol` + `xhigh`; commit `9c2e325`; 报告 `notes/codex-review-v1.2.0c-v0.1-formal-report.md`; 5 findings 全 pattern/测试层零实现 bug: m1 断言漂移 / m2 fetch 跨架构形态 ×4 / m3 class-method form ×6 / m4 camelCase + scope / m5 注释豁免第3例; 三源 verbatim 116/128/12 全闭; tsc 0 + vitest 205p/0f/130 gated = 335)
+- **U7** v1.2.0c minor tag @ boundary `b5a1d07` — **✅ pushed** via Clash proxy (per Debian stable point release 推进式风格 v1.2.0a/b 锁 `289e7eb`, v1.2.0c 推进到 `b5a1d07` = v1.2.0b cross-ref commit)
+- **U8** MacBook worker 真部署 per `deploy/U8-MACBOOK-DEPLOY-CHECKLIST.md` 8 步骤 + `deploy/runbook-macbook-worker.md` 11 步骤 — **⏳ user EXEC**
+- **U9** 5 edge host 真 provision + ACL sync per `deploy/U9-EDGE-PROVISION-CHECKLIST.md` 8 步骤 — **⏳ user EXEC** (5 VPS × 10-15 分钟/host = 50-75 分钟)
 
 ### v1.2.0b cycle scope（2026-09-05 — worker 真实现 + heartbeat 真接 worker + SQLite WorkerPool registry + ExecutionDriver dual + 4 root-cause fixes）✅ PASS
 

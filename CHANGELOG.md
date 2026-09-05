@@ -363,21 +363,23 @@ Cross-ref: [notes/codex-audit-scope-v1.2.0c-v0.1.md](notes/codex-audit-scope-v1.
 - **routedDsh() NOT wired into production dispatch flow** (intentional per F12) — defined per F12 in `wrapper/orchestrator/6host_router.ts:275-329`, exported, public surface ready. 但 production `dispatch()` chain 不调 routedDsh(): `orchestrator.dispatch() → commander.dispatchStep() → worker_pool.dispatch() → worker.run() (execution_driver.ts)`. execution_driver.ts 双模型 (D2) 主路径 `callDshHeadless(prompt, {modelClass:'worker'})` + 备用路径 `fetch(DSH_HTTP_URL + '/api/v1/tasks', POST)` stub — 备用路径是 routedDsh() 的 integration point, 待 v1.2.0d 或 v1.2.1 真接 MagicDNS 远程 host 时启用. 当前 routedDsh() 仅被 4 个 cross_host_dispatch.test.ts 用例 reference + 1 个 6host_router.test.ts 用例.
 - **harness-kernel is smoke container** (per v1.2.0b ADR 0010 Decision d + kernel smoke contract) — `python:3.14-alpine` runs `python -m harness` prints version + exits; restart loop by design; `depends_on condition: service_started` (NOT `service_healthy`) per v1.2.0b 0bfa73b + 20d92ac 修法.
 
-### 4 commits 收口 (2026-09-05)
+### 6 commits 收口 (2026-09-05)
 
 | # | Hash | Subject | Files |
 |---|------|---------|-------|
 | 1 | `e735a8d` | review(v1.2.0c): v0.1 prompt-review — drafting-contract 0C/2M/5m same-round closed | 3 (2 NEW notes/ + cc-ready) |
 | 2 | `3844243` | feat: v1.2.0c cross-host dispatch + MacBook + host-id fencing (D4/D5/D6) | 26 (+1266/-86) |
 | 3 | `a6d6e06` | fix(wrapper): orchestrator.health() version 0.0.0-stub → 1.2.0c | 1 |
-| 4 | (this commit) | chore(v1.2.0c): cc-ready + CHANGELOG + README 簿记翻 PASS | 3 |
+| 4 | `e08fe9d` | chore(v1.2.0c): cc-ready + CHANGELOG + README 簿记翻牌 | 3 (+58/-3) |
+| 5 | `d8c8929` | chore(deploy): U8 + U9 execution checklists for v1.2.0c | 2 NEW (+313) |
+| 6 | `9c2e325` | review(v1.2.0c): v0.1 formal PASS — same-round closure 0C/0M/5m → 0/0/0 | 1 NEW (review report) |
 
-### Pending 4 user EXEC (per plan §12.4)
+### User EXEC status (per plan §12.4, post cycle 闭环)
 
-- **U6** Codex v1.2.0c formal 复审 — user 亲提 `codex review --model gpt-5.6-sol --reasoning-effort xhigh notes/codex-audit-scope-v1.2.0c-v0.1-prompt.md` (预期 0C/0M/0m + §3.8/§4.12/§4.13/§4.14 全绿 + tracked 锚定 post-v1.2.0c = 116 + disk = 128 verbatim PASS)
-- **U7** v1.2.0c minor tag @ boundary `b5a1d07` (per Debian stable point release 风格 v1.2.0a/b/c 同 boundary) — user 亲提 `git tag -a v1.2.0c b5a1d07 -m "v1.2.0c: routedDsh 真发 + host_fencing + MacBook compose + MagicDNS 命名裂痕修复 + 6+1 host 真接 + 37/37 newvps E2E PASS" && git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin v1.2.0c` via Clash proxy
-- **U8** MacBook worker 真部署 per `deploy/runbook-macbook-worker.md` 11 步骤 (MacBook 本地 user EXEC; session 内 agent 无 MacBook daemon 控制)
-- **U9** 5 edge host 真 provision + ACL sync per F16 (5 edge host `tailscale set --advertise-tags=tag:edge --hostname=harness-edge[1-5]` + MacBook `tailscale set --advertise-tags=tag:macbook --hostname=kjonemacbook-pro` + Tailscale admin console 7 host ACL push; session 内 agent 无 Tailscale auth key + 无 VPS 采购能力)
+- **U6** Codex v1.2.0c formal 复审 — **✅ PASS 0C/0M/0m** (user 亲提 `gpt-5.6-sol` + `xhigh`; commit `9c2e325`; 报告落 `notes/codex-review-v1.2.0c-v0.1-formal-report.md`; 5 findings 全 pattern/测试层零实现 bug: m1 断言漂移 + m2 fetch 跨架构形态 ×4 + m3 class-method form ×6 + m4 camelCase + scope / m5 注释豁免第3例; 三源 verbatim 116/128/12 全闭; §3.8 canonical 63 ≥20 + tail1b9878 55→0; §4.12 16/16 + §4.13 12/12 + §4.14 8/8 全绿; tsc 0 + vitest 205p/0f/130 gated = 335)
+- **U7** v1.2.0c minor tag @ boundary `b5a1d07` — **✅ pushed** (`git tag -a v1.2.0c b5a1d07 -m "v1.2.0c: routedDsh 真发 + host_fencing + MacBook compose + MagicDNS 命名裂痕修复 + 6+1 host 真接 + 37/37 newvps E2E PASS"`; per Debian stable point release 推进式风格 v1.2.0a/b 锁 289e7eb, v1.2.0c 推进到 b5a1d07 = v1.2.0b cross-ref commit)
+- **U8** MacBook worker 真部署 per `deploy/U8-MACBOOK-DEPLOY-CHECKLIST.md` 8 步骤 + `deploy/runbook-macbook-worker.md` 11 步骤 — **⏳ user EXEC** (MacBook daemon 本地执行; session 内 agent 无 MacBook daemon 控制权)
+- **U9** 5 edge host 真 provision + ACL sync per F16 per `deploy/U9-EDGE-PROVISION-CHECKLIST.md` 8 步骤 — **⏳ user EXEC** (5 VPS × 10-15 分钟/host = 50-75 分钟总计; session 内 agent 无 Tailscale auth + 无 VPS 采购能力)
 
 ---
 
