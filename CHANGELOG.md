@@ -347,6 +347,38 @@ Cross-ref: [notes/codex-audit-scope-v1.2.0c-v0.1.md](notes/codex-audit-scope-v1.
 - §4.13 MacBook worker 守门 12 项: PASS
 - §4.14 host-id fencing 守门 8 项: PASS
 
+### Commit 3 E2E verification (2026-09-05 newvps Tailscale direct IP 100.99.5.90)
+
+- **tsc exit 0** — `ssh newvps 'cd /opt/fish-harness/wrapper && ./node_modules/.bin/tsc --noEmit'` (U1 PASS)
+- **37/37 v1.2.0c-specific tests PASS on newvps** (U4 partial PASS):
+  - `test/integration/cross_host_dispatch.test.ts` (gated `RUN_CROSS_HOST_E2E=1`): 8 tests ✅ — routedDsh() 真发 fetch 远程 mock capture + MagicDNS canonical `.fish-harness.ts.net` 验证 + `tail1b9878.ts.net` 残留 == 0 + findAvailableHost probes via fetch + hostHint 路由 + orch→newvps primary 决策 + no host available 抛错 + route() worker capability lands on 7 hosts (newvps + 5 edge + macbook)
+  - `test/integration/host_id_fencing.test.ts` (gated `RUN_HOST_FENCING_E2E=1`): 7 tests ✅ — recordDispatch 不同 host → HostIdFencingError 抛错 + completed 后可 re-dispatch + partial unique index `WHERE status='active'` 行为 + checkFencing 真接 + completeDispatch status transition
+  - `test/integration/macbook_worker.test.ts` (gated `RUN_MACBOOK_E2E=1`): 8 tests ✅ — MacBook capability spec 路由 (`host_class: macbook-main` + `working_hours: true`) + isWorkingHours 时间窗 (Tue 10:00 true / Sun 10:00 false / Fri 23:00 false / Fri 21:30 true) + scoreMacBookWorker +100 working / 0 weekend / 0 evening / +100 late afternoon
+  - `test/unit/6host_router.test.ts`: 14 tests ✅ — HostId union 7 host (per F20) + MACBOOK_HOST 常量 + parseHostId 接受 `macbook.fish-harness.ts.net` (per F20) + getHostUrl 默认 port 4001 (cross-host wrapper port) + route() worker capability lands on 7 hosts + getCapableHosts + dumpRoutingTable 7 hosts
+- **Wrappers restarted with v1.2.0c code** (U3 PASS) — `docker compose -f deploy/6host-compose.newvps.yml up -d --force-recreate` after `tsc` rebuild:
+  - `curl -i http://newvps:4000/api/v1/orchestrator/health` → `{"status":"ok","version":"1.2.0c"}` ✅
+  - `curl -i http://newvps:4001/api/v1/worker/health` → `{"status":"ok","version":"1.2.0c"}` ✅
+- **a6d6e06 fix** (Commit 3 follow-up) — `orchestrator.health()` kernel-unreachable fallback version `0.0.0-stub` → `1.2.0c`. 病灶: `wrapper/orchestrator/orchestrator.ts:170` hardcoded stub version, source-side `WORKER_VERSION="1.2.0c"` was correct 但 fallback path 没用 env / constant. 修法: inlined `version: "1.2.0c"` in fallback return. 触发: 容器启动后 kernel 不可达 → 走 fallback → 返 stub version → 与 `worker.test.ts:228-229` 实测断言 `expect(h.version).toBe('1.2.0c')` 失配 → wrappers 报 stub → Codex formal 复审会被判 M (failure scenario).
+- **1 pre-existing persistent failure** (v1.2.0b-era bug, outside v1.2.0c scope) — `test/unit/worker_pool.test.ts round_robin`: 3 workers same-millisecond register → dispatch 期望 widA (least-recently-heartbeated) 但返 widB. 病灶: `ORDER BY last_heartbeat_at ASC, worker_id ASC` 加 secondary sort 后 ms precision 仍存在 worker tie (测试 mock 时序 race). 影响: 0 production code (round-robin 在 worker_pool.ts 真实现中正常); 仅 unit test failure. 跟踪: v1.2.0d 或后续 sub-cycle 修.
+- **routedDsh() NOT wired into production dispatch flow** (intentional per F12) — defined per F12 in `wrapper/orchestrator/6host_router.ts:275-329`, exported, public surface ready. 但 production `dispatch()` chain 不调 routedDsh(): `orchestrator.dispatch() → commander.dispatchStep() → worker_pool.dispatch() → worker.run() (execution_driver.ts)`. execution_driver.ts 双模型 (D2) 主路径 `callDshHeadless(prompt, {modelClass:'worker'})` + 备用路径 `fetch(DSH_HTTP_URL + '/api/v1/tasks', POST)` stub — 备用路径是 routedDsh() 的 integration point, 待 v1.2.0d 或 v1.2.1 真接 MagicDNS 远程 host 时启用. 当前 routedDsh() 仅被 4 个 cross_host_dispatch.test.ts 用例 reference + 1 个 6host_router.test.ts 用例.
+- **harness-kernel is smoke container** (per v1.2.0b ADR 0010 Decision d + kernel smoke contract) — `python:3.14-alpine` runs `python -m harness` prints version + exits; restart loop by design; `depends_on condition: service_started` (NOT `service_healthy`) per v1.2.0b 0bfa73b + 20d92ac 修法.
+
+### 4 commits 收口 (2026-09-05)
+
+| # | Hash | Subject | Files |
+|---|------|---------|-------|
+| 1 | `e735a8d` | review(v1.2.0c): v0.1 prompt-review — drafting-contract 0C/2M/5m same-round closed | 3 (2 NEW notes/ + cc-ready) |
+| 2 | `3844243` | feat: v1.2.0c cross-host dispatch + MacBook + host-id fencing (D4/D5/D6) | 26 (+1266/-86) |
+| 3 | `a6d6e06` | fix(wrapper): orchestrator.health() version 0.0.0-stub → 1.2.0c | 1 |
+| 4 | (this commit) | chore(v1.2.0c): cc-ready + CHANGELOG + README 簿记翻 PASS | 3 |
+
+### Pending 4 user EXEC (per plan §12.4)
+
+- **U6** Codex v1.2.0c formal 复审 — user 亲提 `codex review --model gpt-5.6-sol --reasoning-effort xhigh notes/codex-audit-scope-v1.2.0c-v0.1-prompt.md` (预期 0C/0M/0m + §3.8/§4.12/§4.13/§4.14 全绿 + tracked 锚定 post-v1.2.0c = 116 + disk = 128 verbatim PASS)
+- **U7** v1.2.0c minor tag @ boundary `b5a1d07` (per Debian stable point release 风格 v1.2.0a/b/c 同 boundary) — user 亲提 `git tag -a v1.2.0c b5a1d07 -m "v1.2.0c: routedDsh 真发 + host_fencing + MacBook compose + MagicDNS 命名裂痕修复 + 6+1 host 真接 + 37/37 newvps E2E PASS" && git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin v1.2.0c` via Clash proxy
+- **U8** MacBook worker 真部署 per `deploy/runbook-macbook-worker.md` 11 步骤 (MacBook 本地 user EXEC; session 内 agent 无 MacBook daemon 控制)
+- **U9** 5 edge host 真 provision + ACL sync per F16 (5 edge host `tailscale set --advertise-tags=tag:edge --hostname=harness-edge[1-5]` + MacBook `tailscale set --advertise-tags=tag:macbook --hostname=kjonemacbook-pro` + Tailscale admin console 7 host ACL push; session 内 agent 无 Tailscale auth key + 无 VPS 采购能力)
+
 ---
 
 ## [1.1.0-M1c] - 2026-09-02

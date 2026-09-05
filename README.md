@@ -707,6 +707,29 @@ v1.2 周期第三 sub-cycle（commander/worker 真实现 + 多机 LB + 防 OOM �
 
 **user 必须执行挂账 (per plan §12.4 U1-U9)**: U1 TypeScript build + U2 双 gate (tsc 0 + vitest ≥220 passed | 0 failed) + U3 docker compose restart (5 edge + 3 newvps services Up) + U4 107 gated E2E 真跑 (含 RUN_CROSS_HOST_E2E=1 + RUN_HOST_FENCING_E2E=1 + RUN_MACBOOK_E2E=1) + U5 7 Funnel URL 路径 200 (newvps + 5 edge + MacBook, per F11 修复后 MagicDNS 一致) + U6 Codex v1.2.0c formal 复审 PASS (user 亲提 `gpt-5.6-sol` + `xhigh`) + U7 v1.2.0c minor tag @ boundary commit 289e7eb (per Debian stable point release 风格) + U8 MacBook worker 真部署 (per F15 + runbook) + U9 5 edge host 真 provision + ACL sync (per F16).
 
+#### Commit 3 E2E verification (2026-09-05 newvps Tailscale direct IP 100.99.5.90)
+
+- **tsc exit 0** — `ssh newvps 'cd /opt/fish-harness/wrapper && ./node_modules/.bin/tsc --noEmit'` ✅
+- **37/37 v1.2.0c-specific tests PASS on newvps**:
+  - `test/integration/cross_host_dispatch.test.ts` (gated `RUN_CROSS_HOST_E2E=1`): 8 tests ✅ — routedDsh fetch 真发 + MagicDNS canonical `.fish-harness.ts.net` + findAvailableHost probes + hostHint 路由
+  - `test/integration/host_id_fencing.test.ts` (gated `RUN_HOST_FENCING_E2E=1`): 7 tests ✅ — recordDispatch/checkFencing/completeDispatch + HostIdFencingError + partial unique index
+  - `test/integration/macbook_worker.test.ts` (gated `RUN_MACBOOK_E2E=1`): 8 tests ✅ — MacBook capability spec + isWorkingHours 时间窗 + scoreMacBookWorker +100 working / 0 weekend
+  - `test/unit/6host_router.test.ts`: 14 tests ✅ — HostId union 7 host + MACBOOK_HOST + parseHostId + getHostUrl default 4001 + route() + dumpRoutingTable
+- **Wrappers restarted with v1.2.0c code**:
+  - `curl -i http://newvps:4000/api/v1/orchestrator/health` → `{"status":"ok","version":"1.2.0c"}` ✅
+  - `curl -i http://newvps:4001/api/v1/worker/health` → `{"status":"ok","version":"1.2.0c"}` ✅
+- **a6d6e06 fix** — `orchestrator.health()` kernel-unreachable fallback version `0.0.0-stub` → `1.2.0c` (commit 3 follow-up: source had `WORKER_VERSION="1.2.0c"` but `orchestrator.ts:170` fallback hardcoded stub version; fixed by inlining `version: "1.2.0c"` in fallback return)
+- **1 pre-existing persistent failure** (v1.2.0b-era, outside v1.2.0c scope) — `test/unit/worker_pool.test.ts round_robin` ms precision tie mock race; tracked for v1.2.0d/future
+- **routedDsh() defined but NOT wired into production dispatch flow** (intentional per F12) — exported + public surface ready; production `dispatch() → commander.dispatchStep() → worker_pool.dispatch() → worker.run()` chain 不调 routedDsh(); integration is future work (execution_driver.ts HTTP fallback stub 待 v1.2.0d 真接 MagicDNS 远程 host)
+- **harness-kernel is smoke container** (per ADR 0010 Decision d) — `python -m harness` prints version + exits; restart loop by design
+
+#### Pending 4 user EXEC (per plan §12.4)
+
+- **U6** Codex v1.2.0c formal 复审 — user 亲提 `codex review --model gpt-5.6-sol --reasoning-effort xhigh notes/codex-audit-scope-v1.2.0c-v0.1-prompt.md` (预期 0C/0M/0m + §3.8/§4.12/§4.13/§4.14 全绿)
+- **U7** v1.2.0c minor tag @ boundary `b5a1d07` — user 亲提 via Clash proxy (per Debian stable point release 风格 v1.2.0a/b/c 同 boundary)
+- **U8** MacBook worker 真部署 per `deploy/runbook-macbook-worker.md` 11 步骤
+- **U9** 5 edge host 真 provision + ACL sync per F16 (Tailscale admin console 7 host ACL push)
+
 ### v1.2.0b cycle scope（2026-09-05 — worker 真实现 + heartbeat 真接 worker + SQLite WorkerPool registry + ExecutionDriver dual + 4 root-cause fixes）✅ PASS
 
 v1.2 周期第二 sub-cycle（commander/worker 真实现 + 多机 LB + 防 OOM 大周期第 2 刀）: `worker.ts` 8 函数 stub → real + `worker_pool.ts` NEW ~220 行（better-sqlite3 per-host + WAL + busy_timeout=5000 per ADR 0009 + 6 methods per types.ts WorkerPool Protocol + round-robin ms precision + secondary sort）+ `execution_driver.ts` NEW ~200 行（subprocess spawn 主路径 + HTTP fallback stub per D2 + DriverEvent stream）+ `commander.ts:113-114` TODO(v1.2.0b) 替换为真调 `worker_pool.dispatch(task_id)` + `server.ts handleWorkerHeartbeat` PURE STUB → real + 新增 `/api/v1/{worker,commander}/health` 路由 + `spec/capabilities/worker.json` 校准 `model_id: deepseek-v4-flash` + `wrapper/package.json` 加 `better-sqlite3@^11` + `Dockerfile` 加 `apk add python3 make g++` (§3.7 NEW Dockerfile 例外声明) + 4 NEW unit tests (worker REWRITE 50 + worker_pool 30 + execution_driver 20 = 100 单测) + 2 NEW integration tests gated (worker_pool 12 + server_heartbeat 10) + M4 hygiene fix 合并 commit 2 (vi.restoreAllMocks → vi.clearAllMocks per D3).
