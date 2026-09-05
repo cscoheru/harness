@@ -29,7 +29,7 @@
 | 5× VPS instances | Provider of choice (Hetzner / DO / Vultr / aliyun) | Ubuntu 22.04 LTS, ≥1 GB RAM, ≥10 GB disk | One per region (east-1 / west-1 / asia-1 / eu-1 / sa-1) |
 | DEEPSEEK_API_KEY | DeepSeek dashboard | sk-… | **Same** key as newvps; env-inject only |
 | VAPID_PUBLIC_KEY | `deploy/vapid_public.key` (committed) | base64url | Edge hosts don't need the private key |
-| MagicDNS suffix | Tailscale admin console | `tail1b9878.ts.net` | Verify under DNS tab |
+| MagicDNS suffix | Tailscale admin console | `fish-harness.ts.net` | Verify under DNS tab |
 
 **Forbidden on edge hosts**:
 - ❌ STT worker (whisper.cpp) — newvps only
@@ -76,7 +76,7 @@ tailscale funnel --bg 4001
 # Verify
 tailscale funnel status
 # Expected:
-#   https://harness-edge<N>.tail1b9878.ts.net (Funnel on port 4001)
+#   https://$1.fish-harness.ts.net (Funnel on port 4001)
 ```
 
 Repeat for each of the 5 hosts (edge1..5). Each host exposes its OWN port 4001 via Funnel; the MagicDNS name disambiguates.
@@ -127,15 +127,15 @@ curl -s http://localhost:4001/health
 # Expected: {"status":"ok","version":"0.0.0-stub"} (or real kernel response)
 
 # Cross-host routing (from edge to newvps)
-curl -s http://harness-newvps.tail1b9878.ts.net:8000/health
+curl -s http://$1.fish-harness.ts.net:8000/health
 # Expected: kernel health response
 
 # Funnel HTTPS entrypoint (from outside Tailscale)
-curl -s https://harness-edge<N>.tail1b9878.ts.net/health
+curl -s https://$1.fish-harness.ts.net/health
 # Expected: wrapper health response
 
 # Funnel SPA fallback
-curl -s -o /dev/null -w "%{http_code}\n" https://harness-edge<N>.tail1b9878.ts.net/
+curl -s -o /dev/null -w "%{http_code}\n" https://$1.fish-harness.ts.net/
 # Expected: 200 (HTML shell)
 ```
 
@@ -147,11 +147,11 @@ If any step fails, see §5 故障排除.
 
 | Host | EDGE_REGION | container_name | WRAPPER_PORT | Funnel URL |
 |------|-------------|----------------|--------------|------------|
-| edge1 | east-1 | harness-edge1-wrapper | 4001 | https://harness-edge1.tail1b9878.ts.net |
-| edge2 | west-1 | harness-edge2-wrapper | 4001 | https://harness-edge2.tail1b9878.ts.net |
-| edge3 | asia-1 | harness-edge3-wrapper | 4001 | https://harness-edge3.tail1b9878.ts.net |
-| edge4 | eu-1 | harness-edge4-wrapper | 4001 | https://harness-edge4.tail1b9878.ts.net |
-| edge5 | sa-1 | harness-edge5-wrapper | 4001 | https://harness-edge5.tail1b9878.ts.net |
+| edge1 | east-1 | harness-edge1-wrapper | 4001 | https://$1.fish-harness.ts.net |
+| edge2 | west-1 | harness-edge2-wrapper | 4001 | https://$1.fish-harness.ts.net |
+| edge3 | asia-1 | harness-edge3-wrapper | 4001 | https://$1.fish-harness.ts.net |
+| edge4 | eu-1 | harness-edge4-wrapper | 4001 | https://$1.fish-harness.ts.net |
+| edge5 | sa-1 | harness-edge5-wrapper | 4001 | https://$1.fish-harness.ts.net |
 
 All 5 hosts share the same `wrapper/build/server.js` binary (built once, deployed 5×).
 
@@ -162,21 +162,21 @@ All 5 hosts share the same `wrapper/build/server.js` binary (built once, deploye
 ```bash
 # From newvps, verify MagicDNS resolves all 5 edge hosts
 for n in 1 2 3 4 5; do
-  echo -n "harness-edge${n}.tail1b9878.ts.net → "
-  getent hosts harness-edge${n}.tail1b9878.ts.net || echo "UNRESOLVED"
+  echo -n "$1.fish-harness.ts.net → "
+  getent hosts $1.fish-harness.ts.net || echo "UNRESOLVED"
 done
 
 # From any host, verify Funnel HTTPS is reachable (5 separate URLs)
 for n in 1 2 3 4 5; do
-  curl -s -o /dev/null -w "https://harness-edge${n}.tail1b9878.ts.net/health → %{http_code}\n" \
-    https://harness-edge${n}.tail1b9878.ts.net/health
+  curl -s -o /dev/null -w "https://$1.fish-harness.ts.net/health → %{http_code}\n" \
+    https://$1.fish-harness.ts.net/health
 done
 # Expected: 5 lines, each "200"
 
 # Verify the 6 orchestration endpoints respond on the Funnel URL
 for path in / /health /api/v1/status/test /api/v1/worker/heartbeat; do
   curl -s -o /dev/null -w "edge1 ${path} → %{http_code}\n" \
-    https://harness-edge1.tail1b9878.ts.net${path}
+    https://$1.fish-harness.ts.net${path}
 done
 # Expected: 4 lines, each "200"
 ```

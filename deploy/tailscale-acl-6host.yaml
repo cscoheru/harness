@@ -5,7 +5,7 @@
 # Devices:   owner device + newvps host + 5 edge hosts + iPhone Safari
 #
 # M2 扩 (vs M1c tailscale-acl.yaml):
-#   - 加 5 edge host MagicDNS names (harness-edge1-5.tail1b9878.ts.net)
+#   - 加 5 edge host MagicDNS names (edge1-5.fish-harness.ts.net)
 #   - 加 port 4001 (edge wrapper)
 #   - 加 port 8080 (newvps STT worker)
 #   - 加 port 8081 (newvps Web Push gateway)
@@ -25,12 +25,12 @@
 #   - Explicit deny all other traffic
 #
 # 6 Funnel HTTPS URLs (MagicDNS → local port):
-#   https://harness-newvps.tail1b9878.ts.net/  → newvps :4000
-#   https://harness-edge1.tail1b9878.ts.net/   → edge1 :4001
-#   https://harness-edge2.tail1b9878.ts.net/   → edge2 :4001
-#   https://harness-edge3.tail1b9878.ts.net/   → edge3 :4001
-#   https://harness-edge4.tail1b9878.ts.net/   → edge4 :4001
-#   https://harness-edge5.tail1b9878.ts.net/   → edge5 :4001
+#   https://newvps.fish-harness.ts.net/  → newvps :4000
+#   https://edge1.fish-harness.ts.net/   → edge1 :4001
+#   https://edge2.fish-harness.ts.net/   → edge2 :4001
+#   https://edge3.fish-harness.ts.net/   → edge3 :4001
+#   https://edge4.fish-harness.ts.net/   → edge4 :4001
+#   https://edge5.fish-harness.ts.net/   → edge5 :4001
 #
 # PRD-v1.1 §4.1: Tailscale-only — no Basic Auth, no public HTTPS.
 # NORTH-STAR §7: Tailscale identity replaces Basic Auth.
@@ -71,7 +71,7 @@
     {
       "action": "accept",
       "src": ["tag:edge"],
-      "dst": ["harness-newvps:8000,443"]
+      "dst": ["newvps:8000,443"]
     },
 
     # Edge hosts can talk to each other on local wrapper port 4001
@@ -79,6 +79,21 @@
       "action": "accept",
       "src": ["tag:edge"],
       "dst": ["tag:edge:4001,*"]
+    },
+
+    # MacBook (tag:macbook, v1.2.0c NEW per F16) can reach newvps wrapper (4000/4001) +
+    # kernel (8000) + edges (4001) for cross-host dispatch.
+    {
+      "action": "accept",
+      "src": ["tag:macbook"],
+      "dst": ["newvps:4000,4001,8000,443", "tag:edge:4001,*"]
+    },
+
+    # MacBook can reach other MacBooks (worktree-pair scenarios)
+    {
+      "action": "accept",
+      "src": ["tag:macbook"],
+      "dst": ["tag:macbook:*"]
     },
 
     # iPhone Safari device: Funnel 443 only (no internal port access)
@@ -101,6 +116,7 @@
   "tagOwners": {
     "tag:harness": ["cscoheru"],
     "tag:edge":    ["cscoheru"],
+    "tag:macbook": ["cscoheru"],
     "tag:admin":  ["cscoheru"]
   },
 

@@ -8,7 +8,7 @@
 #   - No STT worker (whisper.cpp 仅在 newvps)
 #   - No Web Push gateway (VAPID 私钥仅在 newvps 集中管理)
 #   - Container inter-connect: use container_name (no pinned IP)
-#   - Cross-host routing: Tailscale MagicDNS (harness-newvps.tail1b9878.ts.net)
+#   - Cross-host routing: Tailscale MagicDNS (newvps.fish-harness.ts.net)
 #   - Port 4001 exposed via Tailscale Funnel
 #
 # References:
@@ -28,7 +28,7 @@ services:
     env_file:
       - env/edge-host.env.example
     environment:
-      HARNESS_API_URL: "http://harness-newvps.tail1b9878.ts.net:8000"
+      HARNESS_API_URL: "http://newvps.fish-harness.ts.net:4000"
       WRAPPER_PORT: "4001"
       WORKER_ID: "${WORKER_ID:-edge2-wrapper}"
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"

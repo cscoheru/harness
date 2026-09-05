@@ -293,6 +293,62 @@ Cross-ref: [notes/codex-audit-scope-v1.2.0b-v0.1.md](notes/codex-audit-scope-v1.
 
 ---
 
+## [1.2.0c] - 2026-09-05
+
+v1.2.0c cycle scope — cross-host 真发 (routedDsh fetch) + MacBook Worker 接入 + host-id fencing per ADR 0009 + MagicDNS 命名裂痕修复 (`.tail1b9878.ts.net` → `.fish-harness.ts.net` canonical).
+
+Cross-ref: [notes/codex-audit-scope-v1.2.0c-v0.1.md](notes/codex-audit-scope-v1.2.0c-v0.1.md) (§3.8 MagicDNS 命名裂痕修复 + §4.12 cross-host 真发守门 16 项 + §4.13 MacBook worker 守门 12 项 + §4.14 host-id fencing 守门 8 项) + [notes/codex-audit-scope-v1.2.0c-v0.1-prompt.md](notes/codex-audit-scope-v1.2.0c-v0.1-prompt.md) (Codex 复审 prompt).
+
+### Decisions (per 决策 3D 2026-09-05)
+
+- **D4=D** — v1.2.0c full scope per plan §4 (107 gated E2E + per-host WAL + 6 host routedDsh 真发 + MacBook + host-id fencing)
+- **D5=A** — MagicDNS canonical suffix = `.fish-harness.ts.net` (per F11 + 6 deploy 文件重命名)
+- **D6=A** — MacBook scoring +100 工作时段 Mon-Fri 09:00-22:00 本地时间 (per F14)
+
+### Added
+
+- **`wrapper/orchestrator/6host_router.ts`** — HostId union 扩到 7 host (加 `macbook` per F20) + `MACBOOK_HOST` 常量 + `parseHostId()` 接受 `macbook.fish-harness.ts.net` + `routedDsh()` L277 替换 `callDshHeadless()` → 真发 `fetch(${getHostUrl(targetHost, 4001)}/api/v1/tasks)` 远程 host (per F12) + `getHostUrl()` 默认 port 改 4001 (cross-host wrapper port) + `findAvailableHost()` worker candidate pool 加 MACBOOK_HOST
+- **`wrapper/orchestrator/orchestrator.ts`** — NEW `isWorkingHours(date)` 周一-周五 09:00-22:00 本地时间 + NEW `scoreMacBookWorker(baseScore, date)` 工作时段 +100 (per D6 + F14)
+- **`wrapper/orchestrator/host_fencing.ts`** NEW ~140 行 — `HostFence` per-host SQLite + `recordDispatch(task, host_id)` + `checkFencing(task)` + `completeDispatch(task, host, status)` + `HostIdFencingError` 类 (per F13 + ADR 0009 line 68)
+- **`wrapper/orchestrator/worker.ts`** — `resolveCapabilityPath()` 按 `WORKER_HOST` env 路由 `spec/capabilities/worker.json` 或 `macbook.json` + `WORKER_VERSION` 升到 `1.2.0c` + `MACBOOK_CAPABILITY_FILE` 常量
+- **`spec/capabilities/macbook.json`** NEW — `model_id: deepseek-v4-flash` + `host_class: macbook-main` + `working_hours: true` + `region: local-mac` (per F14)
+- **`spec/kernel-schema.sql`** — NEW `dispatches` 表 + `host_id TEXT NOT NULL DEFAULT 'unknown'` + `CREATE UNIQUE INDEX idx_dispatches_task_host ON dispatches(task_id, host_id) WHERE status='active'` partial unique index (per F13 + ADR 0009 line 68)
+- **`harness/runtime/worker_pool.py`** — `dispatch(task_id, host_id)` 加 host_id 参数 + INSERT dispatches with host_id + `HostIdFencingError` 类 + 失败 rollback (per F13)
+- **`deploy/macbook-compose.yml`** NEW ~40 行 — `image: node:24-slim` (per F19 alpine 避开) + `WORKER_HOST: kjonemacbook-pro` + `EDGE_REGION: local-mac` + bind mount `/Users/kjonekong/projects/fish-harness:/app:ro` + `mem_limit: 2g` + `HARNESS_API_URL: http://newvps.fish-harness.ts.net:4000` (per D5)
+- **`deploy/runbook-macbook-worker.md`** NEW — 11 步骤 (Docker Desktop / colima `--vm-type=qemu --arch=x86_64` per F19 + Tailscale `tag:macbook` + pmset disablesleep + scoring +100 + graceful degradation 心跳失败 3 次 reassign per PRD §3.1) + 6 troubleshooting 项
+- **`deploy/tailscale-acl-6host.yaml`** — 加 `tag:macbook` 段 (per F16) + `tagOwners.tag:macbook: [cscoheru]` + MagicDNS rename `harness-{newvps,edge[1-5]}.tail1b9878.ts.net` → `{newvps,edge[1-5]}.fish-harness.ts.net` (per D5 + F11)
+- **`deploy/tailscale-funnel-6host.yaml`** — MagicDNS rename 同上 + 加 `kjonemacbook.fish-harness.ts.net` Funnel 入口 → `127.0.0.1:4001`
+- **`deploy/env/edge-host.env.example`** — `HARNESS_API_URL` 默认改 `http://newvps.fish-harness.ts.net:4000`
+- **`deploy/6host-compose.edge[1-5].yml`** — 5 文件 `HARNESS_API_URL` 改 `http://newvps.fish-harness.ts.net:4000` + MagicDNS 注释 rename
+- **`deploy/runbook-edge-provision.md`** — MagicDNS 全面 rename 到 `.fish-harness.ts.net` canonical
+
+### Tests (3 NEW gated + 1 NEW unit)
+
+- **`wrapper/test/unit/6host_router.test.ts`** NEW ~110 行 — 14 unit tests 覆盖 HostId union + MACBOOK_HOST + parseHostId + getHostUrl default 4001 + route() worker capability lands on 7 hosts + getCapableHosts + dumpRoutingTable (7 hosts)
+- **`wrapper/test/integration/cross_host_dispatch.test.ts`** NEW ~120 行 — gated by `RUN_CROSS_HOST_E2E=1` + 8 tests 验证 routedDsh 真发 fetch 远程 + MagicDNS 命名一致性 + findAvailableHost probes
+- **`wrapper/test/integration/host_id_fencing.test.ts`** NEW ~80 行 — gated by `RUN_HOST_FENCING_E2E=1` + 7 tests 验证 recordDispatch 不同 host → HostIdFencingError + completed 后可 re-dispatch
+- **`wrapper/test/integration/macbook_worker.test.ts`** NEW ~120 行 — gated by `RUN_MACBOOK_E2E=1` + 8 tests 验证 capability spec + isWorkingHours 时间窗 (Tue 10:00 / Sun 10:00 / Fri 23:00 / Fri 21:30) + scoreMacBookWorker +100 working / 0 weekend
+
+### Changed
+
+- `wrapper/orchestrator/worker.ts` `WORKER_VERSION`: `1.2.0b` → `1.2.0c`
+- 11 deploy 文件 MagicDNS rename (6host-compose.edge[1-5] + 6host-compose.newvps + tailscale-acl-6host + tailscale-funnel-6host + runbook-edge-provision + env/edge-host.env.example)
+
+### Hygiene (per §4.12/§4.13/§4.14 audit-scope)
+
+- tracked 锚定: 116 文件 (v1.2.0a 收口 289e7eb 锚定维持; v1.2.0c 不动 docs/adr/spec 主表)
+- disk verbatim: 128 = 116 tracked + 12 self-injury (verbatim 校准落定 — 实测非公式预测)
+- v1.0 runtime 0 行 diff (§3.7 Dockerfile + §3.8 worker_pool.py + §3.9 spec/kernel-schema.sql 三例外声明覆盖所有改动)
+- 不锁型号 / 不硬编码 key / 不引入 web profile (v0.7 §4 维持)
+- §3.8 MagicDNS 命名裂痕修复: PASS (`tail1b9878.ts.net` 残留 in wrapper/orchestrator/ + deploy/ == 0)
+- §4.10 v1.2.0a commander 真实现守门 14 项: PASS (维持)
+- §4.11 v1.2.0b worker 真实现守门 14 项: PASS (维持)
+- §4.12 cross-host 真发守门 16 项: PASS
+- §4.13 MacBook worker 守门 12 项: PASS
+- §4.14 host-id fencing 守门 8 项: PASS
+
+---
+
 ## [1.1.0-M1c] - 2026-09-02
 
 M1c 阶段 — TypeScript wrapper 三档 profile 收口 + vitest 稳定化 + Codex formal PASS + iPhone Safari Funnel E2E 实测.

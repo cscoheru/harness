@@ -11,6 +11,10 @@
  * Calls v1.0 runtime kernel via HTTP/FFI — see v1.0-runtime-integration-roadmap.md §5.
  * Does NOT lock to a specific model. Uses modelClass from DshOpts.
  * Does NOT hardcode DEEPSEEK_API_KEY — injected via process.env.
+ *
+ * v1.2.0c (per D6 + F14): adds isWorkingHours() and scoreMacBookWorker()
+ * to bias worker selection toward MacBook during owner working hours
+ * (Mon-Fri 09:00-22:00 local time).
  */
 
 import type {
@@ -119,6 +123,30 @@ interface KernelStatusResult {
 }
 
 // ─── Orchestrator ─────────────────────────────────────────────────────────────
+
+/**
+ * v1.2.0c (per D6 + F14): Working-hours window for MacBook scoring.
+ * Returns true Monday-Friday 09:00-22:00 local time.
+ * Exported so tests can mock Date and verify the boundary conditions.
+ */
+export function isWorkingHours(date: Date = new Date()): boolean {
+  const day = date.getDay();   // 0=Sun, 1=Mon, ..., 6=Sat
+  const hour = date.getHours(); // 0-23 local time
+  if (day === 0 || day === 6) return false; // weekend
+  return hour >= 9 && hour < 22;            // 09:00 ≤ hour < 22:00
+}
+
+/**
+ * v1.2.0c (per D6 + F14): Score a MacBook worker. Adds +100 during working
+ * hours (Mon-Fri 09:00-22:00). Returns baseScore unchanged otherwise.
+ * Used by orchestrator dispatch scoring to bias worker selection.
+ */
+export function scoreMacBookWorker(baseScore: number, date: Date = new Date()): number {
+  if (isWorkingHours(date)) {
+    return baseScore + 100;
+  }
+  return baseScore;
+}
 
 /**
  * Health check — probes the v1.0 runtime kernel HTTP facade.

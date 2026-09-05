@@ -1,0 +1,10 @@
+{
+  "driver_kind": "codex_exec",
+  "model_id": "deepseek-v4-flash",
+  "tier": "low-cost-batch",
+  "evidence_uri": "spec/capabilities/macbook.json",
+  "host_class": "macbook-main",
+  "working_hours": true,
+  "region": "local-mac",
+  "notes": "MacBook Pro M1 worker — primary worker during owner working hours. Wakes up on Tailscale MagicDNS ping; scoring +100 in isWorkingHours() window (Mon-Fri 09:00-22:00 local time)."
+}

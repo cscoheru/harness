@@ -55,9 +55,11 @@ import {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const WORKER_VERSION = "1.2.0b";
+const WORKER_VERSION = "1.2.0c";
 const DEFAULT_RUNTIME_URL = "http://127.0.0.1:8000";
 const CAPABILITY_FILE = "spec/capabilities/worker.json";
+/** v1.2.0c (per F14): MacBook capability spec — same shape, different evidence_uri + host_class */
+const MACBOOK_CAPABILITY_FILE = "spec/capabilities/macbook.json";
 
 /** Module-level state — set by register(); read by heartbeat/drain. */
 let currentWorkerId: string | null = null;
@@ -227,7 +229,7 @@ export async function health(): Promise<WorkerHealth> {
 /**
  * Register this worker with the WorkerPool SQLite registry.
  *
- * host: MagicDNS hostname (e.g. "fish-harness-newvps.tail1b9878.ts.net")
+ * host: MagicDNS hostname (e.g. "newvps.fish-harness.ts.net" or "edge1.fish-harness.ts.net")
  * capabilities_json: raw JSON of capabilities — typically the worker.json
  *                    spec plus runtime detection (driver_kind, model_id,
  *                    max_concurrent_attempts)
@@ -276,14 +278,20 @@ export async function getTaskStatus(_taskId: string): Promise<TaskStatus> {
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
 function resolveCapabilityPath(): string | null {
-  // Walk up from this file's directory to find spec/capabilities/worker.json.
+  // v1.2.0c (per F14): choose spec file based on WORKER_HOST env var.
+  // MacBook workers set WORKER_HOST=kjonemacbook-pro, which maps to macbook.json;
+  // everyone else uses worker.json.
+  const host = process.env["WORKER_HOST"] ?? "";
+  const fileName = host.startsWith("kjonemacbook") ? MACBOOK_CAPABILITY_FILE : CAPABILITY_FILE;
+
+  // Walk up from this file's directory to find spec/capabilities/{fileName}.
   // Resolve via import.meta.url-equivalent path: this module lives at
   // wrapper/orchestrator/worker.ts → up 2 levels to repo root + spec/...
   const candidates = [
-    resolve(process.cwd(), CAPABILITY_FILE),
-    resolve(process.cwd(), "..", CAPABILITY_FILE),
-    resolve(process.cwd(), "..", "..", CAPABILITY_FILE),
-    resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", CAPABILITY_FILE),
+    resolve(process.cwd(), fileName),
+    resolve(process.cwd(), "..", fileName),
+    resolve(process.cwd(), "..", "..", fileName),
+    resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", fileName),
   ];
   for (const c of candidates) {
     if (existsSync(c)) return c;

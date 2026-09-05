@@ -24,18 +24,17 @@
  * Co-Authored-By: Claude Code <noreply@anthropic.com>
  */
 
-import { callDshHeadless } from "../dsh/dsh_client.js";
 import type { DshOpts, DshResponse } from "../dsh/types.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-/** 6-host identifier */
-export type HostId = "newvps" | "edge1" | "edge2" | "edge3" | "edge4" | "edge5";
+/** 7-host identifier (v1.2.0c adds macbook per F20) */
+export type HostId = "newvps" | "edge1" | "edge2" | "edge3" | "edge4" | "edge5" | "macbook";
 
 /** Capability level per host */
 export type CapabilityLevel = "full" | "proxy";
 
-/** 6-host routing table entry */
+/** 7-host routing table entry (v1.2.0c adds hostClass for scoring) */
 export interface HostEntry {
   hostId: HostId;
   magicDnsName: string;
@@ -43,6 +42,8 @@ export interface HostEntry {
   containerName: string;
   capabilities: CapabilityLevel;
   isPrimary: boolean;
+  /** v1.2.0c: optional host class for scoring bias (e.g. "macbook-main") */
+  hostClass?: string;
 }
 
 /** Routing decision */
@@ -86,8 +87,18 @@ const EDGE_HOSTS: HostEntry[] = [
   { hostId: "edge5", magicDnsName: "edge5.fish-harness.ts.net", containerName: "harness-edge5", capabilities: "proxy", isPrimary: false },
 ];
 
-/** All hosts ordered: primary first, then edges round-robin */
-const ALL_HOSTS: HostEntry[] = [PRIMARY_HOST, ...EDGE_HOSTS];
+/** MacBook host (v1.2.0c per D6 + F14/F15/F20) — local-mac region, primary worker during working hours */
+const MACBOOK_HOST: HostEntry = {
+  hostId: "macbook",
+  magicDnsName: "macbook.fish-harness.ts.net",
+  containerName: "harness-macbook-worker",
+  capabilities: "proxy",
+  isPrimary: false,
+  hostClass: "macbook-main",
+};
+
+/** All hosts ordered: primary first, then edges round-robin, MacBook last for scoring bias */
+const ALL_HOSTS: HostEntry[] = [PRIMARY_HOST, ...EDGE_HOSTS, MACBOOK_HOST];
 
 // Round-robin index for worker tasks (shared across calls, not persistent)
 let _edgeRoundRobin = 0;
@@ -99,6 +110,7 @@ let _edgeRoundRobin = 0;
  * Examples:
  *   "newvps.fish-harness.ts.net"  -> "newvps"
  *   "edge3.fish-harness.ts.net"    -> "edge3"
+ *   "macbook.fish-harness.ts.net"  -> "macbook"  (v1.2.0c per F20)
  *   "node-xyz.fish-harness.ts.net" -> null (unknown)
  */
 export function parseHostId(magicDns: string): HostId | null {
@@ -107,6 +119,7 @@ export function parseHostId(magicDns: string): HostId | null {
   const id = match[1] as string;
   if (id === "newvps") return "newvps";
   if (/^edge[1-5]$/.test(id)) return id as HostId;
+  if (id === "macbook") return "macbook"; // v1.2.0c per F20
   return null;
 }
 
@@ -188,8 +201,11 @@ function makeDecision(targetHost: HostEntry): RouteDecision {
  * Get the HTTP base URL for a host entry.
  * Uses Tailscale MagicDNS for cross-host routing.
  * Container internal traffic uses container_name MagicDNS.
+ *
+ * v1.2.0c: default port changed from 8000 (kernel) to 4001 (cross-host wrapper port)
+ * because routedDsh() now fetches to the wrapper endpoint, not the kernel directly.
  */
-export function getHostUrl(entry: HostEntry, port = 8000): string {
+export function getHostUrl(entry: HostEntry, port = 4001): string {
   const dnsName = resolveMagicDns(entry.containerName);
   return `http://${dnsName}:${port}`;
 }
@@ -232,11 +248,13 @@ export async function findAvailableHost(
   }
 
   // For worker, try multiple edges in case one is down
-  for (const edge of EDGE_HOSTS) {
+  // v1.2.0c per F20: include MacBook in the round-robin pool
+  const workerCandidates = [...EDGE_HOSTS, MACBOOK_HOST];
+  for (const edge of workerCandidates) {
     if (await probeHost(edge)) return edge;
   }
 
-  // All edges down — fallback to primary
+  // All edges + MacBook down — fallback to primary
   if (await probeHost(PRIMARY_HOST)) return PRIMARY_HOST;
 
   return null;
@@ -248,6 +266,11 @@ export async function findAvailableHost(
  * Run a dsh command on a specific host via routed HTTP call.
  * DEEPSEEK_API_KEY is injected via process.env (M2 hygiene — no hardcoding).
  * Always uses --profile headless (M2 hygiene §4 — NOT web).
+ *
+ * v1.2.0c per F12: routedDsh() always fetches to the target host's wrapper
+ * port (4001) via Tailscale MagicDNS — uniform dispatch across all 7 hosts
+ * (newvps + 5 edge + macbook). Same path for same-host and cross-host so
+ * the dispatch surface is uniform (easier to audit + instrument).
  */
 export async function routedDsh(
   prompt: string,
@@ -265,7 +288,7 @@ export async function routedDsh(
   const available = await findAvailableHost(capability);
   if (!available) {
     throw new Error(
-      `No host available for capability=${capability}; all 6 hosts unreachable`,
+      `No host available for capability=${capability}; all 7 hosts unreachable`,
     );
   }
 
@@ -274,7 +297,35 @@ export async function routedDsh(
     timeoutMs: getTimeoutForClass(modelClass),
   };
 
-  return await callDshHeadless(prompt, opts);
+  // v1.2.0c per F12: uniform fetch() to MagicDNS-resolved wrapper port 4001.
+  // The wrapper's /api/v1/tasks handler invokes dsh locally — same path
+  // for same-host and cross-host, no special-casing.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), opts.timeoutMs ?? 60_000);
+  try {
+    // Cross-host (and same-host) dispatch via fetch() to MagicDNS-resolved URL
+    const resp = await fetch(`${getHostUrl(decision.targetHost, 4001)}/api/v1/tasks?modelClass=${modelClass}`, { // MagicDNS suffix: fish-harness.ts.net (D5)
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, class: modelClass, host_id: decision.targetHost.hostId }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => "unknown error");
+      throw new Error(`cross-host dispatch ${resp.status}: ${text}`);
+    }
+    const data = await resp.json() as { stdout: string; stderr?: string; exit_code: number; wall_ms: number };
+    return {
+      stdout: data.stdout,
+      stderr: data.stderr ?? "",
+      exitCode: data.exit_code ?? 0,
+      wallMs: data.wall_ms ?? 0,
+    };
+  } catch (err) {
+    clearTimeout(timeout);
+    throw err;
+  }
 }
 
 function getTimeoutForClass(
@@ -301,8 +352,11 @@ export function getCapableHosts(capability: CapabilityId): HostEntry[] {
 // ─── Diagnostics ─────────────────────────────────────────────────────────────
 
 /**
- * Dump the full 6-host routing table as a structured object.
+ * Dump the full 7-host routing table as a structured object.
  * Safe for logging — contains no secrets.
+ *
+ * v1.2.0c: `edges` now includes MACBOOK_HOST (per F20) — the array represents
+ * all non-primary workers in the dispatch pool (5 edge replicas + 1 macbook).
  */
 export function dumpRoutingTable(): {
   primary: HostEntry;
@@ -318,7 +372,7 @@ export function dumpRoutingTable(): {
 
   return {
     primary: PRIMARY_HOST,
-    edges: EDGE_HOSTS,
+    edges: [...EDGE_HOSTS, MACBOOK_HOST], // 5 edge + macbook = 6 worker pool entries
     capabilityMap,
   };
 }

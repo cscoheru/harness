@@ -9,7 +9,7 @@
  *
  * Schema (简化版, per F3 — 无 cross-DB FK current_attempt_id):
  *   - worker_id TEXT PRIMARY KEY (UUID v4)
- *   - host TEXT NOT NULL (MagicDNS hostname, e.g. fish-harness-newvps.tail1b9878.ts.net)
+ *   - host TEXT NOT NULL (MagicDNS hostname, e.g. newvps.fish-harness.ts.net)
  *   - capabilities_json TEXT NOT NULL (raw JSON of spec/capabilities/worker.json)
  *   - status TEXT NOT NULL CHECK IN ('active','draining','drained','reaped')
  *   - last_heartbeat_at INTEGER NOT NULL (unix epoch milliseconds;

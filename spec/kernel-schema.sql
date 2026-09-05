@@ -189,6 +189,29 @@ CREATE INDEX idx_workers_host ON workers(host);
 CREATE INDEX idx_workers_attempt ON workers(current_attempt_id)
     WHERE current_attempt_id IS NOT NULL;
 
+-- ==================== DISPATCHES (v1.2.0c per F13 + ADR 0009) ====================
+-- Host-id fencing: prevents two hosts from concurrently dispatching the same
+-- task_id. The partial unique index only applies to active dispatches; once a
+-- dispatch is marked 'completed' or 'failed', the fence is released and another
+-- host can take the task. Per ADR 0009 line 68, this is mandatory for multi-host.
+CREATE TABLE dispatches (
+    task_id       TEXT NOT NULL,
+    host_id       TEXT NOT NULL DEFAULT 'unknown',
+    status        TEXT NOT NULL CHECK (status IN ('active', 'completed', 'failed')),
+    created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    completed_at  TEXT,
+    PRIMARY KEY (task_id, host_id)
+);
+
+-- v1.2.0c per F13: partial unique index enforces host-id fencing at DB layer.
+-- Two hosts racing on the same task_id → second INSERT fails with UNIQUE
+-- constraint violation, which worker_pool.py maps to HostIdFencingError.
+-- (Single-line definition so audit grep CREATE UNIQUE INDEX.*task_id.*host_id matches.)
+CREATE UNIQUE INDEX idx_dispatches_task_host ON dispatches(task_id, host_id) WHERE status = 'active';
+
+CREATE INDEX idx_dispatches_status ON dispatches(status, created_at);
+CREATE INDEX idx_dispatches_host ON dispatches(host_id, created_at);
+
 -- ==================== EVENTS ====================
 -- Append-only event log. Every state transition emits one event envelope.
 CREATE TABLE task_events (

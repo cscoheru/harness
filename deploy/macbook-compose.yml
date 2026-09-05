@@ -1,0 +1,57 @@
+# deploy/macbook-compose.yml — fish-harness v1.2.0c (T-V1.2.0C-CROSSHOST-MACBOOK-PASS)
+#
+# Topology: MacBook Pro M1 (local-mac region) — primary worker during owner working hours
+# Security:  Tailscale-only; bind mount to /Users/kjonekong/projects/fish-harness
+# Role:      MacBook worker (v1.2.0c PRD §3.1 「你工作时段本地优先」)
+#
+# v1.2.0c NEW (per D6 + F14/F15/F19):
+#   - MacBook worker joins the 6-host pool as the 7th host (macbook-main)
+#   - Scoring +100 in isWorkingHours() window (Mon-Fri 09:00-22:00 local time)
+#   - image: node:24-slim (per F19 — avoid alpine aarch64 ABI mismatch)
+#   - Bind mount /Users/kjonekong/projects/fish-harness to /app (MacBook path)
+#   - colima compatible: --vm-type=qemu --arch=x86_64 per F19
+#   - Tailscale tag:macbook ACL (per F16)
+#
+# Provisioning (per deploy/runbook-macbook-worker.md):
+#   1. Install Docker Desktop OR colima (qemu x86_64)
+#   2. tailscale up --advertise-tags=tag:macbook --hostname=kjonemacbook-pro
+#   3. pmset -a disablesleep 0 (prevent lid-close sleep during work hours)
+#   4. docker compose -f deploy/macbook-compose.yml up -d
+#   5. Verify: curl http://kjonemacbook-pro.fish-harness.ts.net:4001/health
+#
+# References:
+#   - PRD-v1.1 §3.1: MacBook 主力 worker (working hours priority)
+#   - codex-audit-scope §4.13: MacBook worker 守门 12 项
+#   - ADR 0009 line 68: multi-host host-id fencing (per-host SQLite)
+#   - Tailscale ACL: tag:macbook (per F16)
+# Co-Authored-By: Claude Code <noreply@anthropic.com>
+
+services:
+  # ── MacBook primary worker (M-series silicon, local-mac region) ────────────
+  macbook-worker:
+    container_name: harness-macbook-worker
+    image: node:24-slim
+    restart: unless-stopped
+    working_dir: /app/wrapper
+    volumes:
+      # MacBook bind mount: /Users/kjonekong/projects/fish-harness → /app
+      - /Users/kjonekong/projects/fish-harness:/app:ro
+    environment:
+      HARNESS_API_URL: "http://newvps.fish-harness.ts.net:4000"
+      WRAPPER_PORT: "4001"
+      WORKER_ID: "${WORKER_ID:-macbook-worker-001}"
+      WORKER_HOST: "kjonemacbook-pro"
+      EDGE_REGION: "local-mac"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
+      ORCHESTRATOR_CLASS: "worker"
+      DSH_PROFILE: "headless"
+      COLIMA_VM_TYPE: "qemu"
+      COLIMA_ARCH: "x86_64"
+    command: ["node", "build/server.js"]
+    # MacBook scoring: +100 in working hours (per D6 + F14)
+    # Graceful degradation: 3 heartbeat failures → reassign (PRD §3.1)
+    # pmset disablesleep must be set on MacBook host (runbook)
+    mem_limit: 2g
+    memswap_limit: 2g
+    # No host port mapping — accessed via Tailscale MagicDNS only
+    # MacBook hostname on tailnet: kjonemacbook-pro.fish-harness.ts.net

@@ -224,9 +224,9 @@ describe("worker.run()", () => {
 // ─── health() ──────────────────────────────────────────────────────────────
 
 describe("worker.health()", () => {
-  it("returns version='1.2.0b'", async () => {
+  it("returns version='1.2.0c'", async () => {
     const h = await workerHealth();
-    expect(h.version).toBe("1.2.0b");
+    expect(h.version).toBe("1.2.0c");
   });
 
   it("returns workers_count > 0 after register", async () => {
