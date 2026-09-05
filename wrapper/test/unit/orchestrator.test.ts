@@ -19,6 +19,16 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+// v1.2.0d formal M-fix: dispatch() → getDefaultQueueStore() resolves
+// QUEUE_STORE_DB (container default /data) — point it at a temp dir so unit
+// tests pass on non-container hosts (macOS dev machine included).
+let queueDbDir: string;
+let prevQueueDb: string | undefined;
+let prevPoolDb: string | undefined;
 
 // Mock dsh_client — unit tests must not invoke the real dsh CLI.
 // Mock returns a successful dsh response so dispatch tests can verify shape.
@@ -81,11 +91,28 @@ describe('orchestrator', () => {
     // because restoreAllMocks would also reset vi.fn mock implementations
     // (e.g. callDshHeadless from vi.mock) and break subsequent tests.
     vi.spyOn(console, 'log').mockImplementation(() => {});
+    // v1.2.0d formal M-fix: queue store + worker pool on temp dirs (not /data).
+    queueDbDir = mkdtempSync(join(tmpdir(), 'orch-queue-test-'));
+    prevQueueDb = process.env.QUEUE_STORE_DB;
+    process.env.QUEUE_STORE_DB = join(queueDbDir, 'queue.db');
+    prevPoolDb = process.env.WORKER_POOL_DB;
+    process.env.WORKER_POOL_DB = join(queueDbDir, 'pool.db');
   });
 
   afterEach(() => {
     // clearAllMocks preserves mock implementations; restoreAllMocks does not.
     vi.clearAllMocks();
+    if (prevQueueDb === undefined) {
+      delete process.env.QUEUE_STORE_DB;
+    } else {
+      process.env.QUEUE_STORE_DB = prevQueueDb;
+    }
+    if (prevPoolDb === undefined) {
+      delete process.env.WORKER_POOL_DB;
+    } else {
+      process.env.WORKER_POOL_DB = prevPoolDb;
+    }
+    rmSync(queueDbDir, { recursive: true, force: true });
   });
 
   // ── health() ──────────────────────────────────────────────────────────────

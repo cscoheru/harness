@@ -1,0 +1,46 @@
+# Prometheus alert rules for fish-harness (v1.2.0d, per F24 §5.3 + F28)
+# Referenced by prometheus.yml rule_files (per §3.2.4 + H18).
+# Metric names align with wrapper/orchestrator/metrics.ts exports:
+#   active_task_count / queue_depth / memory_used_mb / worker_count
+# Thresholds per runbook.md §Alerts (memory 80% of 1G wrapper fleet ceiling;
+# queue 100 pending; worker fleet silent 5min).
+
+groups:
+  # ─── Alert 1: wrapper memory > 80% (of 1G mem_limit fleet standard) ────────
+  - name: wrapper-memory
+    rules:
+      - alert: WrapperMemoryHigh
+        expr: memory_used_mb > 819
+        for: 5m
+        labels:
+          severity: warning
+          cycle: v1.2.0d
+        annotations:
+          summary: "wrapper memory > 80% of 1G limit ({{ $labels.host }})"
+          runbook: "deploy/monitoring/runbook.md#alert-1-memory"
+
+  # ─── Alert 2: queue depth > 100 pending for 5min (backpressure sustained) ──
+  - name: wrapper-queue
+    rules:
+      - alert: WrapperQueueDepthHigh
+        expr: queue_depth > 100
+        for: 5m
+        labels:
+          severity: warning
+          cycle: v1.2.0d
+        annotations:
+          summary: "queue_depth > 100 for 5m ({{ $labels.host }}) — 429/202 backpressure active"
+          runbook: "deploy/monitoring/runbook.md#alert-2-queue"
+
+  # ─── Alert 3: worker offline > 5min (fleet silent / scrape down) ────────────
+  - name: worker-offline
+    rules:
+      - alert: WorkerOffline
+        expr: worker_count < 1 or up{job=~"harness-.*"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          cycle: v1.2.0d
+        annotations:
+          summary: "no active workers / scrape down > 5min ({{ $labels.host }})"
+          runbook: "deploy/monitoring/runbook.md#alert-3-worker-offline"

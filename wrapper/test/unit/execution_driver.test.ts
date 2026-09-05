@@ -259,7 +259,10 @@ describe("SpawnDshDriver — routedDsh fallback (v1.2.0d F22)", () => {
   beforeEach(() => {
     originalFetch = globalThis.fetch;
     originalForceHttp = process.env.DSH_FORCE_HTTP;
-    process.env.DSH_FORCE_HTTP = "1";
+    // v1.2.0d formal M-fix: no FORCE_HTTP here — the routedDsh wire must fire
+    // (production path). globalThis.fetch is mocked to satisfy both the
+    // probeHost() /health probe and the dispatch POST.
+    delete process.env.DSH_FORCE_HTTP;
   });
 
   afterEach(() => {
@@ -273,10 +276,15 @@ describe("SpawnDshDriver — routedDsh fallback (v1.2.0d F22)", () => {
 
   it("emits driver.finished with source='routed_dsh' on success", async () => {
     globalThis.fetch = vi.fn(async () =>
-      new Response("routed dsh output\n", { status: 200 }),
+      new Response(
+        JSON.stringify({ stdout: "routed dsh output\n", exit_code: 0, wall_ms: 5 }),
+        { status: 200 },
+      ),
     ) as unknown as typeof fetch;
 
-    const d = new SpawnDshDriver();
+    // dshBin points at a nonexistent binary → spawn ENOENT → routedDsh
+    // fallback fires (F22 option A), independent of the host PATH.
+    const d = new SpawnDshDriver({ dshBin: "/nonexistent/dsh-unit-test" });
     const events: DriverEvent[] = [];
     for await (const ev of d.run(SAMPLE_REQUEST)) {
       events.push(ev);
@@ -285,14 +293,21 @@ describe("SpawnDshDriver — routedDsh fallback (v1.2.0d F22)", () => {
     expect(last.kind).toBe("driver.finished");
     expect(last.payload.source).toBe("routed_dsh");
     expect(last.payload.exit_code).toBe(0);
+    expect(String(last.payload.stdout)).toMatch(/routed dsh output/);
   });
 
   it("emits driver.failed with source='routed_dsh' on fetch error", async () => {
-    globalThis.fetch = vi.fn(async () => {
+    // URL-aware mock: /health probes succeed so a host is selected, then the
+    // dispatch POST throws — exercises the routedDsh failure surface.
+    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      if (url.includes("/health")) {
+        return new Response("ok", { status: 200 });
+      }
       throw new Error("routedDsh unreachable");
     }) as unknown as typeof fetch;
 
-    const d = new SpawnDshDriver();
+    const d = new SpawnDshDriver({ dshBin: "/nonexistent/dsh-unit-test" });
     const events: DriverEvent[] = [];
     for await (const ev of d.run(SAMPLE_REQUEST)) {
       events.push(ev);

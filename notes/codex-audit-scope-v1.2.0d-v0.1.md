@@ -130,9 +130,9 @@ grep -rE "newvps|edge[1-5]|kjonemacbook-pro\s*=\s*['\"]?tskey-" deploy/monitorin
 git diff v1.0.0..HEAD -- harness/ ':(exclude)harness/runtime/worker_pool.py' spec/kernel-schema.sql ':(exclude)spec/kernel-schema.sql' spikes/ 'adr/000[1-9]-*.md' docker-compose.yml pyproject.toml | wc -l
 # 期望: 0 行（主 pathspec 排除 worker_pool.py + kernel-schema.sql 两例外文件 + 3 NEW §3.10/§3.11/§3.12 例外 per F22/F25/F26）
 
-# v1.2.0d 例外声明（per F27 graceful shutdown + §3.10 NEW OOM graceful shutdown 声明）：
-grep -cE "stop-timeout|SIGTERM|SIGKILL" deploy/*.yml | awk -F: '{s+=$NF} END{print s}'
-# 期望: ≥ 5（per F27 至少 5 service 设 --stop-timeout）
+# v1.2.0d 例外声明（per F27 graceful shutdown + §3.10 NEW OOM graceful shutdown 声明；m1 GATE-CALIB per v1.2.0d formal：compose 原生字段为 stop_grace_period（等价 CLI --stop-timeout），5 edge 补齐后并入 pattern）：
+grep -cE "stop-timeout|stop_grace_period|SIGTERM|SIGKILL" deploy/*.yml | awk -F: '{s+=$NF} END{print s}'
+# 期望: ≥ 5（per F27 至少 5 service graceful window；实测 9 = newvps×2 + 5 edge + 注释 SIGTERM×2）
 
 # v1.2.0d §3.10 NEW OOM graceful shutdown 声明（per F27）：
 grep -nE "§3\.10.*OOM graceful shutdown|--stop-timeout=30" notes/codex-audit-scope-v1.2.0d-v0.1.md | wc -l
@@ -305,17 +305,17 @@ grep -cE "metrics|/metrics" wrapper/orchestrator/server.ts
 grep -c "scrape_configs" deploy/monitoring/prometheus.yml
 # 期望: ≥ 1（Prometheus config scrape section 存在）
 
-# v1.2.0d 7 host scrape targets 守门（per F24 newvps + 5 edge + macbook）：
-grep -cE "targets.*newvps|edge[1-5]|kjonemacbook-pro" deploy/monitoring/prometheus.yml 2>&1 | awk -F: '{s+=$NF} END{print s}'
-# 期望: ≥ 7（7 host MagicDNS scrape targets）
+# v1.2.0d 7 host scrape targets 守门（per F24 newvps + 5 edge + macbook；m3 GATE-CALIB per v1.2.0d formal：newvps 为多行 targets 列表形态，`targets.*newvps` 行内失配 — 改锚 host:port 全形态）：
+grep -c "fish-harness.ts.net:300" deploy/monitoring/prometheus.yml
+# 期望: ≥ 8（newvps 4 端口 + 5 edge + macbook 多行/单行混合全形态）
 
-# v1.2.0d alert rules 守门（per D9 + §5.3）：
-grep -cE "alert|Alert" deploy/monitoring/prometheus.yml
-# 期望: ≥ 3（memory >80% / queue >100 / worker offline >5min alert rules）
+# v1.2.0d alert rules 守门（per D9 + §5.3；m2 GATE-CALIB per v1.2.0d formal：rule_files 引用 alerts.yml 须落地验证，`alert|Alert` 对 prometheus.yml 结构行假绿）：
+grep -c "alert:" deploy/monitoring/alerts.yml
+# 期望: == 3（WrapperMemoryHigh / WrapperQueueDepthHigh / WorkerOffline）
 
-# v1.2.0d 3 alert condition 守门（per D9 memory/queue/worker）：
-grep -c "memory > 80\|queue_depth > 100\|worker_offline > 5min" deploy/monitoring/prometheus.yml
-# 期望: ≥ 3（3 alert condition 全配置）
+# v1.2.0d 3 alert condition 守门（per D9 memory/queue/worker；metric 名对齐 metrics.ts 导出；m5 GATE-CALIB per v1.2.0d formal：==3 计数被 summary 注释同字面多算 — 拆 expr 行）：
+grep -c "expr:" deploy/monitoring/alerts.yml
+# 期望: == 3（仅 PromQL 表达式行）+ `grep -cE "memory_used_mb > 819|queue_depth > 100|worker_count < 1" deploy/monitoring/alerts.yml` ≥ 3（条件字面，summary 注释冗余命中可超）
 
 # v1.2.0d Tailscale bind + tag:monitor ACL 守门（per F28）：
 grep -cE "tag:monitor|tag:admin" deploy/tailscale-acl-6host.yaml

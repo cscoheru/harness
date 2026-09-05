@@ -42,6 +42,7 @@ services:
     command: ["node", "build/server.js"]
     mem_limit: 1g
     memswap_limit: 1g
+    stop_grace_period: 30s
     # v1.2.0d NEW per D7 + F27: edge wrapper 1G + 30s graceful drain
 
 networks:

@@ -30,6 +30,7 @@
     "vitest": "^3.2.7"
   },
   "dependencies": {
-    "better-sqlite3": "^11.5.0"
+    "better-sqlite3": "^11.5.0",
+    "prom-client": "^15.1.3"
   }
 }

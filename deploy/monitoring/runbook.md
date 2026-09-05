@@ -48,7 +48,7 @@
 
 ## Alert 2: QueueSaturated
 
-**Trigger**: `wrapper_queue_depth > 100` for 5 minutes.
+**Trigger**: `queue_depth > 100` for 5 minutes.
 
 **Severity**: WARNING (sustained load) → CRITICAL (>500 sustained 10min)
 

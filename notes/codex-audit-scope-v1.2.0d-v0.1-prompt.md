@@ -39,9 +39,9 @@
 
 ### §2.3 docker memory limits 守门（5 项）
 
-- [ ] **H7**: deploy/newvps-compose.yml 加 memory/CPU limits per D7 (kernel 256M + orchestrator 2G + commander 1G ×3 + stt 2G + push 1G + monitor 512M)
+- [ ] **H7**: memory limits 全栈分布（m1 GATE-CALIB per v1.2.0d formal 按实际文件布局写回：newvps-compose.yml 4 limits（kernel 256m + 3×1g）+ 6host-compose.newvps.yml 6 limits（kernel 256m / stt 2g / push 1g / orchestrator 512m / commander 1g / frontend 1g）+ monitoring 栈 512m；§3.2.1 复合 ≥27 总量守门为准）per D7
 - [ ] **H8**: deploy/6host-compose.newvps.yml 加 wrapper limits 1G per D7
-- [ ] **H9**: deploy/6host-compose.edge[1-5].yml 5 文件全 wrapper limit 1G + `--stop-timeout=30` per F27
+- [ ] **H9**: deploy/6host-compose.edge[1-5].yml 5 文件全 wrapper limit 1G + `stop_grace_period: 30s`（compose 原生字段，等价 CLI `--stop-timeout=30`）per F27（m1 GATE-CALIB per v1.2.0d formal：起草只写 CLI 语义且实施初期注释「30s graceful drain」无字段兑现 — 5 文件已补字段）
 - [ ] **H10**: deploy/macbook-compose.yml 加 worker limit 2G + `--memory-reservation=1G` MacBook-specific per plan §5.2
 - [ ] **H11**: ≥ 5 service 设 `--stop-timeout=30` graceful shutdown per F27（docker stats 验证 MemLimit 列非空）
 
@@ -56,11 +56,11 @@
 
 - [ ] **H16**: wrapper/orchestrator/metrics.ts NEW 文件存在 + prom-client exporter + 4 metric names per F25
 - [ ] **H17**: deploy/monitoring/prometheus.yml NEW + 7 host scrape jobs (newvps + 5 edge + macbook) per F24
-- [ ] **H18**: prometheus.yml 加 3 alert rules (memory >80% / queue >100 / worker offline >5min) + Tailscale ACL tag:monitor + tag:admin per F28
+- [ ] **H18**: prometheus.yml + alerts.yml（rule_files 落地）加 3 alert rules (memory >80% / queue_depth >100 / worker offline >5min) + Tailscale ACL tag:monitor + tag:admin per F28（m2 GATE-CALIB per v1.2.0d formal：原复合 pattern 被 `alert` 字面假绿掩盖 rule_files 悬空 — alerts.yml NEW 落地 3 groups 后拆条验证：`grep -c "alert:" deploy/monitoring/alerts.yml` == 3）
 
 ### §2.6 顺手清 + 顺手 wire 守门（2 项）
 
-- [ ] **H19**: wrapper/orchestrator/worker_pool.ts dispatch() query 加 tertiary sort `ORDER BY last_heartbeat_at ASC, worker_id ASC, registered_at ASC` per F21 (round_robin tie-breaking)
+- [ ] **H19**: wrapper/orchestrator/worker_pool.ts dispatch() query 加 tertiary sort `ORDER BY last_heartbeat_at ASC, registered_at ASC, worker_id ASC` per F21 (round_robin tie-breaking)（m4 GATE-CALIB per v1.2.0d formal：起草把 worker_id ASC 放在 registered_at 前 — 同 ms 全 tie 时字典序压过注册序，round_robin 自然序=先注册先派 → registered_at 提前，worker_id 兜底）
 - [ ] **H20**: wrapper/orchestrator/execution_driver.ts HTTP fallback path 替换为 `routedDsh()` 调用 + commit 注释 `// wire-routedDsh per F22 option A`
 
 ---
@@ -100,9 +100,12 @@ v1.2.0d v0.1 prompt-review expected:
 
 #### §3.2.4 Prometheus 7 host scrape 机制（per F24）
 
-- scrape_configs + 7 host targets + 3 alert rules + 3 alert condition + Tailscale bind 100.64.0.0/8
-- 验证命令: `grep -cE "scrape_configs|targets.*newvps|targets.*edge[1-5]|targets.*kjonemacbook-pro|alert|memory > 80|queue_depth > 100|worker_offline > 5min|100\.64\.0\.0" deploy/monitoring/prometheus.yml 2>&1 | awk -F: '{s+=$NF} END{print s}'`
-- 期望: ≥ 14 (1 scrape_configs + 7 targets + 3 alert + 3 condition + 1 Tailscale = 15)
+- scrape_configs + 7 host targets + 3 alert rules（alerts.yml 落地）+ 3 alert condition + Tailscale bind 100.64.0.0/8
+- 验证命令（m3 GATE-CALIB per v1.2.0d formal 拆条防假绿——原复合 pattern `targets.*newvps` 对多行 targets 列表失配 + `alert` 字面吃掉全部命中掩盖 rule_files 悬空）:
+  `grep -cE "scrape_configs|targets.*edge[1-5]|targets.*kjonemacbook-pro|100\.64\.0\.0" deploy/monitoring/prometheus.yml` ≥ 10
+  + `grep -c "fish-harness.ts.net:300" deploy/monitoring/prometheus.yml` ≥ 8（7 host targets 多行列表形态，newvps 4 端口 + edge×5 + macbook）
+  + `grep -c "alert:" deploy/monitoring/alerts.yml` == 3（M2 落地：rule_files 引用文件真实存在）
+  + `grep -cE "memory_used_mb > 819|queue_depth > 100|worker_count < 1" deploy/monitoring/alerts.yml` == 3（真实条件表达式，metric 名对齐 metrics.ts 导出）
 
 #### §3.2.5 worker_pool round_robin tertiary sort 机制（per F21）
 

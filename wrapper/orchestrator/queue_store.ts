@@ -81,6 +81,7 @@ export class SqliteQueueStore {
   private readonly stmts: {
     insertPending: Database.Statement;
     selectPending: Database.Statement;
+    selectNonCompleted: Database.Statement;
     markDispatched: Database.Statement;
     markCompleted: Database.Statement;
     countPending: Database.Statement;
@@ -116,6 +117,14 @@ export class SqliteQueueStore {
         `SELECT task_id, payload_json, enqueued_at, status
            FROM queue_tasks WHERE status = 'pending'
           ORDER BY enqueued_at ASC LIMIT 1`,
+      ),
+      // v1.2.0d formal M-fix: reclaim must pull pending AND dispatched rows
+      // (dispatched = dequeued into hot path but never completed — crash
+      // recovery re-dispatches them), ordered oldest-first.
+      selectNonCompleted: this.db.prepare(
+        `SELECT task_id, payload_json, enqueued_at, status
+           FROM queue_tasks WHERE status != 'completed'
+          ORDER BY enqueued_at ASC`,
       ),
       markDispatched: this.db.prepare(
         `UPDATE queue_tasks SET status = 'dispatched' WHERE task_id = ?`,
@@ -198,9 +207,18 @@ export class SqliteQueueStore {
     };
   }
 
-  /** Dequeue the next pending task from in-memory (FIFO). */
+  /**
+   * Dequeue the next pending task from in-memory (FIFO).
+   * v1.2.0d formal M-fix: also markDispatched on the SQLite side — otherwise
+   * pendingCount() stays stale and reclaim() would re-dispatch a task that
+   * already left the hot path (double-dispatch on crash recovery).
+   */
   dequeue(): QueueTask | null {
-    return this.inMemory.shift() ?? null;
+    const task = this.inMemory.shift() ?? null;
+    if (task) {
+      this.stmts.markDispatched.run(task.task_id);
+    }
+    return task;
   }
 
   /** Peek at the next pending task without removing it. */
@@ -209,22 +227,26 @@ export class SqliteQueueStore {
   }
 
   /**
-   * Reclaim path: scan SQLite pending queue and re-populate in-memory.
-   * Called by orchestrator when worker completes a task — pulls next pending
-   * task from SQLite (overflow queue) back into hot path.
+   * Reclaim path: scan SQLite for non-completed tasks (pending + dispatched)
+   * and re-populate in-memory hot path. Called by orchestrator when a worker
+   * completes a task, and on cold start for crash recovery (per F26).
+   *
+   * v1.2.0d formal M-fix: rows already present in in-memory are skipped
+   * (no duplicates); 'dispatched' rows are re-pulled — a dequeued-but-never-
+   * completed task is exactly what crash recovery must re-dispatch.
    */
   reclaim(): number {
     let count = 0;
-    while (this.inMemory.length < this.maxInFlight) {
-      const row = this.stmts.selectPending.get() as
-        | {
-            task_id: string;
-            payload_json: string;
-            enqueued_at: number;
-            status: string;
-          }
-        | undefined;
-      if (!row) break;
+    const hot = new Set(this.inMemory.map((t) => t.task_id));
+    const rows = this.stmts.selectNonCompleted.all() as Array<{
+      task_id: string;
+      payload_json: string;
+      enqueued_at: number;
+      status: string;
+    }>;
+    for (const row of rows) {
+      if (this.inMemory.length >= this.maxInFlight) break;
+      if (hot.has(row.task_id)) continue;
       const task: QueueTask = {
         task_id: row.task_id,
         payload: JSON.parse(row.payload_json),

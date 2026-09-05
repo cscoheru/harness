@@ -317,7 +317,7 @@ describe("SqliteWorkerPool — countActive() + getWorker()", () => {
 // Tie-break by registered_at when 3+ workers register in the same
 // millisecond AND last_heartbeat_at is also identical. Without the
 // tertiary sort (worker_pool.ts:146
-// `ORDER BY last_heartbeat_at ASC, worker_id ASC, registered_at ASC`)
+// `ORDER BY last_heartbeat_at ASC, registered_at ASC, worker_id ASC`)
 // SQLite falls back to undefined order — leading to intermittent
 // test failures ("widA expected, widB got") at tight intervals.
 
@@ -346,8 +346,21 @@ describe("SqliteWorkerPool — round_robin tertiary sort (v1.2.0d F21)", () => {
   });
 
   it("getDefaultWorkerPool returns singleton (module-level cache)", () => {
-    const a = getDefaultWorkerPool();
-    const b = getDefaultWorkerPool();
-    expect(a).toBe(b);
+    // v1.2.0d formal M-fix: singleton resolves WORKER_POOL_DB (container
+    // default /data) — point it at this suite's temp dir so the test passes
+    // on non-container hosts.
+    const prev = process.env.WORKER_POOL_DB;
+    process.env.WORKER_POOL_DB = join(tempDir, "singleton.db");
+    try {
+      const a = getDefaultWorkerPool();
+      const b = getDefaultWorkerPool();
+      expect(a).toBe(b);
+    } finally {
+      if (prev === undefined) {
+        delete process.env.WORKER_POOL_DB;
+      } else {
+        process.env.WORKER_POOL_DB = prev;
+      }
+    }
   });
 });

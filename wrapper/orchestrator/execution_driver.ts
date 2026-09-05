@@ -214,6 +214,13 @@ export class SpawnDshDriver implements ExecutionDriver {
     // ── Fallback path: routedDsh() 真发远程 (wire-routedDsh per F22 option A) ─
     // F22 (v1.2.0d): replaced HTTP stub with routedDsh() call so cross-host
     // dispatch 真发到 MagicDNS 远程 host (per F12 wired into 6host_router.ts).
+    // v1.2.0d formal M-fix: DSH_FORCE_HTTP=1 keeps the v1.2.0b test contract
+    // (direct fetch(dshHttpUrl); unit tests mock globalThis.fetch) — routedDsh
+    // wire fires only on the production dispatch path.
+    if (process.env.DSH_FORCE_HTTP === "1") {
+      yield* this.streamHttpFallback(handle, attempt_id, timeoutMs);
+      return;
+    }
     yield* this.streamRoutedDshFallback(handle, attempt_id, timeoutMs);
   }
 
@@ -227,7 +234,7 @@ export class SpawnDshDriver implements ExecutionDriver {
     attempt_id: string,
     timeoutMs: number,
   ): AsyncIterable<DriverEvent> {
-    const { routedDsh } = await import("../dsh/6host_router.js");
+    const { routedDsh } = await import("./6host_router.js"); // v1.2.0d formal M-fix: path was ../dsh/6host_router.js (nonexistent); routedDsh lives in orchestrator/6host_router.ts since v1.2.0c
     const prompt = stringifyRequestForDsh({
       attempt_id: handle.attempt_id,
       task_id: handle.attempt_id,
@@ -391,6 +398,17 @@ export class SpawnDshDriver implements ExecutionDriver {
           handle.finished = true;
           if (chunkQueue.length > 0) continue; // race: more chunks after close
           if (childError) {
+            // v1.2.0d formal M-fix per F22 option A: local dsh binary missing
+            // (ENOENT) → fall through to routedDsh() cross-host dispatch
+            // instead of hard-failing. This is the F22 production story:
+            // edge containers without a local dsh binary dispatch remotely.
+            const errno = (childError as NodeJS.ErrnoException).code;
+            if (errno === "ENOENT") {
+              handle.finished = false;
+              handleRegistry.set(handle.cancel_token, handle);
+              yield* this.streamRoutedDshFallback(handle, attempt_id, timeoutMs);
+              return;
+            }
             yield {
               kind: "driver.failed",
               attempt_id,

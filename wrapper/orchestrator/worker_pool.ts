@@ -16,8 +16,10 @@
  *     sub-second precision needed so that 3+ rapid dispatches don't tie
  *     on ORDER BY last_heartbeat_at ASC and always pick the first-registered
  *     worker — secondary sort by worker_id ASC breaks remaining ties)
- *   - registered_at INTEGER NOT NULL (unix epoch seconds)
- *   - drained_at INTEGER (unix epoch seconds, nullable)
+ *   - registered_at INTEGER NOT NULL (unix epoch milliseconds; v1.2.0d
+ *     formal M-fix — was seconds, same-second registrations tied and pushed
+ *     tie-breaking to worker_id lexicographic order)
+ *   - drained_at INTEGER (unix epoch milliseconds, nullable; same M-fix)
  *
  * Invariants (simplified per ADR 0007 line 60 WorkerInfo schema):
  *   - I15-simp: heartbeat advances last_heartbeat_at only if worker exists
@@ -143,7 +145,7 @@ export class SqliteWorkerPool implements WorkerPool {
                 last_heartbeat_at, registered_at, drained_at
            FROM workers
           WHERE status = 'active'
-          ORDER BY last_heartbeat_at ASC, worker_id ASC, registered_at ASC
+          ORDER BY last_heartbeat_at ASC, registered_at ASC, worker_id ASC
           LIMIT 1`,
       ),
       updateHeartbeat: this.db.prepare(
@@ -221,9 +223,12 @@ export class SqliteWorkerPool implements WorkerPool {
       host,
       capabilities_json,
       nowMs,
-      // registered_at is unix epoch SECONDS (schema comment above); only
-      // last_heartbeat_at uses ms precision (for sub-second dispatch ties).
-      Math.floor(nowMs / 1000),
+      // v1.2.0d formal M-fix per v1.2.0b M1 unit-contract discipline:
+      // registered_at is unix epoch MILLISECONDS (same precision as
+      // last_heartbeat_at) — seconds-level precision ties same-second
+      // registrations and pushes tie-breaking to worker_id lexicographic
+      // order, breaking round_robin "first-registered-first" semantics.
+      nowMs,
     );
 
     return worker_id;
@@ -279,8 +284,9 @@ export class SqliteWorkerPool implements WorkerPool {
   async drain(worker_id: string): Promise<string> {
     validateWorkerId(worker_id);
     const nowMs = unixNowMillis();
-    // drained_at is unix epoch SECONDS (schema comment above).
-    const info = this.stmts.updateDrain.run(Math.floor(nowMs / 1000), worker_id);
+    // drained_at is unix epoch MILLISECONDS (v1.2.0d formal M-fix, aligned
+    // with registered_at/last_heartbeat_at — reader no longer scales).
+    const info = this.stmts.updateDrain.run(nowMs, worker_id);
     if (info.changes === 0) {
       const existing = this.getWorker(worker_id);
       if (!existing) {
@@ -388,12 +394,25 @@ function ensureParentDir(filePath: string): void {
   }
 }
 
+let lastTickMs = 0;
+
 function unixNowMillis(): number {
   // Sub-second precision so that 3+ workers registered within the same
   // second don't tie on `ORDER BY last_heartbeat_at ASC` (would always pick
-  // the first-registered worker). Secondary sort by worker_id ASC breaks
-  // any remaining ms-level ties.
-  return Date.now();
+  // the first-registered worker). Secondary sort by registered_at ASC breaks
+  // any remaining ties.
+  //
+  // v1.2.0d formal M-fix: MONOTONIC — Date.now() can return the same ms for
+  // consecutive register()/heartbeat() calls, which re-ties everything and
+  // pushes round_robin back onto worker_id lexicographic order. Guaranteeing
+  // strict monotonicity within the process makes registered_at ASC a genuine
+  // "first-registered-first" tie-break (per F21).
+  const now = Date.now();
+  if (now <= lastTickMs) {
+    return ++lastTickMs;
+  }
+  lastTickMs = now;
+  return now;
 }
 
 function validateHost(host: string): void {
@@ -440,9 +459,9 @@ function rowToWorkerInfo(row: {
   registered_at: number;
   drained_at: number | null;
 }): WorkerInfo {
-  // Column units differ by design (schema comment above): last_heartbeat_at
-  // is unix epoch MILLISECONDS; registered_at/drained_at are unix epoch
-  // SECONDS. Scale accordingly — a uniform *1000 here produced years ~58k.
+  // Column units (schema comment above): last_heartbeat_at, registered_at and
+  // drained_at are ALL unix epoch MILLISECONDS (v1.2.0d formal M-fix aligned
+  // registered_at/drained_at to ms — a *1000 here produced years ~58k).
   return {
     worker_id: row.worker_id,
     host: row.host,
@@ -452,9 +471,9 @@ function rowToWorkerInfo(row: {
       : "active",
     last_heartbeat_at: new Date(row.last_heartbeat_at).toISOString(),
     current_attempt_id: null,
-    registered_at: new Date(row.registered_at * 1000).toISOString(),
+    registered_at: new Date(row.registered_at).toISOString(),
     drained_at:
-      row.drained_at === null ? null : new Date(row.drained_at * 1000).toISOString(),
+      row.drained_at === null ? null : new Date(row.drained_at).toISOString(),
   };
 }
 
