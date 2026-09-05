@@ -82,7 +82,7 @@ services:
       - harness_net
     depends_on:
       harness-kernel:
-        condition: service_healthy
+        condition: service_started
     # Port 3010 (host) → 3000 (container). 3010 chosen because 3000 is occupied
     # by next-server (puer-hub dev server). Tailscale Funnel proxies
     # harness.rana.asia:443 → wrapper:3010.
