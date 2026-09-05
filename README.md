@@ -691,6 +691,8 @@ v1.2 周期第二 sub-cycle（commander/worker 真实现 + 多机 LB + 防 OOM �
 
 **Cross-ref**: [`notes/codex-audit-scope-v1.2.0b-v0.1.md`](notes/codex-audit-scope-v1.2.0b-v0.1.md) (v0.1 守门: §4.11 NEW worker 真实现守门 14 项 grep + §4.7.7 NEW server.ts handleWorkerHeartbeat 真接守门 + §4.10.5/§4.10.6 NEW commander.ts TODO(v1.2.0b) + synthetic stub 替换守门 + §3.7 NEW Dockerfile 例外声明 + §2.7 NEW better-sqlite3 path 默认值守门 + §4.8.5 NEW wrapper/orchestrator/ 5 文件 PROJECT_ROOT 守门 + §5 20 文件 hygiene 自检表 + §7 NEW 教训记档 6 项 + §9 14 验证命令矩阵) + [`notes/codex-audit-scope-v1.2.0b-v0.1-prompt.md`](notes/codex-audit-scope-v1.2.0b-v0.1-prompt.md) (v1.2.0b Codex 复审 prompt + 14 hygiene checklist + 6 处引用式机制落地验证 + 25 条验证命令).
 
+**Codex v0.1 formal 复审报告**: [`notes/codex-review-v1.2.0b-v0.1-formal-report.md`](notes/codex-review-v1.2.0b-v0.1-formal-report.md) (10657 bytes, PASS 0C/0M/0m 同轮全闭 — 初审 0C/2M/5m → same-round closure: M1 worker_pool column-unit contract repair [8bef884 列契约 heartbeat ms / register+drain seconds] + M2 disk anchoring 116/129/13 三源闭合 + m3-m7 守门 全部 closed). 三源闭合 116/129/13 + 双 gate tsc 0 + vitest 191p/0f/107g (298 total, 33.9s) 维持.
+
 #### 1. 三层架构抽象第二刀收口 (per PRD §3 L102-104 + A-1/A-2/A-3)
 
 ```
