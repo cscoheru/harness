@@ -57,7 +57,7 @@ services:
   # ── STT worker (M2 newvps only; whisper.cpp audio→text) ─────────────────────
   stt-worker:
     container_name: harness-stt-worker
-    image: node:22-slim
+    image: node:24-slim
     restart: unless-stopped
     working_dir: /app/wrapper
     volumes:
@@ -90,7 +90,7 @@ services:
   # ── Web Push gateway (M2 newvps only; VAPID private key centralized) ─────────
   web-push-gateway:
     container_name: harness-web-push
-    image: node:22-slim
+    image: node:24-slim
     restart: unless-stopped
     working_dir: /app/wrapper
     volumes:
@@ -118,7 +118,7 @@ services:
   # ── wrapper orchestrator (port 4000) ─────────────────────────────────────────
   wrapper-orchestrator:
     container_name: harness-wrapper-orch
-    image: node:22-slim
+    image: node:24-slim
     restart: unless-stopped
     working_dir: /app/wrapper
     volumes:
@@ -146,7 +146,7 @@ services:
   # ── wrapper commander (port 4001) ─────────────────────────────────────────────
   wrapper-commander:
     container_name: harness-wrapper-commander
-    image: node:22-slim
+    image: node:24-slim
     restart: unless-stopped
     working_dir: /app/wrapper
     volumes:
@@ -180,7 +180,7 @@ services:
   #   /*        → wrapper-frontend:4002 (PWA + /api/pwa/* form handlers)
   wrapper-frontend:
     container_name: harness-wrapper-frontend
-    image: node:22-slim
+    image: node:24-slim
     restart: unless-stopped
     working_dir: /app/wrapper
     volumes:

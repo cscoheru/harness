@@ -20,7 +20,7 @@ services:
   # ── edge wrapper orchestrator (asia-1) ─────────────────────────────────────
   edge-wrapper:
     container_name: harness-edge3-wrapper
-    image: node:22-slim
+    image: node:24-slim
     restart: unless-stopped
     working_dir: /app/wrapper
     volumes:
