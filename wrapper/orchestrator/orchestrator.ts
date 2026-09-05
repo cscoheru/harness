@@ -167,7 +167,7 @@ export async function health(): Promise<HealthResponse> {
     // fall through to stub
   }
   console.log("[orchestrator] health() — kernel unreachable, returning stub");
-  return { status: "ok", version: "0.0.0-stub" };
+  return { status: "ok", version: "1.2.0c" };
 }
 
 /**
