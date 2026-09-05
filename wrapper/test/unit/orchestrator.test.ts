@@ -91,11 +91,11 @@ describe('orchestrator', () => {
   // ── health() ──────────────────────────────────────────────────────────────
 
   describe('health()', () => {
-    it('returns stub ok status and version', async () => {
+    it('returns ok status and version (1.2.0c per a6d6e06)', async () => {
       const res = await health();
       expect(res).toEqual({
         status: 'ok',
-        version: '0.0.0-stub',
+        version: '1.2.0c',
       });
     });
 

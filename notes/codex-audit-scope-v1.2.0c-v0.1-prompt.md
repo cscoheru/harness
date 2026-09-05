@@ -56,7 +56,7 @@ git diff v1.0.0..HEAD -- spec/kernel-schema.sql | wc -l  # ≥ 1（§3.9 例外�
 
 # 5. wrapper/orchestrator/ 不锁型号
 grep -rE "Fable 5|GLM 5.3|MiniMax-M3" wrapper/orchestrator/ | wc -l
-# 期望: 0（v1.2.0c NEW host_fencing.ts 同样守）
+# 期望: 0（m5 GATE-CALIB 注释豁免第三例：host_fencing.ts L20 hygiene 注释「No model-specific identifiers (Fable 5 / GLM 5.3 / MiniMax-M3)」自身提及字面 — 生产路径 0 锁型号；v0.6 DER + v1.2.0b stub-worker 同型。守门跑法：命中 1 处须核对为注释行）
 
 # 6. §3.8 NEW MagicDNS 命名裂痕修复（per D5 + F11）
 grep -rE "fish-harness\.ts\.net" wrapper/orchestrator/6host_router.ts deploy/tailscale-acl-6host.yaml deploy/tailscale-funnel-6host.yaml deploy/tailscale-serve-harness.yaml deploy/6host-compose.edge1.yml deploy/6host-compose.edge2.yml deploy/6host-compose.edge3.yml deploy/6host-compose.edge4.yml deploy/6host-compose.edge5.yml deploy/6host-compose.newvps.yml deploy/macbook-compose.yml | wc -l
@@ -147,7 +147,7 @@ grep -rE "fish-harness\.ts\.net" wrapper/orchestrator/6host_router.ts deploy/tai
 grep -rE "tail1b9878\.ts\.net" wrapper/orchestrator/ deploy/ 2>&1 | wc -l  # == 0
 
 # §4.12 NEW cross-host 真发守门 16 项
-grep -cE "fetch.*fish-harness\.ts\.net.*api/v1/tasks" wrapper/orchestrator/6host_router.ts  # ≥ 1（routedDsh() 真发远程 per F12）
+grep -cE "fetch\(.*getHostUrl.*api/v1/tasks" wrapper/orchestrator/6host_router.ts  # ≥ 1（routedDsh() 真发远程 per F12；m2 GATE-CALIB per v1.2.0c formal：原 pattern 要求 fetch+域名+path 同行，实现为表驱动 getHostUrl() 拼接 — 真发在 L307 `${getHostUrl(...)}/api/v1/tasks`，域名字面在 L75-87 magicDnsName 表 63 处 canonical 由 cmd 6 独立守门）
 grep -c "callDshHeadless" wrapper/orchestrator/6host_router.ts  # == 0（替换 L277, per F12）
 grep -c "MACBOOK_HOST\|macbook" wrapper/orchestrator/6host_router.ts  # ≥ 4（HostId union + 表 + findAvailableHost + scoring, per F20）
 grep -c "host_id\|hostId" harness/runtime/worker_pool.py spec/kernel-schema.sql | awk -F: '{s+=$NF} END{print s}'  # ≥ 5（per F13 partial unique index）
@@ -166,7 +166,7 @@ grep -rE "vapid_private_key|sk-[a-z0-9]{32,}" wrapper/orchestrator/6host_router.
 test -f deploy/macbook-compose.yml  # NEW（per F15）
 test -f deploy/runbook-macbook-worker.md  # NEW（per F15）
 test -f spec/capabilities/macbook.json  # NEW（per F14）
-grep -c "host_class.*macbook-main\|working_hours" wrapper/orchestrator/worker.ts spec/capabilities/macbook.json | awk -F: '{s+=$NF} END{print s}'  # ≥ 3（per F14）
+grep -c "host_class.*macbook-main\|working_hours\|isWorkingHours" wrapper/orchestrator/orchestrator.ts spec/capabilities/macbook.json | awk -F: '{s+=$NF} END{print s}'  # ≥ 3（per F14；m4 GATE-CALIB per v1.2.0c formal 二次校准：原 pattern 误列 worker.ts + 漏 camelCase — host_class 归 capability spec（macbook.json L6-7 两处）、工作时段评分逻辑在 orchestrator.ts 以 isWorkingHours 命名（3 处）；实测 5 = json 2 + orchestrator 3）
 grep -c "isWorkingHours\|scoring.*+100\|score.*+.*100" wrapper/orchestrator/orchestrator.ts  # ≥ 2（per F14 + D6）
 grep -rE "tag:macbook" deploy/tailscale-acl-6host.yaml | wc -l  # ≥ 3（per F16）
 grep -c "kjonemacbook-pro\|macbook\.fish-harness\.ts\.net" deploy/macbook-compose.yml wrapper/orchestrator/6host_router.ts  # ≥ 4
@@ -183,8 +183,8 @@ grep -cE "host_id|hostId" harness/runtime/worker_pool.py  # ≥ 3（per F13）
 grep -cE "CREATE UNIQUE INDEX.*task_id.*host_id|UNIQUE.*host_id" spec/kernel-schema.sql  # ≥ 1（partial unique index, per F13）
 grep -c "host_id" wrapper/orchestrator/host_fencing.ts  # ≥ 5
 test -f wrapper/orchestrator/host_fencing.ts  # NEW
-grep -c "function recordDispatch\|export function recordDispatch\|recordDispatch\s*=" wrapper/orchestrator/host_fencing.ts  # ≥ 1
-grep -c "function checkFencing\|export function checkFencing\|checkFencing\s*=" wrapper/orchestrator/host_fencing.ts  # ≥ 1
+grep -cE "recordDispatch\(task_id|function recordDispatch|recordDispatch\s*=" wrapper/orchestrator/host_fencing.ts  # ≥ 1（m3 GATE-CALIB per v1.2.0c formal：实现为 class HostFence 方法形态 `recordDispatch(task_id: ...)` — 方法定义无 function 关键字无 = 赋值，原 pattern 恒 0 假门）
+grep -cE "checkFencing\(task_id|function checkFencing|checkFencing\s*=" wrapper/orchestrator/host_fencing.ts  # ≥ 1（m3 同型：方法形态 L131）
 grep -c "class HostIdFencingError\|HostIdFencingError\s*extends" wrapper/orchestrator/host_fencing.ts  # ≥ 1（per F13）
 test -f wrapper/test/integration/host_id_fencing.test.ts  # NEW（per plan §4.2 + F18）
 ```
@@ -197,7 +197,7 @@ grep -rE "fish-harness\.ts\.net" wrapper/orchestrator/6host_router.ts deploy/tai
 grep -rE "tail1b9878\.ts\.net" wrapper/orchestrator/ deploy/ 2>&1 | wc -l  # == 0
 
 # 2. F12 routedDsh() L277 真发 fetch() 替换
-grep -cE "fetch.*fish-harness\.ts\.net.*api/v1/tasks" wrapper/orchestrator/6host_router.ts  # ≥ 1
+grep -cE "fetch\(.*getHostUrl.*api/v1/tasks" wrapper/orchestrator/6host_router.ts  # ≥ 1（m2 GATE-CALIB：表驱动 getHostUrl 拼接形态）
 grep -c "callDshHeadless" wrapper/orchestrator/6host_router.ts  # == 0
 
 # 3. F13 kernel-side partial unique index 兜底

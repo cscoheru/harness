@@ -327,8 +327,8 @@ grep -rE "tail1b9878\.ts\.net" wrapper/orchestrator/ deploy/ 2>&1 | wc -l
 # 期望: == 0（v1.2.0c 起草预估 = 0）
 
 # routedDsh() 真发 fetch() 守门（v1.2.0c NEW §4.12.3 — per F12 L277 替换）：
-grep -cE "fetch.*fish-harness\.ts\.net.*api/v1/tasks" wrapper/orchestrator/6host_router.ts
-# 期望: ≥ 1（v1.2.0c 起草预估 ≥ 1）
+grep -cE "fetch\(.*getHostUrl.*api/v1/tasks" wrapper/orchestrator/6host_router.ts
+# 期望: ≥ 1（m2 GATE-CALIB per v1.2.0c formal：表驱动 getHostUrl 拼接形态；起草预估 ≥ 1）
 
 # callDshHeadless 残留检测（v1.2.0c NEW §4.12.4 — per F12 替换后必 == 0）：
 grep -c "callDshHeadless" wrapper/orchestrator/6host_router.ts
@@ -459,12 +459,12 @@ test -f wrapper/orchestrator/host_fencing.ts  # NEW
 # 期望: exists（v1.2.0c 起草预估 = exists）
 
 # host_fencing.ts recordDispatch 函数守门（v1.2.0c NEW §4.14.5 — per plan §4.2）：
-grep -c "function recordDispatch\|export function recordDispatch\|recordDispatch\s*=" wrapper/orchestrator/host_fencing.ts
-# 期望: ≥ 1（v1.2.0c 起草预估 ≥ 1）
+grep -cE "recordDispatch\(task_id|function recordDispatch|recordDispatch\s*=" wrapper/orchestrator/host_fencing.ts
+# 期望: ≥ 1（m3 GATE-CALIB per v1.2.0c formal：实现为 class HostFence 方法形态 L104；起草预估 ≥ 1）
 
 # host_fencing.ts checkFencing 函数守门（v1.2.0c NEW §4.14.6 — per plan §4.2）：
-grep -c "function checkFencing\|export function checkFencing\|checkFencing\s*=" wrapper/orchestrator/host_fencing.ts
-# 期望: ≥ 1（v1.2.0c 起草预估 ≥ 1）
+grep -cE "checkFencing\(task_id|function checkFencing|checkFencing\s*=" wrapper/orchestrator/host_fencing.ts
+# 期望: ≥ 1（m3 同型：方法形态 L131）
 
 # host_fencing.ts HostIdFencingError 类守门（v1.2.0c NEW §4.14.7 — per plan §4.2 + F13）：
 grep -c "class HostIdFencingError\|HostIdFencingError\s*extends" wrapper/orchestrator/host_fencing.ts
@@ -624,7 +624,7 @@ grep -cE "WorkflowPack" wrapper/orchestrator/commander.ts  # ≥ 3
 grep -cE "ExecutionDriver|worker_pool" wrapper/orchestrator/worker.ts  # ≥ 6
 
 # 7. §4.12 v1.2.0c cross-host 真发守门 16 项 NEW（commit 2 后实测）
-grep -cE "fetch.*fish-harness\.ts\.net.*api/v1/tasks" wrapper/orchestrator/6host_router.ts  # ≥ 1
+grep -cE "fetch\(.*getHostUrl.*api/v1/tasks" wrapper/orchestrator/6host_router.ts  # ≥ 1（m2 GATE-CALIB per v1.2.0c formal：表驱动 getHostUrl 拼接形态，域名字面由 cmd 6 magicDnsName 表独立守门）
 grep -c "callDshHeadless" wrapper/orchestrator/6host_router.ts  # == 0
 grep -c "MACBOOK_HOST\|macbook" wrapper/orchestrator/6host_router.ts  # ≥ 4
 grep -c "host_id\|hostId" harness/runtime/worker_pool.py spec/kernel-schema.sql | awk -F: '{s+=$NF} END{print s}'  # ≥ 5
@@ -643,7 +643,7 @@ grep -rE "vapid_private_key|sk-[a-z0-9]{32,}" wrapper/orchestrator/6host_router.
 test -f deploy/macbook-compose.yml  # NEW
 test -f deploy/runbook-macbook-worker.md  # NEW
 test -f spec/capabilities/macbook.json  # NEW
-grep -c "host_class.*macbook-main\|working_hours" wrapper/orchestrator/worker.ts spec/capabilities/macbook.json | awk -F: '{s+=$NF} END{print s}'  # ≥ 3
+grep -c "host_class.*macbook-main\|working_hours\|isWorkingHours" wrapper/orchestrator/orchestrator.ts spec/capabilities/macbook.json | awk -F: '{s+=$NF} END{print s}'  # ≥ 3（m4 GATE-CALIB per v1.2.0c formal：worker.ts 误列移除 + camelCase isWorkingHours 并入 — 实测 5 = macbook.json 2 + orchestrator.ts 3）
 grep -c "isWorkingHours\|scoring.*+100\|score.*+.*100" wrapper/orchestrator/orchestrator.ts  # ≥ 2
 grep -rE "tag:macbook" deploy/tailscale-acl-6host.yaml | wc -l  # ≥ 3
 grep -c "kjonemacbook-pro\|macbook\.fish-harness\.ts\.net" deploy/macbook-compose.yml wrapper/orchestrator/6host_router.ts  # ≥ 4
@@ -660,8 +660,8 @@ grep -cE "host_id|hostId" harness/runtime/worker_pool.py  # ≥ 3
 grep -cE "CREATE UNIQUE INDEX.*task_id.*host_id|UNIQUE.*host_id" spec/kernel-schema.sql  # ≥ 1
 grep -c "host_id" wrapper/orchestrator/host_fencing.ts  # ≥ 5
 test -f wrapper/orchestrator/host_fencing.ts  # NEW
-grep -c "function recordDispatch\|export function recordDispatch\|recordDispatch\s*=" wrapper/orchestrator/host_fencing.ts  # ≥ 1
-grep -c "function checkFencing\|export function checkFencing\|checkFencing\s*=" wrapper/orchestrator/host_fencing.ts  # ≥ 1
+grep -cE "recordDispatch\(task_id|function recordDispatch|recordDispatch\s*=" wrapper/orchestrator/host_fencing.ts  # ≥ 1（m3 方法形态）
+grep -cE "checkFencing\(task_id|function checkFencing|checkFencing\s*=" wrapper/orchestrator/host_fencing.ts  # ≥ 1（m3 方法形态）
 grep -c "class HostIdFencingError\|HostIdFencingError\s*extends" wrapper/orchestrator/host_fencing.ts  # ≥ 1
 test -f wrapper/test/integration/host_id_fencing.test.ts  # NEW
 
