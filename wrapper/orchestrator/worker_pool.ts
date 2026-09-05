@@ -221,7 +221,9 @@ export class SqliteWorkerPool implements WorkerPool {
       host,
       capabilities_json,
       nowMs,
-      nowMs,
+      // registered_at is unix epoch SECONDS (schema comment above); only
+      // last_heartbeat_at uses ms precision (for sub-second dispatch ties).
+      Math.floor(nowMs / 1000),
     );
 
     return worker_id;
@@ -277,7 +279,8 @@ export class SqliteWorkerPool implements WorkerPool {
   async drain(worker_id: string): Promise<string> {
     validateWorkerId(worker_id);
     const nowMs = unixNowMillis();
-    const info = this.stmts.updateDrain.run(nowMs, worker_id);
+    // drained_at is unix epoch SECONDS (schema comment above).
+    const info = this.stmts.updateDrain.run(Math.floor(nowMs / 1000), worker_id);
     if (info.changes === 0) {
       const existing = this.getWorker(worker_id);
       if (!existing) {
@@ -305,9 +308,11 @@ export class SqliteWorkerPool implements WorkerPool {
     if (!Number.isFinite(nowMs)) {
       throw new Error(`worker_pool.reap_stale: now_iso is not parseable (got ${now_iso})`);
     }
-    const cutoffSec = nowMs - threshold_seconds;
+    // last_heartbeat_at is stored in ms, threshold_seconds is in seconds —
+    // scale before subtracting so a fresh worker stays inside the window.
+    const cutoffMs = nowMs - threshold_seconds * 1000;
 
-    const staleRows = this.stmts.selectStale.all(cutoffSec) as { worker_id: string }[];
+    const staleRows = this.stmts.selectStale.all(cutoffMs) as { worker_id: string }[];
     if (staleRows.length === 0) return 0;
 
     const tx = this.db.transaction((workerIds: string[]) => {
@@ -435,6 +440,9 @@ function rowToWorkerInfo(row: {
   registered_at: number;
   drained_at: number | null;
 }): WorkerInfo {
+  // Column units differ by design (schema comment above): last_heartbeat_at
+  // is unix epoch MILLISECONDS; registered_at/drained_at are unix epoch
+  // SECONDS. Scale accordingly — a uniform *1000 here produced years ~58k.
   return {
     worker_id: row.worker_id,
     host: row.host,
@@ -442,7 +450,7 @@ function rowToWorkerInfo(row: {
     status: ALLOWED_STATUSES.has(row.status as WorkerStatus)
       ? row.status
       : "active",
-    last_heartbeat_at: new Date(row.last_heartbeat_at * 1000).toISOString(),
+    last_heartbeat_at: new Date(row.last_heartbeat_at).toISOString(),
     current_attempt_id: null,
     registered_at: new Date(row.registered_at * 1000).toISOString(),
     drained_at:
