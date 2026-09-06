@@ -785,6 +785,39 @@ v1.2 周期第四 sub-cycle（commander/worker 真实现 + 多机 LB + 防 OOM �
 - **U6** Codex v1.2.0d formal 复审 PASS 0C/0M/6m (user 亲提 `gpt-5.6-sol` + `xhigh`; 6M same-round fixes M1 stop_grace_period / M2 alerts.yml / M3 routedDsh ENOENT / M4 prom-client / M5 queue lifecycle / M6 ms 列契约 → `eff9da8` closure commit) — **✅ DONE**
 - **U7** v1.2.0d minor tag @ boundary `eff9da8` (per Debian stable point release 推进式风格; v1.2.0c formal review + 6M fixes closure commit) — **✅ Claude EXEC** (per user override 2026-09-05, 一次性; 后续 tag push 按 new rule Claude 可代劳) (`git tag -a v1.2.0d eff9da8 -m "..." && git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin v1.2.0d` via Clash proxy)
 
+### v1.2.0d.1 cycle scope（2026-09-06 — oom_prevention reclaim test logic 修复 M-class #3 quick-fix, 0 production code touched, skip formal review per user authorization）✅ Commit 1 修复 pushed + Commit 2 簿记翻 PASS
+
+v1.2.0d.1 quick-fix sub-cycle（commander/worker 真实现 + 多机 LB + 防 OOM 大周期收口 + quick-fix）: v1.2.0d post-cycle 真机 E2E 暴露 `wrapper/test/integration/oom_prevention.test.ts:78` "reclaim round-trip drains 1000-task burst without memory growth" test logic 错 — `expect(reclaimed).toBe(0)` 但 impl 正确返回 `5`。**Root cause**: `queue_store.dequeue()` 故意 mark `'dispatched'` (NOT `'completed'`) — crash recovery 路径设计: dequeued-but-not-completed task 在 wrapper crash 后必须能被 reclaim 捞回重 dispatch, 若 mark `'completed'` 则 crash 恢复时丢任务 (M-class 隐患)。Test author 误假设 enqueue → SQLite 0 rows (comment 错) + reclaim 应返回 0 (assertion 错)。**Fix**: 1 file (it() body rewrite, 12 insertions / 7 deletions) — rename it() → "reclaim recovers dispatched-but-not-completed tasks after in-memory drain (crash recovery)" + rewrite comments 反映实际语义 + update assertions `reclaimed===5/inFlightCount===5/pendingCount===5`。**0 production code touched, 0 env flag, 0 new dep**。
+
+**M-bug class 三连复发第 3 cycle** (per fish-harness-v1.2.0d-cycle-closure memory):
+- v1.2.0b: ms / 秒混列陷阱 → column-unit contract 8bef884 fix
+- v1.2.0c: disk verbatim 走样 → BRE `\|` 反斜杠块复制
+- v1.2.0d: cc-ready PASS 翻牌超前于实测 + test logic 错 (test author comment-driven 写 assertion) → 本次 v1.2.0d.1 quick-fix (impl 不动, test 期望对齐 impl 实际语义)
+
+**Codex v0.1 formal review**: **⏭️ SKIPPED** per user authorization (per 修订 Codex 提交铁律 2026-09-05 Claude 可代劳 tag push + user 亲提可选; 本次 cycle skip Codex formal review 因 quick-fix 1 file Edit + impl 不动 + test logic 而非 impl 漂移)。Codex 6M formal review 0C/6M/5m PASS 在 v1.2.0d cycle 已漏抓 test assertion drift — formal review 重点 impl + audit-scope, test drift 需靠真机 vitest 实测 catch。
+
+**Cross-ref**: [`notes/codex-audit-scope-v1.2.0d.1-v0.1-prompt.md`](notes/codex-audit-scope-v1.2.0d.1-v0.1-prompt.md) (v1.2.0d.1 quick-fix Codex 复审 prompt + §1 Context impl-vs-test 表 + §2 1 file 改动 + §3 5 维度 期望输出 0C/0M/0m + §4 验证清单 + §5 M-bug 复盘 + §6 user EXEC 3 项 + §7 Plan self-check 8 项).
+
+#### 2 commits 实施 (2026-09-06)
+
+| # | Hash | Subject | Files |
+|---|------|---------|-------|
+| 1 | `42a6dcd` | fix(v1.2.0d.1): oom_prevention reclaim test logic — impl 是对的,test 期望错 (M-class #3) | 1 (+12/-7) |
+| 2 | (本 commit) | chore(v1.2.0d.1): cc-ready + CHANGELOG + README 簿记翻 PASS (skip formal review per user authorization) | 3 |
+
+#### User EXEC status (per plan §13.4 quick-fix sub-cycle, 3 项 = U1-U3)
+
+- **U1** TypeScript build on newvps — `ssh newvps 'cd /opt/fish-harness/wrapper && ./node_modules/.bin/tsc --noEmit'` — **✅ exit 0**
+- **U2** 双 gate vitest full gated 9 flag — `unset DEEPSEEK_API_KEY; export RUN_QUEUE_BACKPRESSURE_E2E=1 RUN_OOM_PREVENTION_E2E=1 RUN_WORKER_POOL_E2E=1 RUN_SERVER_HEARTBEAT_E2E=1 RUN_ORCH_COMMANDER_E2E=1 RUN_PACK_PLAN_E2E=1 RUN_CROSS_HOST_E2E=1 RUN_HOST_FENCING_E2E=1 RUN_MACBOOK_E2E=1; ./node_modules/.bin/vitest run` — **✅ 295/295 PASS** (was 294/295 → 295/295 after fix)
+- **U3** v1.2.0d.1 minor tag @ commit 2 (closure commit) — **⏳ Claude EXEC** (per 修订 Codex 提交铁律 2026-09-05 Claude 可代劳 tag push via Clash) `git tag -a v1.2.0d.1 <commit-2> -m "v1.2.0d.1: oom_prevention.test.ts reclaim test logic 修复 (M-class #3 quick-fix)" && git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin v1.2.0d.1`
+
+#### Hygiene 锚定 (维持 v1.2.0d, v1.2.0d.1 不动)
+
+- post-v1.2.0d.1 tracked = **116 文件** (v1.2.0d 116 维持; 不动 spec/harness/9 ADR/Dockerfile; 不动 docs/adr/spec/capabilities 主表锚定区域; 不动 9 ADR body immutable per T-DD-6 冻结规则)
+- disk verbatim = **128** = 116 tracked + 12 self-injury (v1.2.0d 锚定维持; v1.2.0d.1 不引入新 self-injury)
+- v1.2.0d.1 不引入 Fable/GLM/MiniMax 字面 (impl 完全不动, 只 test edit)
+- tracked 锚定 grep `wc -l` 全 PASS (per Codex 0C/6M/5m v1.2.0d 维持)
+
 ### v1.2.0b cycle scope（2026-09-05 — worker 真实现 + heartbeat 真接 worker + SQLite WorkerPool registry + ExecutionDriver dual + 4 root-cause fixes）✅ PASS
 
 v1.2 周期第二 sub-cycle（commander/worker 真实现 + 多机 LB + 防 OOM 大周期第 2 刀）: `worker.ts` 8 函数 stub → real + `worker_pool.ts` NEW ~220 行（better-sqlite3 per-host + WAL + busy_timeout=5000 per ADR 0009 + 6 methods per types.ts WorkerPool Protocol + round-robin ms precision + secondary sort）+ `execution_driver.ts` NEW ~200 行（subprocess spawn 主路径 + HTTP fallback stub per D2 + DriverEvent stream）+ `commander.ts:113-114` TODO(v1.2.0b) 替换为真调 `worker_pool.dispatch(task_id)` + `server.ts handleWorkerHeartbeat` PURE STUB → real + 新增 `/api/v1/{worker,commander}/health` 路由 + `spec/capabilities/worker.json` 校准 `model_id: deepseek-v4-flash` + `wrapper/package.json` 加 `better-sqlite3@^11` + `Dockerfile` 加 `apk add python3 make g++` (§3.7 NEW Dockerfile 例外声明) + 4 NEW unit tests (worker REWRITE 50 + worker_pool 30 + execution_driver 20 = 100 单测) + 2 NEW integration tests gated (worker_pool 12 + server_heartbeat 10) + M4 hygiene fix 合并 commit 2 (vi.restoreAllMocks → vi.clearAllMocks per D3).

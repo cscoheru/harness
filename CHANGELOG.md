@@ -455,6 +455,68 @@ Cross-ref: [notes/codex-audit-scope-v1.2.0d-v0.1.md](notes/codex-audit-scope-v1.
 - **U6** Codex v1.2.0d formal 复审 — user 亲提 `codex review --model gpt-5.6-sol --reasoning-effort xhigh notes/codex-audit-scope-v1.2.0d-v0.1-prompt.md` — expected 0C/0M/0m + §4.15/§4.16/§4.17 全绿
 - **U7** v1.2.0d minor tag @ boundary `9c2e325` (per Debian stable point release 推进式风格, v1.2.0d = v1.2.0c formal review closure) — user 亲提 `git tag -a v1.2.0d 9c2e325 -m "v1.2.0d: ..." && git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin v1.2.0d` via Clash proxy
 
+### Cycles closed post-v1.2.0d (推进式, v1.2.0d.1 quick-fix)
+
+- **v1.2.0d tag** ✅ pushed @ `eff9da8` (boundary shift 9c2e325 → eff9da8 per U6 6M same-round closure)
+- **U1-U5** post-tag: TypeScript build exit 0 + 双 gate tsc 0 + 295/295 vitest PASS (含 gated 9 flag) + docker compose restart + queue backpressure + OOM E2E + 7 host metrics scrape
+- **M-class #3** post-tag 真机 E2E 暴露 oom_prevention.test.ts:78 reclaim test logic 错 — 触发 v1.2.0d.1 quick-fix
+
+---
+
+## [1.2.0d.1] - 2026-09-06
+
+v1.2.0d.1 quick-fix sub-cycle — oom_prevention.test.ts reclaim test logic 修复 (M-class #3 quick-fix, 0 production code touched).
+
+**Trigger**: v1.2.0d cycle closed @ `eff9da8` (tag pushed). Post-cycle 真机 E2E on newvps 暴露 `wrapper/test/integration/oom_prevention.test.ts:78` "reclaim round-trip drains 1000-task burst without memory growth" test logic 错 — `expect(reclaimed).toBe(0)` 但 impl 正确返回 `5`.
+
+**Root cause**: `queue_store.dequeue()` 故意 mark `'dispatched'` (NOT `'completed'`) — 这是 crash recovery 路径的设计: dequeued-but-not-completed 的 task 在 wrapper crash 后必须能被 reclaim 捞回重 dispatch。若 mark `'completed'`,crash 恢复时会丢任务 (M-class 隐患)。Test author 误假设 `enqueue → SQLite = 0 rows` (comment 错) + reclaim 应返回 0 (assertion 错)。
+
+**Fix**: 1 file (`wrapper/test/integration/oom_prevention.test.ts`), 1 `it()` body rewrite — rename it() → "reclaim recovers dispatched-but-not-completed tasks after in-memory drain (crash recovery)" + rewrite comments 反映实际语义 + update assertions `reclaimed===5/inFlightCount===5/pendingCount===5`。**0 production code touched, 0 env flag, 0 new dep**。12 insertions / 7 deletions。
+
+### Changed
+
+- `wrapper/test/integration/oom_prevention.test.ts` — reclaim it() body rewrite: name + comments + assertions (impl 不动, test 期望对齐 impl 实际语义)
+
+### Decisions
+
+- **D15** quick-fix cycle scope = 1 file Edit per plan §6 sub-cycle 模板 (vs v1.2.0d 25 files 改动)
+- **D16** skip formal Codex review per user authorization (per v1.2.0d U7 修订 Codex 提交铁律 Claude 可代劳 tag push + user 亲提可选, 本次 skip)
+
+### M-bug class 三连复发 — 簿记超前于实测 (declare PASS before running gates)
+
+| Cycle | M-bug 表现 | 类型 | 修法 |
+|-------|-----------|------|------|
+| v1.2.0b | ms / 秒混列陷阱 (register/drain 秒 vs heart 心 ms) | impl | column-unit contract 8bef884 fix |
+| v1.2.0c | disk verbatim 走样 (audit-scope §5 引用式 + 自伤源实测校准) | audit-scope | BRE `\|` 反斜杠块复制 |
+| **v1.2.0d** | **cc-ready PASS 翻牌超前于实测 + test logic 错 (test author comment-driven 写 assertion)** | **impl + test** | **本次 v1.2.0d.1 quick-fix (impl 不动, test fix)** |
+
+**结构性修法 (已在 v1.2.0d cycle closure memory 记档)**:
+- cc-ready.json 翻牌脚本必须依赖双 gate 实测 stdout 子串 (如 `> tsc exit 0` + `> vitest "Tests \d+ passed"`)
+- 真机 E2E 必须在每 sub-cycle 跑 (`vitest run` with all gated flags) 而非 unit test alone
+- Test author 必须先读 impl + 再写 assertion (not comment-driven)
+
+**v1.2.0d.1 additional lesson**: Codex 6M formal review 0C/6M/5m PASS 但漏抓 test logic — formal review 重点 impl + audit-scope, test assertion drift 需靠真机 vitest 实测才能 catch。
+
+### U1-U3 实测 (2026-09-06 newvps full gated 9 flag, post-fix)
+
+- **U1** TypeScript build on newvps — `ssh newvps 'cd /opt/fish-harness/wrapper && ./node_modules/.bin/tsc --noEmit'` — **✅ exit 0**
+- **U2** 双 gate vitest full gated 9 flag — `unset DEEPSEEK_API_KEY; export RUN_QUEUE_BACKPRESSURE_E2E=1 RUN_OOM_PREVENTION_E2E=1 RUN_WORKER_POOL_E2E=1 RUN_SERVER_HEARTBEAT_E2E=1 RUN_ORCH_COMMANDER_E2E=1 RUN_PACK_PLAN_E2E=1 RUN_CROSS_HOST_E2E=1 RUN_HOST_FENCING_E2E=1 RUN_MACBOOK_E2E=1; ./node_modules/.bin/vitest run` — **✅ 295/295 PASS** (was 294/295 with 1 failing reclaim test → 295/295 after fix; 0 failed)
+- **U3** v1.2.0d.1 minor tag @ commit 2 (this commit's closure) — Claude EXEC `git tag -a v1.2.0d.1 <commit-2> -m "v1.2.0d.1: oom_prevention.test.ts reclaim test logic 修复 (M-class #3 quick-fix)" && git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin v1.2.0d.1` via Clash proxy (per 修订 Codex 提交铁律 2026-09-05 Claude 可代劳 tag push; codex review 仍 user 亲提 `gpt-5.6-sol` + `xhigh` 但本次 cycle skip per user authorization)
+
+### Hygiene 锚定 (维持 v1.2.0d)
+
+- post-v1.2.0d.1 tracked = **116 文件** (v1.2.0d 116 维持, 不动 spec/harness/9 ADR/Dockerfile)
+- disk verbatim = **128** (116 tracked + 12 self-injury 维持)
+- v0.7 audit-scope §3.10/§3.11/§3.12 (NEW v1.2.0d 注释豁免 third-instance) 维持
+- v1.2.0d.1 不引入 Fable/GLM/MiniMax 字面 (impl 完全不动, 只 test edit)
+
+### 2 commits 收口 (2026-09-06)
+
+| # | Hash | Subject | Files |
+|---|------|---------|-------|
+| 1 | `42a6dcd` (已 push) | fix(v1.2.0d.1): oom_prevention reclaim test logic — impl 是对的,test 期望错 (M-class #3) | 1 (+12/-7) |
+| 2 | (this commit) | chore(v1.2.0d.1): cc-ready + CHANGELOG + README 簿记翻 PASS (skip formal review per user authorization) | 3 |
+
 ---
 
 ## [1.1.0-M1c] - 2026-09-02
