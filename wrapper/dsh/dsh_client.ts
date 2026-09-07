@@ -5,7 +5,9 @@
  * DEEPSEEK_API_KEY is injected via process.env (NOT hardcoded).
  *
  * Uses model class from DshOpts to select the appropriate profile override.
- * Does NOT lock to a specific model — model is set by the --patch YAML files.
+ * Model selection: role patch YAMLs are authoritative, unless overridden by
+ * DSH_MODEL (direct) or DEEPSEEK_COST_MODE=cheap (default; downgrades orch
+ * from v4-pro to v4-flash). See resolveModelOverride() for precedence.
  *
  * Profile semantics (confirmed by BE-1/TG-1/DO-1):
  *   headless = CLI single-turn task → answer, print, exit
@@ -99,24 +101,60 @@ function resolveProfilePath(modelClass: ModelClass): string {
 }
 
 /**
+ * Role-default models per class (mirrors docs/m0b/profile-override-{orch,commander,worker}.yaml).
+ * Used only by the cost-mode resolver to decide when a CLI --model override is needed;
+ * the authoritative selection stays in the role patch yamls when no override applies.
+ */
+const ROLE_DEFAULT_MODEL: Record<ModelClass, string> = {
+  orch: 'deepseek-v4-pro',        // high-reasoning tier (profile-override-orch.yaml)
+  commander: 'deepseek-v4-flash', // mid-context tier (profile-override-commander.yaml)
+  worker: 'deepseek-v4-flash',    // low-cost batch tier (profile-override-worker.yaml)
+};
+
+/** Target model for DEEPSEEK_COST_MODE=cheap downgrades (cost-optimal text model). */
+const CHEAP_MODEL = 'deepseek-v4-flash';
+
+/**
+ * Resolve a CLI --model override for a model class.
+ *
+ * Precedence (highest first):
+ *   1. DSH_MODEL          — direct override, wins over everything
+ *   2. DEEPSEEK_COST_MODE — 'full' keeps role-patch defaults (orch stays v4-pro);
+ *                           'cheap' (default) downgrades every class to v4-flash
+ *
+ * Returns undefined when the role patch already selects the wanted model, so
+ * commander/worker args are unchanged in cheap mode (zero behavior drift).
+ */
+export function resolveModelOverride(modelClass: ModelClass): string | undefined {
+  if (process.env.DSH_MODEL) return process.env.DSH_MODEL;
+  const mode = process.env.DEEPSEEK_COST_MODE ?? 'cheap';
+  if (mode !== 'cheap') return undefined;
+  return ROLE_DEFAULT_MODEL[modelClass] === CHEAP_MODEL ? undefined : CHEAP_MODEL;
+}
+
+/**
  * Build the dsh CLI argument list for a given model class + prompt.
  *
  * Stack order (last --patch wins):
  *   1. BASE_PATCH       — enables A-class tools (bash/fs/goal/ralph)
  *   2. role PATCH       — sets model (orch → deepseek-v4-pro / commander/worker → deepseek-v4-flash)
+ *   3. --model          — cost-mode/direct override (see resolveModelOverride); only
+ *                         present when it differs from the role-patch default
  *
  * Env DEEPSEEK_API_KEY is injected at spawn time (NOT in the CLI args).
  */
-function buildArgs(
+export function buildArgs(
   modelClass: ModelClass,
   prompt: string,
   extraArgs?: string[],
 ): string[] {
   const rolePatch = resolveProfilePath(modelClass);
+  const modelOverride = resolveModelOverride(modelClass);
   return [
     '--profile', 'headless',
     '--patch', BASE_PATCH,
     '--patch', rolePatch,
+    ...(modelOverride ? ['--model', modelOverride] : []),
     '--',
     prompt,
     ...(extraArgs ?? []),
