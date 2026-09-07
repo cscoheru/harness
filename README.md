@@ -818,6 +818,20 @@ v1.2.0d.1 quick-fix sub-cycle（commander/worker 真实现 + 多机 LB + 防 OOM
 - v1.2.0d.1 不引入 Fable/GLM/MiniMax 字面 (impl 完全不动, 只 test edit)
 - tracked 锚定 grep `wc -l` 全 PASS (per Codex 0C/6M/5m v1.2.0d 维持)
 
+### v1.2.0d.2 cycle scope（2026-09-07 — DEEPSEEK_COST_MODE 成本闸门: orch 默认降级 v4-flash, 集成测试账单直降）✅ 2 commits + tag
+
+**Trigger**: user 质询扣费来源 — key 真身在 `~/projects/choyaku/.env`; 计费大头 = gated E2E 走 `dsh_client.ts` orch role patch → `deepseek-v4-pro` (≈flash 5-10x 价)。
+
+**三层模型优先级** (`wrapper/dsh/dsh_client.ts` `resolveModelOverride()`): `DSH_MODEL` (直接 override) > `DEEPSEEK_COST_MODE` (`cheap` 默认 = 全 class 落 v4-flash; `full` = role patch 默认, orch 回 v4-pro) > role patch yaml (authoritative)。cheap 模式只给 orch 补 `--model` CLI flag (双 `--patch` 之后层叠覆盖); commander/worker args 字节不变 — 304/304 全绿无一断言改动即零漂移实证。
+
+- `spec/capabilities/commander.json` model_id 对齐 flash (worker.json 已 F9 对齐)
+- `deploy/env/newvps.env.example` 首次入库 (原 newvps untracked; MODEL default flash; 全 placeholder)
+- `wrapper/test/unit/dsh_client_cost_mode.test.ts` NEW 9 单测 (优先级矩阵 + 注入位置 + 无漂移)
+
+**Verification**: newvps `tsc --noEmit` exit 0 + 全 9 gated flag vitest **304/304 PASS** (295 基线 + 9 新增)。skip Codex formal review (user 成本优先; audit-scope prompt 已起草 `notes/codex-audit-scope-v1.2.0d.2-v0.1-prompt.md`)。
+
+**Usage**: 默认 cheap 无需 env; `DEEPSEEK_COST_MODE=full` 恢复高推理; `DSH_MODEL=<model>` 任意直指。
+
 ### v1.2.0b cycle scope（2026-09-05 — worker 真实现 + heartbeat 真接 worker + SQLite WorkerPool registry + ExecutionDriver dual + 4 root-cause fixes）✅ PASS
 
 v1.2 周期第二 sub-cycle（commander/worker 真实现 + 多机 LB + 防 OOM 大周期第 2 刀）: `worker.ts` 8 函数 stub → real + `worker_pool.ts` NEW ~220 行（better-sqlite3 per-host + WAL + busy_timeout=5000 per ADR 0009 + 6 methods per types.ts WorkerPool Protocol + round-robin ms precision + secondary sort）+ `execution_driver.ts` NEW ~200 行（subprocess spawn 主路径 + HTTP fallback stub per D2 + DriverEvent stream）+ `commander.ts:113-114` TODO(v1.2.0b) 替换为真调 `worker_pool.dispatch(task_id)` + `server.ts handleWorkerHeartbeat` PURE STUB → real + 新增 `/api/v1/{worker,commander}/health` 路由 + `spec/capabilities/worker.json` 校准 `model_id: deepseek-v4-flash` + `wrapper/package.json` 加 `better-sqlite3@^11` + `Dockerfile` 加 `apk add python3 make g++` (§3.7 NEW Dockerfile 例外声明) + 4 NEW unit tests (worker REWRITE 50 + worker_pool 30 + execution_driver 20 = 100 单测) + 2 NEW integration tests gated (worker_pool 12 + server_heartbeat 10) + M4 hygiene fix 合并 commit 2 (vi.restoreAllMocks → vi.clearAllMocks per D3).

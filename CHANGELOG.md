@@ -519,6 +519,41 @@ v1.2.0d.1 quick-fix sub-cycle — oom_prevention.test.ts reclaim test logic 修�
 
 ---
 
+## [1.2.0d.2] - 2026-09-07
+
+v1.2.0d.2 quick-fix sub-cycle — DEEPSEEK_COST_MODE 成本闸门 (orch 默认降级 v4-pro→v4-flash, 集成测试账单直降; commander/worker 零行为漂移).
+
+**Trigger**: user 2026-09-06 质询「DEEPSEEK_API_KEY 如果不存在, 为什么这两天我的费用被扣了不少?」— 实查 key 真身在 `~/projects/choyaku/.env` (newvps 侧 env-only 设计正确, `/data/secrets/` 路径从未存在是 env limitation 非 bug)。真实计费大头 = gated E2E 全 9 flag 真跑 → `dsh_client.ts` orch role patch → `deepseek-v4-pro` (高推理档, ≈flash 5-10x 价)。
+
+### Added
+
+- **`wrapper/dsh/dsh_client.ts`** (+42): NEW `resolveModelOverride()` 三层优先级 `DSH_MODEL` (直接 override, 最高) > `DEEPSEEK_COST_MODE` (`cheap` 默认 = 全 class 落 v4-flash; `full` = role patch 默认, orch 回 v4-pro) > role patch yaml (authoritative)。`buildArgs` 仅在 override 存在时注入 `--model` (位于双 `--patch` 之后层叠覆盖); cheap 模式只给 orch 补 flag, commander/worker args 字节不变。
+- **`wrapper/test/unit/dsh_client_cost_mode.test.ts`** NEW: 9 单测覆盖优先级矩阵 (default/cheap/full/DSH_MODEL×2) + buildArgs 注入位置 + commander/worker 无漂移断言。
+
+### Changed
+
+- **`spec/capabilities/commander.json`**: `model_id` deepseek-chat → deepseek-v4-flash (对齐 `docs/m0b/profile-override-commander.yaml`; worker.json 已于 v1.2.0b F9 对齐)。
+- **`deploy/env/newvps.env.example`** (首次入库, 原为 newvps untracked): ORCHESTRATOR_MODEL/COMMANDER_MODEL default deepseek-chat → deepseek-v4-flash (纯 dead config, wrapper 无代码读, 但消除误导; 全 placeholder 无真实 secret, 自带 GH013 注记)。
+
+### Verification (newvps 真机双 gate, 2026-09-07)
+
+- **U1** `tsc --noEmit` — **✅ exit 0**
+- **U2** 全 9 gated flag vitest (同 v1.2.0d.1 U2 模板) — **✅ 304 passed / 0 failed** (295 基线 + 9 新增; 304/304 无一断言改动 = commander/worker 零漂移实证)
+- hygiene 红线 0 命中; tracked `deepseek-chat` 残留仅剩 worker.json notes 历史记载 ("was deepseek-chat"), 保留正确
+
+### Decisions
+
+- skip Codex formal review (user 成本优先; scope 小 4 files + 1 new test; audit-scope prompt 已起草 `notes/codex-audit-scope-v1.2.0d.2-v0.1-prompt.md` 供未来复审)
+- 顺手清 newvps repo 根 stray `cc-ready.json` (v1.2.0d.1 scp 失误落点, 内容已在 `docs/poll/` 正确落地)
+
+### Usage
+
+- 默认 = cheap (orch 也走 v4-flash, 集成测试账单预计降 50%+, 无需任何 env)
+- `DEEPSEEK_COST_MODE=full` 恢复 orch v4-pro 高推理
+- `DSH_MODEL=<model>` 直接 override 任意模型 (压过 cost mode)
+
+---
+
 ## [1.1.0-M1c] - 2026-09-02
 
 M1c 阶段 — TypeScript wrapper 三档 profile 收口 + vitest 稳定化 + Codex formal PASS + iPhone Safari Funnel E2E 实测.
