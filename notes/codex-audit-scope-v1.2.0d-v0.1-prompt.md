@@ -1,197 +1,224 @@
-# Codex v0.1 prompt — v1.2.0d 防 OOM 复审 prompt
+# Codex audit-scope prompt v1.2.0d — DeepSeek HTTP + Anti-OOM
 
-> **Date**: 2026-09-05
-> **适用 sub-cycle**: v1.2.0d（v1.2.0 周期第四 sub-cycle）
-> **核心目标**: 验证 v1.2.0d 24 文件改动 + §4.15/§4.16/§4.17 NEW 守门 + §3.10/§3.11/§3.12 NEW 声明 + tracked 116 / disk 128 锚定维持
-> **预期 Codex 输出**: 0C/0M/0m | 1+M+5m 同轮清零（per v1.2.0b/c 闭环模式）
-
----
-
-## §1 Codex 角色
-
-你是 Anthropic Codex CLI（gpt-5.6-sol + xhigh），正对 `notes/codex-audit-scope-v1.2.0d-v0.1.md` 进行 v0.1 prompt-review（同一轮 commit 1 起草 PASS）。你的工作仅限以下 3 件事：
-
-1. **逐条**核对 v1.2.0d audit-scope §1-§10 的 30 验证命令 + 30+ grep pattern 字面是否 verbatim 校准（per §9 cmd 矩阵）
-2. **逐项**对照 §1.5 主表 24 文件改动清单，核对 §4.15-§4.17 + §3.10-§3.12 守门覆盖度
-3. **逐条**核对 §7 教训记档 11 项（v1.2.0c 5 findings + v1.2.0d NEW 6 项）实战吸收模式
-
-**不要**做：
-- 推断 v1.2.0d Commit 2 还没写的代码（tsc 0 + vitest 230+ pass 实测需等 user U2 真跑）
-- 修改 v1.0 runtime / spec/capabilities/ / 9 ADR body / Dockerfile / docker-compose.yml（frozen per §8.3）
-- 提出 v1.3+ / v1.2.1+ 范围外建议（per §8.1/8.2）
-- 校准 v1.2.0c cycle 已锁 boundary（per §14.2 推进式风格）
+> **Trigger**: user 2026-09-08「选 A:wrapper 直调 DeepSeek HTTP API」+ v1.2.0e 3-host 真接闭环 (d 链内合并) + v1.2.0d.2 cost-mode PASS (boundary `9781dcc`; m2 GATE-CALIB per v0.1 prompt-review: 起草误写 9c2e325 = v1.2.0c 收口)
+> **Scope**: 24 文件改动 (per plan §5) + 4 commits + 8 user EXEC + 1 tag v1.2.0d
+> **Codex CLI**: `codex review --model gpt-5.6-sol --reasoning-effort xhigh notes/codex-audit-scope-v1.2.0d-v0.1-prompt.md`
 
 ---
 
-## §2 hygiene 自检表（20 项，必须全 PASS）
+## §1 契约 — v1.2.0d 4 大块决策(已 user 锁,不再二次审议)
 
-### §2.1 不锁型号守门（3 项）
-
-- [ ] **H1**: wrapper/orchestrator/queue_store.ts 不含 Fable 5/GLM 5.3/MiniMax-M3 字面（per §1 继承 + NEW 文件同守）
-- [ ] **H2**: wrapper/orchestrator/metrics.ts 不含 Fable 5/GLM 5.3/MiniMax-M3 字面
-- [ ] **H3**: deploy/monitoring/prometheus.yml + runbook.md 不含 Fable 5/GLM 5.3/MiniMax-M3 字面（NEW monitoring stack 同守）
-
-### §2.2 不硬编码凭据守门（3 项）
-
-- [ ] **H4**: wrapper/orchestrator/queue_store.ts 不硬编码 DEEPSEEK_API_KEY（per §2 继承 + NEW queue_store 同守）
-- [ ] **H5**: wrapper/orchestrator/metrics.ts 不暴露 VAPID_PRIVATE_KEY 或 Prometheus admin_password
-- [ ] **H6**: deploy/tailscale-acl-6host.yaml 加 tag:monitor 段不硬编码 Tailscale auth key（per F28）
-
-### §2.3 docker memory limits 守门（5 项）
-
-- [ ] **H7**: memory limits 全栈分布（m1 GATE-CALIB per v1.2.0d formal 按实际文件布局写回：newvps-compose.yml 4 limits（kernel 256m + 3×1g）+ 6host-compose.newvps.yml 6 limits（kernel 256m / stt 2g / push 1g / orchestrator 512m / commander 1g / frontend 1g）+ monitoring 栈 512m；§3.2.1 复合 ≥27 总量守门为准）per D7
-- [ ] **H8**: deploy/6host-compose.newvps.yml 加 wrapper limits 1G per D7
-- [ ] **H9**: deploy/6host-compose.edge[1-5].yml 5 文件全 wrapper limit 1G + `stop_grace_period: 30s`（compose 原生字段，等价 CLI `--stop-timeout=30`）per F27（m1 GATE-CALIB per v1.2.0d formal：起草只写 CLI 语义且实施初期注释「30s graceful drain」无字段兑现 — 5 文件已补字段）
-- [ ] **H10**: deploy/macbook-compose.yml 加 worker limit 2G + `--memory-reservation=1G` MacBook-specific per plan §5.2
-- [ ] **H11**: ≥ 5 service 设 `--stop-timeout=30` graceful shutdown per F27（docker stats 验证 MemLimit 列非空）
-
-### §2.4 queue 持久化守门（4 项）
-
-- [ ] **H12**: wrapper/orchestrator/queue_store.ts NEW 文件存在（per D8 + F25）
-- [ ] **H13**: queue_store.ts 加 better-sqlite3 + WAL mode + busy_timeout=5000 per ADR 0009
-- [ ] **H14**: queue_store.ts 加 429 Retry-After + 202 Accepted Location header per F26 HTTP RFC
-- [ ] **H15**: orchestrator.ts dispatch() 加 queue backpressure check max_in_flight=50 + reclaim path
-
-### §2.5 monitoring + metrics 守门（3 项）
-
-- [ ] **H16**: wrapper/orchestrator/metrics.ts NEW 文件存在 + prom-client exporter + 4 metric names per F25
-- [ ] **H17**: deploy/monitoring/prometheus.yml NEW + 7 host scrape jobs (newvps + 5 edge + macbook) per F24
-- [ ] **H18**: prometheus.yml + alerts.yml（rule_files 落地）加 3 alert rules (memory >80% / queue_depth >100 / worker offline >5min) + Tailscale ACL tag:monitor + tag:admin per F28（m2 GATE-CALIB per v1.2.0d formal：原复合 pattern 被 `alert` 字面假绿掩盖 rule_files 悬空 — alerts.yml NEW 落地 3 groups 后拆条验证：`grep -c "alert:" deploy/monitoring/alerts.yml` == 3）
-
-### §2.6 顺手清 + 顺手 wire 守门（2 项）
-
-- [ ] **H19**: wrapper/orchestrator/worker_pool.ts dispatch() query 加 tertiary sort `ORDER BY last_heartbeat_at ASC, registered_at ASC, worker_id ASC` per F21 (round_robin tie-breaking)（m4 GATE-CALIB per v1.2.0d formal：起草把 worker_id ASC 放在 registered_at 前 — 同 ms 全 tie 时字典序压过注册序，round_robin 自然序=先注册先派 → registered_at 提前，worker_id 兜底）
-- [ ] **H20**: wrapper/orchestrator/execution_driver.ts HTTP fallback path 替换为 `routedDsh()` 调用 + commit 注释 `// wire-routedDsh per F22 option A`
+| 决策 | 选项 | 关键不变量 |
+|------|------|-----------|
+| **D16** DeepSeek 调用方式 | A:wrapper 直调 DeepSeek HTTP API | OpenAI-compatible Chat Completions;DEEPSEEK_API_KEY env-inject;wrapper 移除 dsh binary 依赖;spawn dsh `child_process.spawn('dsh', ...)` 在 execution_driver.ts 全消失 |
+| **D17** DeepSeek endpoint + model | `https://api.deepseek.com/v1/chat/completions` | orch=deepseek-v4-pro / commander,worker=deepseek-v4-flash;cost-mode `DEEPSEEK_COST_MODE=cheap` 强制降级 |
+| **D7** docker memory limits | A:7 service 全 limits + --stop-timeout=30 | kernel smoke 256M / orch 512M / commander 1G ×2 / frontend 1G / stt 2G / push 1G / worker 1G |
+| **D8** queue backpressure | A:SQLite WAL + 202/429/Location | max_in_flight=50;超 → SQLite pending + 202 Accepted Location header |
+| **D9** monitoring stack | A:Prometheus | 7 host scrape + 3 alert rules (memory > 80% / queue > 100 / worker offline > 5min) + Tailscale ACL `tag:monitor` |
 
 ---
 
-## §3 Codex 期望输出（per v1.2.0b/c 闭环模式 + v1.2.0d NEW 8 处引用式）
+## §2 Files — 24 文件改动清单(per plan §5)
 
-### §3.1 v0.1 终态裁定
+### A. DeepSeek HTTP 直调 (6: 3 NEW + 3 EDIT)
+1. `wrapper/dsh/deepseek_client.ts` NEW ~150 行
+2. `wrapper/dsh/dsh_client.ts` Edit: 加 `@deprecated` JSDoc + re-export `deepseekInvoke as callDshHeadless`
+3. `wrapper/orchestrator/execution_driver.ts` Edit: spawnDsh → deepseekInvoke + streamRoutedDshFallback 替换
+4. `wrapper/orchestrator/orchestrator.ts` Edit: runDsh → deepseekInvoke
+5. `wrapper/orchestrator/workflow_pack.ts` Edit: callDshHeadless → deepseekInvoke
+6. `wrapper/test/unit/deepseek_client.test.ts` NEW ~40 tests
 
-```yaml
-v1.2.0d v0.1 prompt-review expected:
-  - 终态: PASS (0C/0M/0m) OR PASS with 1+M+5m 同轮清零
-  - 含义: 全部 20 hygiene checklist 全 PASS + 8 处引用式机制落地验证全 PASS + 30 验证命令 verbatim 校准
-  - 不接受: 终态 FAIL 或 2+M+ 或 任意 Critical (C) finding
-```
+### B. docker memory limits (8: 8 EDIT)
+7. `deploy/newvps-compose.yml` Edit memory/CPU/--stop-timeout
+8. `deploy/6host-compose.newvps.yml` Edit 6 services
+9. `deploy/3host-compose.worker.yml` NEW worker limit 1G (m6 GATE-CALIB per v0.1 prompt-review: 起草误标 Edit — 实为 v1.2.0e 新建未跟踪 ?? 状态)
+10-14. `deploy/6host-compose.edge[1-5].yml` Edit 5 files
 
-### §3.2 8 处引用式机制落地验证
+### C. queue backpressure (4: 2 NEW + 2 EDIT)
+15. `wrapper/orchestrator/queue_store.ts` NEW ~120 行
+16. `wrapper/orchestrator/orchestrator.ts` Edit dispatch backpressure
+17. `wrapper/orchestrator/types.ts` Edit QueueOverflow + RetryAfter
+18. `wrapper/test/unit/queue_store.test.ts` NEW ~80 行
 
-每处引用式机制 = plan §13.3 + audit-scope §5 24 文件清单中一个独立子系统，需逐处验证：
+### D. Prometheus monitoring (6: 4 NEW + 2 EDIT)
+19. `wrapper/orchestrator/metrics.ts` NEW ~80 行
+20. `wrapper/orchestrator/server.ts` Edit /metrics endpoint (现状已有 per F28)
+21. `deploy/monitoring/prometheus.yml` NEW ~60 行
+22. `deploy/monitoring/runbook.md` NEW ~120 行
+23. `deploy/tailscale-acl-6host.yaml` Edit tag:monitor 段
+24. `wrapper/test/unit/metrics.test.ts` NEW ~50 行
 
-#### §3.2.1 docker memory limits 机制（per D7 + F23 + F27）
+### E. v1.2.0e 合并 (5: 3 NEW + 2 EDIT) — per user 选 A 决策并入 commit 2
+- `wrapper/orchestrator/heartbeat_sender.ts` (NEW)
+- `wrapper/test/unit/heartbeat_sender.test.ts` (NEW)
+- 3 host compose Edit (extra_hosts + .fish-harness.ts.net)
 
-- 7 service compose 文件存在 + memory limit ≥10 + cpus ≥4 + stop-timeout ≥5 + 256M kernel smoke + unless-stopped ≥5
-- 验证命令: `grep -cE "memory:|mem_limit|deploy\.resources\.limits\.memory|stop-timeout|256M|unless-stopped" deploy/*.yml 2>&1 | awk -F: '{s+=$NF} END{print s}'`
-- 期望: ≥ 27 (10 memory + 7 mem_limit + 5 stop-timeout + 1 256M + 5 unless-stopped = 28)
-
-#### §3.2.2 queue 持久化机制（per D8 + F25 + F26）
-
-- queue_store.ts NEW + better-sqlite3 + WAL + 202/429/Location + max_in_flight + queue_depth/active_task_count metric
-- 验证命令: `grep -cE "better-sqlite3|Database|WAL|busy_timeout|202|Retry-After|Location|max_in_flight|queue_depth|active_task_count" wrapper/orchestrator/queue_store.ts wrapper/orchestrator/orchestrator.ts wrapper/orchestrator/types.ts 2>&1 | awk -F: '{s+=$NF} END{print s}'`
-- 期望: ≥ 12 (4 better-sqlite3 + 3 WAL + 3 429/202 + 1 max_in_flight + 4 metric = 15)
-
-#### §3.2.3 metrics.ts + Prometheus exporter 机制（per F25）
-
-- prom-client + Prometheus + register + 4 metric names (active_task_count/queue_depth/memory_used/worker_count)
-- 验证命令: `grep -cE "prom-client|Prometheus|register|active_task_count|queue_depth|memory_used|worker_count" wrapper/orchestrator/metrics.ts`
-- 期望: ≥ 8 (3 framework + 4 metric + 1 register = 8)
-
-#### §3.2.4 Prometheus 7 host scrape 机制（per F24）
-
-- scrape_configs + 7 host targets + 3 alert rules（alerts.yml 落地）+ 3 alert condition + Tailscale bind 100.64.0.0/8
-- 验证命令（m3 GATE-CALIB per v1.2.0d formal 拆条防假绿——原复合 pattern `targets.*newvps` 对多行 targets 列表失配 + `alert` 字面吃掉全部命中掩盖 rule_files 悬空）:
-  `grep -cE "scrape_configs|targets.*edge[1-5]|targets.*kjonemacbook-pro|100\.64\.0\.0" deploy/monitoring/prometheus.yml` ≥ 10
-  + `grep -c "fish-harness.ts.net:300" deploy/monitoring/prometheus.yml` ≥ 8（7 host targets 多行列表形态，newvps 4 端口 + edge×5 + macbook）
-  + `grep -c "alert:" deploy/monitoring/alerts.yml` == 3（M2 落地：rule_files 引用文件真实存在）
-  + `grep -cE "memory_used_mb > 819|queue_depth > 100|worker_count < 1" deploy/monitoring/alerts.yml` == 3（真实条件表达式，metric 名对齐 metrics.ts 导出）
-
-#### §3.2.5 worker_pool round_robin tertiary sort 机制（per F21）
-
-- ORDER BY last_heartbeat_at ASC, worker_id ASC, registered_at ASC + 集成测试 same-ms register → widA expected widA
-- 验证命令: `grep -cE "ORDER BY.*last_heartbeat_at|ORDER BY.*registered_at" wrapper/orchestrator/worker_pool.ts wrapper/test/unit/worker_pool.test.ts`
-- 期望: ≥ 2
-
-#### §3.2.6 execution_driver routedDsh wire 机制（per F22）
-
-- HTTP fallback path 替换为 `routedDsh()` + commit 注释 `// wire-routedDsh per F22 option A`
-- 验证命令: `grep -cE "routedDsh\(\)|wire-routedDsh" wrapper/orchestrator/execution_driver.ts wrapper/test/integration/execution_driver.test.ts`
-- 期望: ≥ 2
-
-#### §3.2.7 Tailscale ACL tag:monitor 机制（per F28）
-
-- tag:monitor 段 + tagOwners.tag:monitor: ["cscoheru"] + port 9090 仅 tag:admin 可达
-- 验证命令: `grep -cE "tag:monitor|tagOwners|tag:admin|9090" deploy/tailscale-acl-6host.yaml`
-- 期望: ≥ 4 (1 tag:monitor + 1 tagOwners + 1 tag:admin + 1 port 9090)
-
-#### §3.2.8 OOM graceful shutdown 声明机制（per §3.10 + F27）
-
-- audit-scope §3.10 + §3.11 + §3.12 声明 + commit 注释 graceful shutdown + integration test oom_prevention
-- 验证命令: `grep -cE "§3\.10|§3\.11|§3\.12|OOM graceful shutdown|routedDsh wire|queue_store SQLite|wire-routedDsh" notes/codex-audit-scope-v1.2.0d-v0.1.md wrapper/orchestrator/execution_driver.ts wrapper/orchestrator/queue_store.ts wrapper/test/integration/oom_prevention.test.ts 2>&1 | awk -F: '{s+=$NF} END{print s}'`
-- 期望: ≥ 5 (1 §3.10 + 1 §3.11 + 1 §3.12 + 1 OOM graceful shutdown + 1 oom_prevention test = 5)
-
-### §3.3 30 验证命令 verbatim 校准
-
-按 audit-scope §9 cmd 矩阵 30 命令逐条 grep 实测：
-- §9.1 hygiene 8 命令（不锁型号 + 不硬编码 + §3.10/§3.11/§3.12 声明 + §4.15/§4.16/§4.17 守门）
-- §9.2 tsc + vitest 4 命令（双 gate 绿）
-- §9.3 docker compose + Prometheus 10 命令（memory limits + scrape + alert + graceful shutdown）
-- §9.4 MacBook + 5 edge 5 命令（heartbeat + scoring + MagicDNS + fencing）
-- §9.5 cc-ready + CHANGELOG + README 3 命令（task_id 翻牌 + [1.2.0d] 段 + status 段）
-
-每命令期望值 verbatim 校准（不预测，引用式实测）。
+### F. 测试 + gated (E2E + 簿记)
+- `wrapper/test/integration/deepseek_e2e.test.ts` NEW gated
+- `wrapper/test/integration/queue_backpressure.test.ts` NEW gated
+- `wrapper/test/integration/oom_prevention.test.ts` NEW gated
+- `wrapper/test/integration/execution_driver.test.ts` Edit spawn mock → fetch mock
 
 ---
 
-## §4 Codex findings 提交格式
-
-请以 JSON 格式输出 findings（每个 finding 一行）：
-
-```json
-[
-  {
-    "id": "H{N}",
-    "severity": "M" | "m" | "C",
-    "category": "hygiene" | "filesystem" | "wire" | "metrics" | "compose",
-    "file": "<rel path>",
-    "line": <1-indexed>,
-    "claim": "<verbatim quoted line>",
-    "why": "<factual 错误说明, 不解释背景>",
-    "fix": "<具体改法>"
-  }
-]
-```
-
-**Severity 含义**：
-- **C** (Critical): hygiene 守门违例, 必须修才能 PASS
-- **M** (Major): 实施层 bug, 影响 v1.2.0d cycle closure
-- **m** (minor): 命名/格式 polish, 同轮可清零
-
-**注意**: 不要输出「建议性」finding (e.g., 「考虑加更多注释」), 仅输出可 grep 验证的事实错。
-
----
-
-## §5 Codex 提交铁律
-
-- Claude 不亲提 Codex review — **user 亲提**
-- 用户命令模板: `codex review --model gpt-5.6-sol --reasoning-effort xhigh notes/codex-audit-scope-v1.2.0d-v0.1-prompt.md`
-- Codex 报告落: `notes/codex-review-v1.2.0d-v0.1-formal-report.md` (per v1.2.0b/c 闭环模式)
-- 复审后用户裁断: PASS → Commit 2 启动 / PASS with M+m → 同轮清零后再启 / FAIL → 等 user 决定 re-plan
-
----
-
-## §6 push via Clash proxy 守门
-
-任何 git push 操作必须通过 Clash 代理（per Codex 提交铁律）：
+## §3 §4.15 NEW DeepSeek HTTP 直调守门 14 项 grep(commit 2 后实测)
 
 ```bash
-git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin main
-git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin v1.2.0d  # tag push
+test -f wrapper/dsh/deepseek_client.ts                                              # PASS
+grep -c "deepseek.com/v1/chat/completions\|api.deepseek.com" wrapper/dsh/deepseek_client.ts  # ≥ 3
+grep -c "DEEPSEEK_API_KEY" wrapper/dsh/deepseek_client.ts                           # ≥ 3
+grep -rE "spawn.*dsh|child_process.spawn\(['\"]dsh" wrapper/orchestrator/execution_driver.ts | wc -l  # == 0
+grep -c "deepseek_client\|deepseekInvoke" wrapper/orchestrator/execution_driver.ts  # ≥ 4
+grep -rE "--profile|--model" wrapper/dsh/dsh_client.ts | wc -l                      # == 0 (deprecation 注释除外)
+grep -rE "model_id.*deepseek-v4-(pro|flash)" wrapper/dsh/deepseek_client.ts | wc -l  # ≥ 3
+grep -c "model.*deepseek-v4-flash" docs/m0b/profile-override-*.yaml                # == 4 (m5 GATE-CALIB per v0.1 prompt-review: 实测 commander 2 + worker 2, base/orch 0 — 起草误写 3)
+grep -rE "vapid_private_key|sk-[a-z0-9]{32,}" wrapper/dsh/deepseek_client.ts | wc -l  # == 0
+grep -c "DEEPSEEK_COST_MODE\|resolveModelOverride" wrapper/dsh/deepseek_client.ts  # ≥ 2 (cost-mode 沿用)
+grep -c "AbortSignal.timeout\|timeoutMs" wrapper/dsh/deepseek_client.ts            # ≥ 2
+grep -c "DshResponse\|tokenUsage" wrapper/dsh/deepseek_client.ts                    # ≥ 4
+test -f wrapper/test/unit/deepseek_client.test.ts                                   # PASS
+grep -c "describe\|it(" wrapper/test/unit/deepseek_client.test.ts | awk -F: '{s+=$NF} END{print s}'  # ≥ 40
 ```
-
-不允许 push 前未通过 Clash proxy 的命令。
 
 ---
 
-*v1.2.0d v0.1 Codex prompt 起草 PASS — §1 角色 + §2 20 hygiene checklist + §3 Codex 期望输出 (8 处引用式 + 30 验证命令) + §4 findings JSON 格式 + §5 提交铁律 + §6 Clash push。等 user ExitPlanMode 批准 + Codex 亲提复审。*
+## §4 §4.16 NEW docker memory limits 守门 12 项
+
+```bash
+grep -c "mem_limit" deploy/newvps-compose.yml deploy/6host-compose.newvps.yml deploy/6host-compose.edge*.yml deploy/macbook-compose.yml 2>&1 | awk -F: '{s+=$NF} END{print s}'  # ≥ 10 (M3 GATE-CALIB: `memory:` 形态实测 0 恒红, mem_limit 实测 18)
+grep -c "mem_limit\|deploy.resources.limits.memory" deploy/*.yml 2>&1 | awk -F: '{s+=$NF} END{print s}'  # ≥ 7
+grep -c "cpus:" deploy/newvps-compose.yml deploy/6host-compose.newvps.yml            # ≥ 4 (post-commit-2: B 块 CPU limits 待加, 现实测 0)
+grep -c "stop-timeout\|stop_grace_period" deploy/*.yml 2>&1 | awk -F: '{s+=$NF} END{print s}'  # ≥ 5 (M3: compose 原生 stop_grace_period, 复合实测 10 — v1.2.0d.1 M1)
+grep -cE "256M" deploy/newvps-compose.yml                                            # ≥ 1 (kernel smoke, per F23)
+grep -c "memswap_limit\|memswap" deploy/*.yml                                        # ≥ 7
+```
+
+---
+
+## §5 §4.17 NEW queue 持久化守门 8 项
+
+```bash
+test -f wrapper/orchestrator/queue_store.ts                                          # PASS
+grep -c "better-sqlite3\|Database" wrapper/orchestrator/queue_store.ts              # ≥ 4 (per F25 + ADR 0009 WAL)
+grep -c "WAL\|busy_timeout\|journal_mode" wrapper/orchestrator/queue_store.ts       # ≥ 3 (per ADR 0009)
+grep -c "202\|Retry-After\|Location" wrapper/orchestrator/queue_store.ts wrapper/orchestrator/orchestrator.ts | awk -F: '{s+=$NF} END{print s}'  # ≥ 3 (per F26)
+grep -cE "max_in_flight" wrapper/orchestrator/orchestrator.ts                       # ≥ 1
+grep -c "queue_depth\|active_task_count" wrapper/orchestrator/metrics.ts wrapper/orchestrator/queue_store.ts | awk -F: '{s+=$NF} END{print s}'  # ≥ 4
+test -f wrapper/test/unit/queue_store.test.ts                                        # PASS
+test -f wrapper/test/integration/queue_backpressure.test.ts                          # PASS gated
+```
+
+---
+
+## §6 §4.18 NEW monitoring 守门 10 项
+
+```bash
+test -f wrapper/orchestrator/metrics.ts                                              # PASS
+test -f deploy/monitoring/prometheus.yml                                             # PASS
+test -f deploy/monitoring/runbook.md                                                 # PASS
+grep -cE "prom-client|Prometheus|register" wrapper/orchestrator/metrics.ts           # ≥ 4
+grep -c "active_task_count\|queue_depth\|memory_used\|worker_count" wrapper/orchestrator/metrics.ts  # ≥ 4
+grep -c "scrape_configs" deploy/monitoring/prometheus.yml                            # ≥ 1
+grep -cE "targets.*newvps|edge[1-5]|kjonemacbook-pro" deploy/monitoring/prometheus.yml | awk -F: '{s+=$NF} END{print s}'  # ≥ 7
+grep -c "alert:" deploy/monitoring/alerts.yml                                       # == 3 (M3 GATE-CALIB: `alert|Alert` 结构行假绿, 真身 alerts.yml)
+grep -cE "memory_used_mb > 819|queue_depth > 100|worker_count < 1" deploy/monitoring/alerts.yml  # ≥ 3 (M3: 条件真身, 实测 4)
+grep -cE "tag:monitor|tag:admin" deploy/tailscale-acl-6host.yaml                     # ≥ 2 (per F28)
+```
+
+---
+
+## §7 §3.10 NEW dsh binary 移除声明(per F31/F32)
+
+```bash
+grep -rE "child_process.spawn\(['\"]dsh" wrapper/orchestrator/execution_driver.ts   # == 0
+grep -rE "'dsh'|\"dsh\"" wrapper/orchestrator/execution_driver.ts | grep -vE '^\s*[^:]+:[0-9]+:\s*(\*|//|#)' | wc -l  # == 0 (m4 GATE-CALIB: 注释除外不可 grep 验证 — 排注释行判活代码, post-commit-2)
+grep -c "deepseekInvoke\|deepseek_client" wrapper/orchestrator/execution_driver.ts  # ≥ 4
+grep -c "deepseekInvoke" wrapper/orchestrator/orchestrator.ts wrapper/orchestrator/workflow_pack.ts | awk -F: '{s+=$NF} END{print s}'  # ≥ 2
+grep -c "@deprecated" wrapper/dsh/dsh_client.ts                                       # ≥ 1
+grep -c "export.*deepseekInvoke.*as.*callDshHeadless" wrapper/dsh/dsh_client.ts     # ≥ 1
+```
+
+---
+
+## §8 v0.7 hygiene 8 项守门(per F1-F4 cycle hygiene)
+
+```bash
+# §4.5 no hardcoded keys
+grep -rE "vapid_private_key|sk-[a-z0-9]{32,}" wrapper/dsh/ wrapper/orchestrator/ | wc -l  # == 0
+
+# §4.6 STT 守门 (新vps only)
+grep -c "WHISPER_MODEL_PATH" deploy/6host-compose.edge*.yml deploy/3host-compose.worker.yml deploy/macbook-compose.yml | wc -l  # == 0
+
+# §4.7 Web Push VAPID env-inject only
+grep -rE "vapid_private_key.*=" deploy/tailscale-acl-6host.yaml wrapper/orchestrator/webpush_gateway.ts | wc -l  # == 0
+
+# §4.8 sleep infinity 守门
+grep -rE "sleep infinity" deploy/ | wc -l                                            # == 0
+
+# §4.9 container_name 引用
+grep -c "container_name:" deploy/6host-compose.newvps.yml deploy/3host-compose.worker.yml | wc -l  # ≥ 7
+
+# F1 grep pattern 三处对齐 (commit hash / cc-ready / notes index)
+grep -c "v1.2.0d" docs/poll/cc-ready.json CHANGELOG.md README.md | wc -l              # ≥ 3 (m2 GATE-CALIB: 起草误写 notes/MEMORY.md — 该文件不存在, grep 报错恒红)
+
+# F2 grep -r | wc -l 守门 (实测长度对齐,不靠 exit code)
+wc -l notes/codex-audit-scope-v1.2.0d-v0.1.md                                       # == 252 (m1 GATE-CALIB per v0.1 prompt-review: 起草误写 ≥320 与实测 252 自相矛盾必恒红 — F2 实测长度对齐不靠 exit code 的正用)
+
+# F3 cc-ready 单一簿记
+test -f docs/poll/cc-ready.json                                                      # PASS (单源)
+grep -cE "task_id.*V1\\.2\\.0D" docs/poll/cc-ready.json                              # ≥ 1 (m3 GATE-CALIB: task_id 真值 T-V1.2.0D- 大写无点间 — 起草小写 pattern 实测 0 恒红)
+```
+
+---
+
+## §9 v1.2.0a/b/c/d.2 已立守门(维持,不再重复)
+
+- §4.10 v1.2.0a commander 真实现守门
+- §4.11 v1.2.0b worker 真实现守门 (heartbeat_sender 已就位 per v1.2.0e)
+- §4.12/§4.13/§4.14 v1.2.0c cross-host + MacBook + fencing 守门
+- §4.19 v1.2.0d.2 DEEPSEEK_COST_MODE 三层优先级守门 (cheap 默认全 flash;full orch 回 pro) (m7 GATE-CALIB: 起草误挂 §4.14 — 已被 v1.2.0c fencing 占用, 顺延 §4.19)
+
+---
+
+## §10 引用式机制 8 处实测(per v1.2.0c v0.1 模板)
+
+每条引用式必须实测校验,**未实测报 PASS 即同轮 critical**:
+
+1. `deploy/3host-compose.worker.yml` extra_hosts + .fish-harness.ts.net URL → aliyun 容器内 `curl http://newvps.fish-harness.ts.net:4000/health` OK (per v1.2.0e 闭环)
+2. `deploy/6host-compose.newvps.yml` dns: 100.100.100.100 + extra_hosts → newvps orchestrator 拿 7 host 列表 `curl http://newvps.fish-harness.ts.net:4000/api/v1/worker/health` workers_count=7
+3. `deploy/3host-compose.worker.yml` mem_limit: 1G → `docker stats harness-edge-worker --no-stream` memory_used < 1G
+4. `wrapper/orchestrator/queue_store.ts` SQLite WAL → `docker exec newvps-wrapper sqlite3 /data/queue_store.db 'PRAGMA journal_mode=WAL'` 返回 `wal`
+5. `wrapper/orchestrator/metrics.ts` prom-client /metrics endpoint → `curl http://newvps.fish-harness.ts.net:4000/metrics` 返回 `text/plain; version=0.0.4`
+6. `deploy/monitoring/prometheus.yml` 7 scrape jobs → prometheus up `curl newvps:9090/api/v1/targets` 7 全 Up
+7. `wrapper/dsh/deepseek_client.ts` fetch api.deepseek.com → 真机 E2E dispatch `curl -X POST :4000/api/v1/tasks -d '{"prompt":"echo"}'` 拿真实 DeepSeek response (含 `usage.total_tokens`)
+8. `deploy/tailscale-acl-6host.yaml` tag:monitor 段 → `tailscale acl test` PASS (cscoheru tagOwners)
+
+---
+
+## §11 Codex 期望输出格式
+
+报告落 `notes/codex-review-v1.2.0d-v0.1-formal-report.md`,7 段:
+
+| § | 内容 | 期望 |
+|---|------|------|
+| §0 | 终态裁定 | 0C/0M/0m |
+| §1 | hygiene 28 项 checklist | 28/28 PASS |
+| §2 | §3-§7 NEW 守门 grep | 全部 PASS (实测子串) |
+| §3 | §10 引用式 8 处 | 全部 PASS (每处附实测 stdout) |
+| §4 | §8 v0.7 hygiene 8 项 + §9 v1.2.0a/b/c/d.2 守门 | 全 PASS |
+| §5 | self-injury 1 项 + disk verbatim 117 项 | 全 PASS (m1 GATE-CALIB: 重写后口径重锚) |
+| §6 | plan §7 教训 L1-L6 落档确认 | 6 项全落 |
+| §7 | 关键 deviation (与 v1.2.0c v0.1 模板一致) | 列任何偏离 |
+
+---
+
+## §12 期望:0C/0M/0m
+
+- Critical: 0 (任何 spawn dsh 字面残留 → critical)
+- Major: 0 (queue backpressure / Prometheus scrape 漏 trigger → major)
+- Minor: 0-3 (cosmetic, e.g. 注释排版 / JSDoc 字段顺序)
+- 任何 1 误判 critical → 同轮 fail
+
+---
+
+*Prompt 起草完成 (2026-09-08 v1.2.0d cycle, D7/D8/D9/D16/D17 决策锁 + §3-§7 NEW 守门 grep 44 项 + §8 hygiene 8 项 + §10 引用式 8 处 + §11/§12 期望输出格式)。等 Codex v0.1 反馈 0C/0M/0m 后启动 commit 2 (24 文件改动)。*
