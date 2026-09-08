@@ -136,7 +136,7 @@ test -f wrapper/orchestrator/queue_store.ts  # NEW
 grep -c "better-sqlite3\|Database" wrapper/orchestrator/queue_store.ts  # ≥ 4
 grep -c "WAL\|busy_timeout\|journal_mode" wrapper/orchestrator/queue_store.ts  # ≥ 3
 grep -c "202\|Retry-After\|Location" wrapper/orchestrator/queue_store.ts wrapper/orchestrator/orchestrator.ts | awk -F: '{s+=$NF} END{print s}'  # ≥ 3
-grep -cE "max_in_flight" wrapper/orchestrator/orchestrator.ts  # ≥ 1
+grep -cE "MAX_IN_FLIGHT|maxInFlight" wrapper/orchestrator/queue_store.ts  # ≥ 1 (M5 GATE-CALIB per v0.1 codex-run: 起草锚 orchestrator.ts `max_in_flight` — 字面真身 queue_store.ts L41-92 (DEFAULT_MAX_IN_FLIGHT=50 + QUEUE_MAX_IN_FLIGHT env + maxInFlight field), orchestrator 侧走 tryEnqueueOrThrottle 间接链, 原守门 post-commit-2 也恒 0 红 — pattern 锚定落地物, v1.2.0d.1 M2 同型; 实测 4)
 grep -c "queue_depth\|active_task_count" wrapper/orchestrator/metrics.ts wrapper/orchestrator/queue_store.ts | awk -F: '{s+=$NF} END{print s}'  # ≥ 4
 test -f wrapper/test/unit/queue_store.test.ts  # NEW
 test -f wrapper/test/integration/queue_backpressure.test.ts  # NEW gated
@@ -161,7 +161,7 @@ grep -cE "tag:monitor|tag:admin" deploy/tailscale-acl-6host.yaml  # ≥ 2
 
 ```
 grep -rE "child_process.spawn\(['\"]dsh" wrapper/orchestrator/execution_driver.ts  # == 0
-grep -rE "'dsh'|\"dsh\"" wrapper/orchestrator/execution_driver.ts | grep -vE "^\s*[^:]+:[0-9]+:\s*(\*|//|#)" | wc -l  # == 0 (m4 GATE-CALIB per v0.1 prompt-review: 「注释除外」不可 grep 验证 — 排除注释行后判活代码; 现实测 6 处中 4 注释 2 活代码, post-commit-2 活代码全迁移后 == 0)
+grep -rE "'dsh'|\"dsh\"" wrapper/orchestrator/execution_driver.ts | grep -vE "^\s*[^:]+:[0-9]+:\s*(\*|//|#)" | wc -l  # == 0 (m4 GATE-CALIB per v0.1 prompt-review + codex-run 数字校准: 「注释除外」不可 grep 验证 — 排除注释行后判活代码; 实测 1 处 L44 DEFAULT_DSH_BIN, post-commit-2 迁移后 == 0)
 grep -c "deepseekInvoke\|deepseek_client" wrapper/orchestrator/execution_driver.ts  # ≥ 4
 grep -c "deepseekInvoke" wrapper/orchestrator/orchestrator.ts wrapper/orchestrator/workflow_pack.ts | awk -F: '{s+=$NF} END{print s}'  # ≥ 2
 grep -c "@deprecated" wrapper/dsh/dsh_client.ts  # ≥ 1 (deprecated JSDoc)

@@ -102,7 +102,7 @@ test -f wrapper/orchestrator/queue_store.ts                                     
 grep -c "better-sqlite3\|Database" wrapper/orchestrator/queue_store.ts              # ≥ 4 (per F25 + ADR 0009 WAL)
 grep -c "WAL\|busy_timeout\|journal_mode" wrapper/orchestrator/queue_store.ts       # ≥ 3 (per ADR 0009)
 grep -c "202\|Retry-After\|Location" wrapper/orchestrator/queue_store.ts wrapper/orchestrator/orchestrator.ts | awk -F: '{s+=$NF} END{print s}'  # ≥ 3 (per F26)
-grep -cE "max_in_flight" wrapper/orchestrator/orchestrator.ts                       # ≥ 1
+grep -cE "MAX_IN_FLIGHT|maxInFlight" wrapper/orchestrator/queue_store.ts              # ≥ 1 (M5 GATE-CALIB per v0.1 codex-run: 起草锚 orchestrator.ts — 真身 queue_store.ts, 实测 4)
 grep -c "queue_depth\|active_task_count" wrapper/orchestrator/metrics.ts wrapper/orchestrator/queue_store.ts | awk -F: '{s+=$NF} END{print s}'  # ≥ 4
 test -f wrapper/test/unit/queue_store.test.ts                                        # PASS
 test -f wrapper/test/integration/queue_backpressure.test.ts                          # PASS gated
@@ -131,7 +131,7 @@ grep -cE "tag:monitor|tag:admin" deploy/tailscale-acl-6host.yaml                
 
 ```bash
 grep -rE "child_process.spawn\(['\"]dsh" wrapper/orchestrator/execution_driver.ts   # == 0
-grep -rE "'dsh'|\"dsh\"" wrapper/orchestrator/execution_driver.ts | grep -vE '^\s*[^:]+:[0-9]+:\s*(\*|//|#)' | wc -l  # == 0 (m4 GATE-CALIB: 注释除外不可 grep 验证 — 排注释行判活代码, post-commit-2)
+grep -rE "'dsh'|\"dsh\"" wrapper/orchestrator/execution_driver.ts | grep -vE '^\s*[^:]+:[0-9]+:\s*(\*|//|#)' | wc -l  # == 0 (m4 GATE-CALIB: 注释除外不可 grep 验证 — 排注释行判活代码, 实测 1 处 L44, post-commit-2)
 grep -c "deepseekInvoke\|deepseek_client" wrapper/orchestrator/execution_driver.ts  # ≥ 4
 grep -c "deepseekInvoke" wrapper/orchestrator/orchestrator.ts wrapper/orchestrator/workflow_pack.ts | awk -F: '{s+=$NF} END{print s}'  # ≥ 2
 grep -c "@deprecated" wrapper/dsh/dsh_client.ts                                       # ≥ 1
