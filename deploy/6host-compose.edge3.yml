@@ -31,6 +31,11 @@ services:
       HARNESS_API_URL: "http://newvps.fish-harness.ts.net:4000"
       WRAPPER_PORT: "4001"
       WORKER_ID: "${WORKER_ID:-edge3-wrapper}"
+      # v1.2.0e NEW: edge worker self-registers + heartbeat to newvps orchestrator
+      # (worker_pool.ts heartbeat_sender loop). Without this, server.ts
+      # startWorkerHeartbeatSender() is inert and workers table stays empty.
+      WORKER_HEARTBEAT_URL: "http://newvps.fish-harness.ts.net:4000"
+      WORKER_HOST: "edge3.fish-harness.ts.net"
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
       ORCHESTRATOR_CLASS: "orchestrator"
       DSH_PROFILE: "headless"

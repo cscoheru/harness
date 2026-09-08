@@ -1,0 +1,39 @@
+# fish-harness v1.2.0d monitoring stack (per D9).
+#
+# Why this exists (per plan §2 D + §3 U5):
+#   - Prometheus server scrapes 7 hosts (newvps + 3 edge + 3 wrappers)
+#   - 3 alert rules per alerts.yml
+#   - Tailscale bind (per F28): port 9090 only reachable via tailnet
+#
+# Deploy: `docker compose -f deploy/monitoring/docker-compose.yml up -d`
+# Self-test: `curl http://newvps:9090/metrics`
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: fish-harness-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"  # Tailscale bind only (no public exposure)
+    networks:
+      - monitoring_net
+    mem_limit: 512m
+    cpus: "0.5"
+    stop_grace_period: 30s
+
+networks:
+  monitoring_net:
+    driver: bridge
+
+volumes:
+  prometheus_data:

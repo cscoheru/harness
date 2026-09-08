@@ -140,6 +140,11 @@ services:
     # extra_hosts (values via --env-file) bridges the two until the rename.
     dns:
       - 100.100.100.100
+      # v1.2.0d NEW: Tailscale MagicDNS (100.100.100.100) only resolves
+      # tailnet names; add public DNS so wrapper containers can reach
+      # api.deepseek.com via DEEPSEEK_HTTP direct call (D16).
+      - 1.1.1.1
+      - 8.8.8.8
     extra_hosts:
       - "newvps.fish-harness.ts.net:${TS_NEWVPS_IP}"
       - "edge1.fish-harness.ts.net:${TS_EDGE1_IP}"

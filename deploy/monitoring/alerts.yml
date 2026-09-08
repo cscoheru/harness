@@ -1,46 +1,42 @@
-# Prometheus alert rules for fish-harness (v1.2.0d, per F24 §5.3 + F28)
-# Referenced by prometheus.yml rule_files (per §3.2.4 + H18).
-# Metric names align with wrapper/orchestrator/metrics.ts exports:
-#   active_task_count / queue_depth / memory_used_mb / worker_count
-# Thresholds per runbook.md §Alerts (memory 80% of 1G wrapper fleet ceiling;
-# queue 100 pending; worker fleet silent 5min).
+# fish-harness v1.2.0d Prometheus alert rules (per D9 + F25).
+#
+# 3 alerts:
+#   1. fish-harness-high-memory    — memory_used_mb > 80% of mem_limit for 5m
+#   2. fish-harness-queue-backlog  — queue_depth > 100 for 5m
+#   3. fish-harness-worker-offline — worker_count == 0 for 5m
+#
+# Runbook escalation per runbook.md.
 
 groups:
-  # ─── Alert 1: wrapper memory > 80% (of 1G mem_limit fleet standard) ────────
-  - name: wrapper-memory
+  - name: fish-harness
+    interval: 30s
     rules:
-      - alert: WrapperMemoryHigh
-        expr: memory_used_mb > 819
+      # ── Alert 1: High memory (per D9) ─────────────────────────────────
+      - alert: fish-harness-high-memory
+        expr: memory_used_mb > 800
         for: 5m
         labels:
           severity: warning
-          cycle: v1.2.0d
         annotations:
-          summary: "wrapper memory > 80% of 1G limit ({{ $labels.host }})"
-          runbook: "deploy/monitoring/runbook.md#alert-1-memory"
+          summary: "fish-harness wrapper {{ $labels.host }} memory > 800MB"
+          description: "{{ $labels.host }} memory_used_mb = {{ $value }}MB (threshold 800MB). Likely OOM imminent."
 
-  # ─── Alert 2: queue depth > 100 pending for 5min (backpressure sustained) ──
-  - name: wrapper-queue
-    rules:
-      - alert: WrapperQueueDepthHigh
+      # ── Alert 2: Queue backlog (per D8 + D9) ──────────────────────────
+      - alert: fish-harness-queue-backlog
         expr: queue_depth > 100
         for: 5m
         labels:
-          severity: warning
-          cycle: v1.2.0d
+          severity: critical
         annotations:
-          summary: "queue_depth > 100 for 5m ({{ $labels.host }}) — 429/202 backpressure active"
-          runbook: "deploy/monitoring/runbook.md#alert-2-queue"
+          summary: "fish-harness queue > 100 for 5m on {{ $labels.host }}"
+          description: "queue_depth = {{ $value }}. max_in_flight=50 saturated; SQLite overflow growing."
 
-  # ─── Alert 3: worker offline > 5min (fleet silent / scrape down) ────────────
-  - name: worker-offline
-    rules:
-      - alert: WorkerOffline
-        expr: worker_count < 1 or up{job=~"harness-.*"} == 0
+      # ── Alert 3: Worker offline (per D9) ──────────────────────────────
+      - alert: fish-harness-worker-offline
+        expr: worker_count == 0
         for: 5m
         labels:
           severity: critical
-          cycle: v1.2.0d
         annotations:
-          summary: "no active workers / scrape down > 5min ({{ $labels.host }})"
-          runbook: "deploy/monitoring/runbook.md#alert-3-worker-offline"
+          summary: "fish-harness worker_count = 0 on {{ $labels.host }}"
+          description: "No workers registered for 5min. Check worker_pool heartbeat + Tailscale ACL."
