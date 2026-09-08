@@ -51,6 +51,7 @@ services:
       start_period: 10s
     mem_limit: 256m
     memswap_limit: 256m
+    cpus: "0.5"
     # v1.2.0d NEW per D7 + F23: kernel smoke limit (kernel 仅 print version
     # + exit by design per ADR 0010 Decision d; 256M is generous ceiling)
     stop_grace_period: 30s
@@ -94,6 +95,7 @@ services:
     command: ["node", "build/server.js"]
     mem_limit: 1g
     memswap_limit: 1g
+    cpus: "1.0"
     # v1.2.0d NEW per D7 + F27: --stop-timeout=30 给 wrapper 30s graceful drain
 
   # ── 1 worker (background task consumer) ────────────────────────────────────
@@ -127,6 +129,7 @@ services:
     command: ["node", "build/server.js"]
     mem_limit: 1g
     memswap_limit: 1g
+    cpus: "0.5"
     # v1.2.0d NEW per D7 + F27: --stop-timeout=30 worker 30s graceful drain
     # No ports: worker is a background consumer, not a server.
 
@@ -166,6 +169,7 @@ services:
     command: ["node", "build/orchestrator/pwa_server.js"]
     mem_limit: 1g
     memswap_limit: 1g
+    cpus: "0.5"
     # v1.2.0d NEW per D7 + F27: frontend 1G limit + 30s graceful drain
     ports:
       - "3011:3000"

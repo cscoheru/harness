@@ -1,0 +1,88 @@
+# deploy/3host-compose.worker.yml — fish-harness 3-host real deploy (2026-09-07)
+#
+# Topology: edge worker host (puer-hk=edge1 / hk103=edge2 / aliyun=edge3).
+# One wrapper container per host: receives cross-host dispatch on :4001
+# (routedDsh from newvps) and self-registers into the newvps worker_pool via
+# the heartbeat sender (WORKER_HEARTBEAT_URL).
+#
+# Sensitive values injected via --env-file /etc/fish-harness/worker.env
+# (root-only, chmod 600): WORKER_ID, WORKER_HOST, EDGE_REGION, DEEPSEEK_API_KEY
+#
+# Host prerequisites (see runbook-3host.md):
+#   - tailscale joined as edge{1,2,3} → MagicDNS edge{N}.fish-harness.ts.net
+#   - dsh installed at /opt/dsh (npm prefix install, version pinned)
+#   - repo at /opt/fish-harness with wrapper deps built INSIDE node:24-slim
+#     (native better-sqlite3 must match the container ABI, not host node)
+#
+# Constraints (铁律, inherited from 6host edge templates):
+#   - No STT worker / no Web Push gateway / no kernel (newvps only)
+#   - DEEPSEEK_API_KEY env-inject only (never committed)
+#   - Container inter-connect: MagicDNS names, no pinned IPs
+# Co-Authored-By: Claude Code <noreply@anthropic.com>
+
+services:
+  worker:
+    container_name: harness-edge-worker
+    image: node:24-slim
+    restart: unless-stopped
+    working_dir: /app/wrapper
+    # Host networking: hardened hosts (ufw FORWARD policy DROP) block docker
+    # bridge egress to the tailnet; sharing the host stack avoids FORWARD
+    # entirely. Port 4001 binds directly on the host.
+    network_mode: host
+    volumes:
+      - /opt/fish-harness:/app:ro
+      # dsh CLI (node package) mounted read-only; PATH below exposes its bin
+      - /opt/dsh:/opt/dsh:ro
+      # worker_pool SQLite lives at /data/worker_pool.db (hardcoded path in
+      # worker_pool.ts) — needs a writable dir inside the container
+      - worker_data:/data
+    # 6host_router/edge compose speak *.fish-harness.ts.net but the real
+    # tailnet suffix is tail1b9878.ts.net (rename never applied in admin).
+    # extra_hosts (values via --env-file, NOT hardcoded) bridges the two until
+    # the tailnet is renamed to fish-harness.
+    # Bridge DNS doesn't apply under network_mode: host, but container's
+    # /etc/resolv.conf is a Docker-generated snapshot of the host's stub
+    # (127.0.0.53) and won't follow systemd-resolved restarts. Force-inject
+    # tailscaled's local listener + a public DNS so MagicDNS names resolve.
+    dns:
+      - 100.100.100.100
+      - 8.8.8.8
+    extra_hosts:
+      - "newvps.fish-harness.ts.net:${TS_NEWVPS_IP}"
+      - "edge1.fish-harness.ts.net:${TS_EDGE1_IP}"
+      - "edge2.fish-harness.ts.net:${TS_EDGE2_IP}"
+      - "edge3.fish-harness.ts.net:${TS_EDGE3_IP}"
+    environment:
+      WRAPPER_PORT: "4001"
+      WORKER_ID: "${WORKER_ID}"
+      WORKER_HOST: "${WORKER_HOST}"
+      EDGE_REGION: "${EDGE_REGION}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
+      ORCHESTRATOR_CLASS: "worker"
+      DSH_PROFILE: "headless"
+      # Cross-host routing + heartbeat target: newvps orchestrator wrapper.
+      # Uses the fish-harness.ts.net hostname (registered via extra_hosts in
+      # /etc/hosts) instead of the raw tailnet suffix (tail1b9878.ts.net).
+      # Container's c-ares resolver can't reliably reach tailscaled's
+      # 100.100.100.100 UDP listener from every hardened host (aliyun
+      # systemd-resolved stub fails the route-only domain on this host).
+      # /etc/hosts is Docker-managed and stays in sync with the IPs we set,
+      # so the hostname always resolves to the right newvps IP at container
+      # start. Per plan §12.2 F11 this matches the canonical-suffix decision.
+      HARNESS_API_URL: "http://newvps.fish-harness.ts.net:4000"
+      WORKER_HEARTBEAT_URL: "http://newvps.fish-harness.ts.net:4000"
+      WORKER_HEARTBEAT_INTERVAL_MS: "10000"
+      PATH: "/opt/dsh/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    # Port publishing is N/A under network_mode: host — the wrapper binds
+    # host port 4001 directly.
+    command: ["node", "build/server.js"]
+    mem_limit: 512m
+    memswap_limit: 768m
+    # Tighter than the 1G edge template: puer-hk shares the host with
+    # puer-hub production (additive-only deploy); 512m fits dsh text tasks.
+    stop_grace_period: 30s
+
+volumes:
+  worker_data:
+    # worker_pool SQLite (per-host file; ADR 0009 single-host WAL)

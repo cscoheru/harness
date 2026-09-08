@@ -52,6 +52,7 @@ services:
       start_period: 10s
     mem_limit: 256m
     memswap_limit: 256m
+    cpus: "0.5"
     # v1.2.0d NEW per D7 + F23: kernel smoke limit (kernel 仅 print version
     # + exit by design per ADR 0010 Decision d; 256M is generous ceiling)
     stop_grace_period: 30s
@@ -88,6 +89,7 @@ services:
     command: ["node", "build/server.js"]
     mem_limit: 2g
     memswap_limit: 2g
+    cpus: "1.5"
     # v1.2.0d NEW per D7 + F27: stt 2G (whisper.cpp) + 30s graceful drain
     # whisper.cpp CPU-bound; no host ports needed
 
@@ -118,6 +120,7 @@ services:
     command: ["node", "build/server.js"]
     mem_limit: 1g
     memswap_limit: 1g
+    cpus: "0.5"
     # v1.2.0d NEW per D7 + F27: web-push 1G + 30s graceful drain
 
   # ── wrapper orchestrator (port 4000) ─────────────────────────────────────────
@@ -128,6 +131,20 @@ services:
     working_dir: /app/wrapper
     volumes:
       - ..:/app:ro
+      # worker_pool SQLite at /data/worker_pool.db (hardcoded path) — persist
+      # across container recreations so registered edge workers survive restarts
+      - orch_pool:/data
+    # Bridge containers skip the host's systemd-resolved stub (127.0.0.53);
+    # point at tailscaled's local MagicDNS resolver. 6host_router speaks
+    # *.fish-harness.ts.net but the real tailnet suffix is tail1b9878.ts.net —
+    # extra_hosts (values via --env-file) bridges the two until the rename.
+    dns:
+      - 100.100.100.100
+    extra_hosts:
+      - "newvps.fish-harness.ts.net:${TS_NEWVPS_IP}"
+      - "edge1.fish-harness.ts.net:${TS_EDGE1_IP}"
+      - "edge2.fish-harness.ts.net:${TS_EDGE2_IP}"
+      - "edge3.fish-harness.ts.net:${TS_EDGE3_IP}"
     env_file:
       - env/newvps.env.example
     environment:
@@ -147,6 +164,7 @@ services:
     command: ["node", "build/server.js"]
     mem_limit: 512m
     memswap_limit: 512m
+    cpus: "0.5"
 
   # ── wrapper commander (port 4001) ─────────────────────────────────────────────
   wrapper-commander:
@@ -175,7 +193,40 @@ services:
     command: ["node", "build/server.js"]
     mem_limit: 1g
     memswap_limit: 1g
+    cpus: "1.0"
     # v1.2.0d NEW per D7 + F27: wrapper-commander 1G (3 commanders × 1G) + 30s graceful drain
+
+  # ── wrapper commander-2 (port 4003) — 3host deploy: orch + 2 commanders ──────
+  # User directive 2026-09-07: mobilize workers via orchestrator + 2 commanders.
+  # Same profile as wrapper-commander on a second port; PRD A-2 (GA ≥3) still
+  # tracks a third commander for later.
+  wrapper-commander-2:
+    container_name: harness-wrapper-commander-2
+    image: node:24-slim
+    restart: unless-stopped
+    working_dir: /app/wrapper
+    volumes:
+      - ..:/app:ro
+    env_file:
+      - env/newvps.env.example
+    environment:
+      HARNESS_API_URL: "http://harness-kernel:8000"
+      WRAPPER_PORT: "4003"
+      WORKER_ID: "wrapper-commander-2"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
+      ORCHESTRATOR_CLASS: "commander"
+      DSH_PROFILE: "headless"
+    networks:
+      - harness_net
+    depends_on:
+      harness-kernel:
+        condition: service_started
+    ports:
+      - "4003:4003"
+    command: ["node", "build/server.js"]
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: "1.0"
 
   # ── wrapper frontend/PWA (port 4002) — D-9 Option B: real PWA ──────────────
   # Repurposed from server.ts placeholder to pwa_server.ts (D-9 Option B):
@@ -212,6 +263,7 @@ services:
     command: ["node", "build/orchestrator/pwa_server.js"]
     mem_limit: 1g
     memswap_limit: 1g
+    cpus: "0.5"
     # v1.2.0d NEW per D7 + F27: wrapper-frontend 1G + 30s graceful drain
 
 networks:
@@ -224,3 +276,5 @@ volumes:
     # ADR 0009: SQLite WAL is single-host only (newvps only; not shared)
   whisper_model:
     # whisper.cpp GGML model files (absolute path; shared read-only)
+  orch_pool:
+    # orchestrator worker_pool SQLite (/data/worker_pool.db) — survives recreate

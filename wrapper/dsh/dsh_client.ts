@@ -1,108 +1,37 @@
 /**
- * dsh_client.ts — dsh CLI wrapper (M1c real implementation).
+ * dsh_client.ts — legacy dsh CLI wrapper (DEPRECATED v1.2.0d).
  *
- * Calls `dsh --profile headless --patch <base> --patch <role> -- <prompt>`.
- * DEEPSEEK_API_KEY is injected via process.env (NOT hardcoded).
+ * The spawn-binary path is deprecated. Use `deepseek_client.ts#deepseekInvoke`
+ * instead — it calls DeepSeek's OpenAI-compatible HTTP API directly with
+ * env-injected DEEPSEEK_API_KEY, bypassing the dsh binary (which 0.1.1-rc.2
+ * only ships a web profile, no headless CLI). This file is preserved for
+ * backward compatibility via the `callDshHeadless = deepseekInvoke` re-export
+ * at the bottom. `resolveModelOverride` is retained as the cost-mode resolver
+ * used by deepseek_client.ts.
  *
- * Uses model class from DshOpts to select the appropriate profile override.
- * Model selection: role patch YAMLs are authoritative, unless overridden by
- * DSH_MODEL (direct) or DEEPSEEK_COST_MODE=cheap (default; downgrades orch
- * from v4-pro to v4-flash). See resolveModelOverride() for precedence.
- *
- * Profile semantics (confirmed by BE-1/TG-1/DO-1):
+ * Profile semantics (historical):
  *   headless = CLI single-turn task → answer, print, exit
  *   web      = Web UI server (DO NOT USE in M1c wrapper)
  *
+ * v1.2.0d NEW: the legacy spawn-binary path is DEPRECATED.
+ *
+ * Migration path:
+ *   - Replace `import { callDshHeadless } from '../dsh/dsh_client.js'`
+ *     with `import { deepseekInvoke } from '../dsh/deepseek_client.js'`
+ *   - Rename call sites: callDshHeadless(prompt, opts) → deepseekInvoke(prompt, opts)
+ *   - The DshResponse shape is identical — no caller logic changes
+ *
  * @file wrapper/dsh/dsh_client.ts
+ * @deprecated Since v1.2.0d (D16). Use deepseek_client.ts.
  */
 
-import { spawn } from 'child_process';
-import { dirname, resolve } from 'path';
-import { fileURLToPath } from 'url';
-import { readFileSync } from 'fs';
 import {
-  type DshOpts,
-  type DshResponse,
-  type DshInvokeOptions,
   type ModelClass,
-  PROFILE_YAML_MAP,
 } from './types.js';
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/** Absolute path to the project root. Resolved via import.meta.url so it works correctly in both src (wrapper/dsh/) and build (wrapper/build/dsh/) layouts, regardless of process.cwd(). tsc preserves the wrapper/dsh/ → wrapper/build/dsh/ offset, so a 2-layer resolution works in src and 3-layer in build. */
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const PROJECT_ROOT = __dirname.includes('/build/')
-  ? resolve(__dirname, '..', '..', '..')
-  : resolve(__dirname, '..', '..');
-
-/** dsh base profile override — enables A-class tools. */
-const BASE_PATCH = resolve(PROJECT_ROOT, 'docs', 'm0b', 'profile-override-base.yaml');
-
-/** Default timeouts per model class (ms). */
-const DEFAULT_TIMEOUT_MS: Record<ModelClass, number> = {
-  orch: 300_000,    // 5 min — high-reasoning cross-project decisions
-  commander: 180_000, // 3 min — mid-context single-workflow changes
-  worker: 60_000,    // 1 min — low-cost batch summaries
-};
-
-/** Known denial patterns from dsh output. */
-const DENIAL_PATTERNS = [
-  /cannot complete|unable to|not possible|does not contain|error/i,
-  /permission denied|forbidden|blocked/i,
-  /refused|declined/i,
-];
-
-/** JSON wrapper patterns for extracting trace_id / token usage. */
-const TRACE_ID_RE = /"trace_id"\s*:\s*"([^"]+)"/;
-const TOKEN_USAGE_RE = /token[_\s]?usage.*?(\d+).*?(\d+)/i;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Parse a denial reason from dsh stdout/stderr.
- * Returns undefined if no denial pattern matches.
- */
-function parseDenialReason(stdout: string, stderr: string): string | undefined {
-  const combined = `${stdout}\n${stderr}`;
-  for (const pat of DENIAL_PATTERNS) {
-    const match = combined.match(pat);
-    if (match) return match[0].trim();
-  }
-  return undefined;
-}
-
-/**
- * Parse trace_id and token usage from dsh stdout.
- */
-function parseDshMetadata(stdout: string): { traceId?: string; tokenUsage?: DshResponse['tokenUsage'] } {
-  const traceMatch = stdout.match(TRACE_ID_RE);
-  const tokenMatch = stdout.match(TOKEN_USAGE_RE);
-
-  return {
-    traceId: traceMatch?.[1],
-    tokenUsage: tokenMatch
-      ? { inputTokens: parseInt(tokenMatch[1], 10), outputTokens: parseInt(tokenMatch[2], 10) }
-      : undefined,
-  };
-}
-
-/**
- * Resolve a relative path (from PROFILE_YAML_MAP) to an absolute path.
- */
-function resolveProfilePath(modelClass: ModelClass): string {
-  const rel = PROFILE_YAML_MAP[modelClass];
-  return resolve(PROJECT_ROOT, rel);
-}
 
 /**
  * Role-default models per class (mirrors docs/m0b/profile-override-{orch,commander,worker}.yaml).
- * Used only by the cost-mode resolver to decide when a CLI --model override is needed;
+ * Used only by the cost-mode resolver to decide when a model override is needed;
  * the authoritative selection stays in the role patch yamls when no override applies.
  */
 const ROLE_DEFAULT_MODEL: Record<ModelClass, string> = {
@@ -115,7 +44,7 @@ const ROLE_DEFAULT_MODEL: Record<ModelClass, string> = {
 const CHEAP_MODEL = 'deepseek-v4-flash';
 
 /**
- * Resolve a CLI --model override for a model class.
+ * Resolve a model override for a model class.
  *
  * Precedence (highest first):
  *   1. DSH_MODEL          — direct override, wins over everything
@@ -133,154 +62,29 @@ export function resolveModelOverride(modelClass: ModelClass): string | undefined
 }
 
 /**
- * Build the dsh CLI argument list for a given model class + prompt.
- *
- * Stack order (last --patch wins):
- *   1. BASE_PATCH       — enables A-class tools (bash/fs/goal/ralph)
- *   2. role PATCH       — sets model (orch → deepseek-v4-pro / commander/worker → deepseek-v4-flash)
- *   3. --model          — cost-mode/direct override (see resolveModelOverride); only
- *                         present when it differs from the role-patch default
- *
- * Env DEEPSEEK_API_KEY is injected at spawn time (NOT in the CLI args).
+ * @deprecated Since v1.2.0d (D16). Legacy spawn-binary arg builder. No callers
+ * after v1.2.0d — deepseek_client.ts handles model override via HTTP request
+ * body, not CLI args. Kept exported only for historical import resolution;
+ * use `resolveModelOverride` instead for any cost-mode / override decisions.
  */
 export function buildArgs(
-  modelClass: ModelClass,
-  prompt: string,
-  extraArgs?: string[],
-): string[] {
-  const rolePatch = resolveProfilePath(modelClass);
-  const modelOverride = resolveModelOverride(modelClass);
-  return [
-    '--profile', 'headless',
-    '--patch', BASE_PATCH,
-    '--patch', rolePatch,
-    ...(modelOverride ? ['--model', modelOverride] : []),
-    '--',
-    prompt,
-    ...(extraArgs ?? []),
-  ];
-}
-
-/**
- * Run a child process with a timeout using AbortController.
- * Returns the exit code (null if killed by timeout).
- */
-function runWithTimeout(
-  cmd: string,
-  args: string[],
-  env: NodeJS.ProcessEnv,
-  timeoutMs: number,
-): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  return new Promise((resolve) => {
-    const proc = spawn(cmd, args, {
-      env: { ...process.env, ...env },
-      // node 20+ AbortSignal timeout support
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-    proc.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
-
-    proc.on('close', (code) => {
-      resolve({ stdout, stderr, exitCode: code ?? 0 });
-    });
-
-    proc.on('error', (err) => {
-      // AbortError means SIGKILL from AbortSignal.timeout
-      if (err.name === 'AbortError') {
-        proc.kill();
-        resolve({ stdout, stderr: `${stderr}\n[timeout after ${timeoutMs}ms]`, exitCode: null });
-      } else {
-        resolve({ stdout, stderr: `${stderr}\n[error: ${err.message}]`, exitCode: 1 });
-      }
-    });
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-/**
- * Call dsh CLI with real invocation (env-inject DEEPSEEK_API_KEY).
- *
- * @param prompt   - task prompt sent to dsh
- * @param opts     - call options (modelClass required)
- * @returns DshResponse with stdout/stderr/exitCode/wallMs/traceId/tokenUsage
- *
- * Security notes:
- *   - DEEPSEEK_API_KEY is injected via process.env (never in CLI args)
- *   - No API key is written to any file
- *   - No specific model is hardcoded (model selected by --patch YAML)
- */
-export async function callDshHeadless(
-  prompt: string,
-  opts?: DshOpts,
-): Promise<DshResponse> {
-  const modelClass: ModelClass = opts?.modelClass ?? 'commander';
-  const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS[modelClass];
-  const startMs = Date.now();
-
-  // Read DEEPSEEK_API_KEY from env (never hardcode)
-  const apiKey = opts?.apiKey ?? process.env.DEEPSEEK_API_KEY;
-  const envInject: NodeJS.ProcessEnv = apiKey
-    ? { DEEPSEEK_API_KEY: apiKey }
-    : {};
-
-  if (process.env['DEBUG_DSH_SPAWN']) {
-    console.log(`[dsh_client] key_len=${(apiKey ?? '').length} modelClass=${modelClass} timeoutMs=${timeoutMs}`);
-  }
-
-  const args = buildArgs(modelClass, prompt, opts?.extraArgs);
-
-  const { stdout, stderr, exitCode: rawExitCode } = await runWithTimeout(
-    'dsh',
-    args,
-    envInject,
-    timeoutMs,
-  );
-
-  const wallMs = Date.now() - startMs;
-  const exitCode = rawExitCode ?? 124; // 124 = timeout exit code convention
-
-  const { traceId, tokenUsage } = parseDshMetadata(stdout);
-  const denialReason = exitCode !== 0
-    ? parseDenialReason(stdout, stderr)
-    : undefined;
-
-  return {
-    stdout,
-    stderr,
-    exitCode,
-    wallMs,
-    traceId,
-    tokenUsage,
-    denialReason,
-  };
-}
-
-/**
- * Convenience wrapper: call dsh with explicit DshInvokeOptions.
- * Preferred entry point for tool_provider.ts.
- */
-export async function dshInvoke(options: DshInvokeOptions): Promise<DshResponse> {
-  return callDshHeadless(options.prompt, {
-    modelClass: options.modelClass,
-    timeoutMs: options.timeoutMs,
-    extraArgs: options.extraArgs,
-  });
-}
-
-/**
- * Stub: call dsh via HTTP (alternative to CLI).
- * Not implemented in M1c (CLI only).
- */
-export async function callDshHttp(
+  _modelClass: ModelClass,
   _prompt: string,
-  _opts?: DshOpts,
-): Promise<DshResponse> {
-  throw new Error('callDshHttp: HTTP mode not implemented in M1c (CLI only)');
+  _extraArgs?: string[],
+): string[] {
+  return [];
 }
+
+// ---------------------------------------------------------------------------
+// Public API (DEPRECATED since v1.2.0d D16)
+// ---------------------------------------------------------------------------
+// All public exports below are legacy shims. New code MUST import from
+// `deepseek_client.ts` directly. The re-export at the bottom preserves
+// backward compatibility for any code path that still imports `callDshHeadless`.
+
+// ─── Backward-compat re-export (v1.2.0d) ─────────────────────────────────
+// v1.2.0d: dsh binary spawn is deprecated (per D16). Existing callers
+// that still import callDshHeadless get deepseekInvoke under the same
+// name so they compile without changes. New code should import
+// deepseekInvoke directly from deepseek_client.ts.
+export { deepseekInvoke as callDshHeadless } from './deepseek_client.js';

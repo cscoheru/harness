@@ -17,7 +17,7 @@
  * @file wrapper/dsh/tool_provider.ts
  */
 
-import { dshInvoke } from './dsh_client.js';
+import { deepseekInvoke } from './deepseek_client.js';
 import { loadProfile, getRolePatchPath } from './profile.js';
 import type {
   DshInvokeOptions,
@@ -89,7 +89,7 @@ export interface CapabilityInfo {
  *   1. Resolve modelClass from capabilityId
  *   2. Load profile YAML (base + role patch)
  *   3. Serialize ToolInvokeRequest into a dsh prompt
- *   4. Call dsh via dshInvoke()
+ *   4. Call DeepSeek HTTP via deepseekInvoke()
  *   5. Parse stdout into ToolInvokeResult
  *
  * @implements IToolProvider
@@ -150,9 +150,8 @@ export class DshToolProvider implements IToolProvider {
   async invoke(request: ToolInvokeRequest): Promise<ToolInvokeResult> {
     const prompt = this._buildPrompt(request);
 
-    const response = await dshInvoke({
+    const response = await deepseekInvoke(prompt, {
       modelClass: this._modelClass,
-      prompt,
       timeoutMs: this._profile.timeoutMs,
     });
 
@@ -186,7 +185,7 @@ export class DshToolProvider implements IToolProvider {
    */
   private _parseResponse(
     request: ToolInvokeRequest,
-    response: Awaited<ReturnType<typeof dshInvoke>>,
+    response: Awaited<ReturnType<typeof deepseekInvoke>>,
   ): ToolInvokeResult {
     const { stdout, stderr, exitCode, wallMs, traceId, tokenUsage, denialReason } = response;
     const fallbackTraceId = traceId ?? `dsh-${request.taskId}-${wallMs}-${Math.random().toString(36).slice(2, 8)}`;

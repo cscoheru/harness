@@ -4,7 +4,7 @@
  * Responsibilities (M1c):
  *   - Parse user intent / task description
  *   - Dispatch to v1.0 kernel via POST /api/orch/invoke
- *   - Call dsh_client.callDshHeadless() (env-inject DEEPSEEK_API_KEY)
+ *   - Call deepseek_client.deepseekInvoke() (env-inject DEEPSEEK_API_KEY)
  *   - Track task lifecycle (pending → running → completed/failed)
  *   - Query kernel via GET /api/orch/status/{task_id}
  *
@@ -24,7 +24,7 @@ import type {
   HealthResponse,
   DriverEvent,
 } from "./types.js";
-import { callDshHeadless } from "../dsh/dsh_client.js";
+import { deepseekInvoke } from "../dsh/deepseek_client.js";
 import type { DshOpts, DshResponse } from "../dsh/types.js";
 import * as commander from "./commander.js";
 import * as workerModule from "./worker.js";
@@ -418,7 +418,7 @@ async function runDsh(prompt: string, modelClass: string): Promise<DshResponse> 
     modelClass: validClass,
     timeoutMs: 120_000,
   };
-  return await callDshHeadless(prompt, opts);
+  return await deepseekInvoke(prompt, opts);
 }
 
 /**

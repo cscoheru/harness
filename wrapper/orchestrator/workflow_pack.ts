@@ -7,14 +7,14 @@
  *     when the file does not exist.
  *   - plan(task): generate a PlanPlan (DAG of PlanSteps) by calling dsh with
  *     the commander profile (docs/m0b/profile-override-commander.yaml,
- *     model = deepseek-v4-flash, 60s timeout). On dsh failure or non-JSON
+ *     model = deepseek-v4-flash, 60s timeout). On DeepSeek failure or non-JSON
  *     output, falls back to a deterministic heuristic 1-step plan.
  *
  * The fallback path is critical: it keeps the wrapper usable in unit tests
  * and integration tests without requiring a real DEEPSEEK_API_KEY. Production
  * runs with the key set will use the dsh-generated path.
  *
- * Does NOT lock to a specific model. dsh profile YAML controls model selection.
+ * Does NOT lock to a specific model. DeepSeek model param controls selection.
  * DEEPSEEK_API_KEY injected via process.env (never hardcoded).
  *
  * @file wrapper/orchestrator/workflow_pack.ts
@@ -23,7 +23,7 @@
 import { existsSync, readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { callDshHeadless } from '../dsh/dsh_client.js';
+import { deepseekInvoke } from '../dsh/deepseek_client.js';
 import type {
   PackManifest,
   PackStep,
@@ -133,7 +133,7 @@ export async function plan(task: Task): Promise<PlanPlan> {
   // Try dsh-based plan generation first
   const prompt = buildPlanPrompt(task, manifest);
   try {
-    const dshResp = await callDshHeadless(prompt, {
+    const dshResp = await deepseekInvoke(prompt, {
       modelClass: 'commander',
       timeoutMs: PLAN_TIMEOUT_MS,
     });

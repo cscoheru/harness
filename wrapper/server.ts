@@ -29,7 +29,34 @@ import express from 'express';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
+// Node 24's undici DNS resolver does not honor /etc/resolv.conf entries
+// pointing at tailscaled's 100.100.100.100 listener (it discards non-RFC1918
+// nameservers on some hosts). Forcing the resolver set here makes MagicDNS
+// hostnames resolvable from inside the wrapper process regardless of the
+// container's resolv.conf — covers the network_mode: host case where the
+// container's snapshot resolv.conf would otherwise route through the host
+// systemd-resolved stub and time out on tailnet names.
+import dns from 'dns';
+import { readFileSync } from 'fs';
+if (!process.env['DNS_SERVERS']) {
+  const fromResolv = (() => {
+    try {
+      const txt = readFileSync('/etc/resolv.conf', 'utf8');
+      const out: string[] = [];
+      for (const line of txt.split('\n')) {
+        const m = line.match(/^\s*nameserver\s+(\S+)/);
+        if (m && m[1] !== '127.0.0.53' && m[1] !== '127.0.0.1') out.push(m[1]);
+      }
+      return out.length > 0 ? out : ['1.1.1.1', '8.8.8.8'];
+    } catch {
+      return ['1.1.1.1', '8.8.8.8'];
+    }
+  })();
+  dns.setServers(fromResolv);
+}
+
 import * as orchestrator from './orchestrator/orchestrator.js';
+import { startWorkerHeartbeatSender } from './orchestrator/heartbeat_sender.js';
 import * as webpush from './orchestrator/webpush_gateway.js';
 // stt_worker.ts is dynamically imported in the /api/stt/transcribe handler
 // because its module-level WHISPER_MODEL_PATH check would otherwise crash the
@@ -352,6 +379,9 @@ if (isMain) {
     // eslint-disable-next-line no-console
     console.log(`[wrapper/server] listening on :${port}`);
   });
+  // Worker self-registration loop (3-host deploy NEW): only active when
+  // WORKER_HEARTBEAT_URL is set (edge/worker compose), inert on newvps profiles.
+  startWorkerHeartbeatSender();
 }
 
 export { WRAPPER_PORT };

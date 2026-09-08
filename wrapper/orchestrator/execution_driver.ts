@@ -1,14 +1,19 @@
 /**
- * Execution driver — subprocess spawn (primary) + HTTP fallback (per D2=C).
+ * Execution driver — DeepSeek HTTP direct + cross-host routed fallback.
  *
- * Why dual-model (per D2 = Option C):
- *   - Primary path: child_process.spawn('dsh --profile headless --model ...')
- *     reuses wrapper/dsh/dsh_client.ts spawn pattern (F4). Yields
- *     DriverEvent stream as stdout streams line-by-line.
- *   - Fallback path: fetch() POST to DSH_HTTP_URL/api/v1/tasks. Stub for
- *     v1.2.0b (dsh binary doesn't yet expose HTTP server — T-DO-4 future).
- *     Kept as named interface so v1.2.0c routedDsh() can flip priority
- *     without refactoring callers.
+ * Why dual-model (per D2 = Option C → v1.2.0d D16 DeepSeek HTTP 直调):
+ *   - Primary path: deepseekInvoke() (wrapper/dsh/deepseek_client.ts) — fetch()
+ *     POST to https://api.deepseek.com/v1/chat/completions with
+ *     env-injected DEEPSEEK_API_KEY. No dsh binary dependency.
+ *   - Fallback path: routedDsh() — fetch() POST to DSH_HTTP_URL/api/v1/tasks
+ *     for cross-host dispatch (per v1.2.0c F12). Used when primary fails
+ *     (network unreachable to api.deepseek.com from edge host).
+ *
+ * v1.2.0d NEW (per D16):
+ *   - Removed legacy dsh binary invocation path entirely (was a dead
+ *     command since dsh 0.1.1-rc.2 — only web profile, no headless CLI).
+ *   - Default model: deepseek-v4-flash (worker class default).
+ *   - DEFAULT_DSH_BIN constant kept for backward compat but no longer spawned.
  *
  * DriverEvent stream contract (per types.ts:262-270):
  *   driver.started → driver.output_chunk ×N → driver.heartbeat ×N
@@ -16,19 +21,13 @@
  *
  * Cancel / interrupt:
  *   AbortController shared across primary + fallback. interrupt() calls
- *   controller.abort() AND (for primary) spawn-kill on the subprocess.
+ *   controller.abort() AND (for primary) fetch abort.
  *   Both paths converge on driver.interrupted event in the stream.
- *
- * Reused from existing code (F4):
- *   - dsh_client.ts spawn pattern (line 17 import + line 108-181 runWithTimeout
- *     with AbortSignal.timeout). execution_driver.ts implements its own
- *     line-streaming variant because callDshHeadless() returns Promise<string>
- *     (single final answer), not AsyncIterable.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
+import { deepseekInvoke } from "../dsh/deepseek_client.js";
 import type {
   DriverCapabilities,
   DriverEvent,
@@ -41,7 +40,7 @@ import type {
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const DEFAULT_TIMEOUT_SECONDS = 60;
-const DEFAULT_DSH_BIN = "dsh";
+const DEFAULT_DSH_BIN = "dsh"; // DEPRECATED (v1.2.0d D16): kept for backward compat but never spawned
 const DEFAULT_PROFILE = "headless";
 const DEFAULT_MODEL = "deepseek-v4-flash";
 const DEFAULT_HTTP_URL = "http://127.0.0.1:4001";
@@ -57,16 +56,20 @@ const HEARTBEAT_INTERVAL_MS = 5000;
 interface DriverHandle {
   cancel_token: string;
   controller: AbortController;
-  child: ChildProcess | null;
+  child: null; // v1.2.0d D16: spawn path removed; field kept for handleRegistry shape compat
   startMs: number;
   attempt_id: string;
   driver_kind: DriverKind;
   finished: boolean;
 }
 
-// ─── SpawnDshDriver ──────────────────────────────────────────────────────────
+// ─── DeepseekHttpDriver (v1.2.0d NEW: replaces SpawnDshDriver) ───────────────
 
 export class SpawnDshDriver implements ExecutionDriver {
+  // DEPRECATED alias for SpawnDshDriver (v1.2.0d D16): the spawn path is gone,
+  // but kept for callers that imported the class name. Behavior is now the
+  // same as the new DeepseekHttpDriver — deepseekInvoke() with cross-host
+  // routedDsh fallback on network failure.
   private readonly dshBin: string;
   private readonly dshHttpUrl: string;
 
@@ -85,8 +88,8 @@ export class SpawnDshDriver implements ExecutionDriver {
       supports_heartbeat: true,
       supports_tool_gateway: false,
       notes:
-        "SpawnDshDriver: child_process.spawn of dsh --profile headless; " +
-        "yields DriverEvent stream; HTTP fallback stubbed for v1.2.0b.",
+        "v1.2.0d: DeepSeek HTTP direct via deepseekInvoke(); " +
+        "legacy dsh binary invocation removed (D16); routedDsh fallback on network fail.",
     };
   }
 
@@ -96,35 +99,17 @@ export class SpawnDshDriver implements ExecutionDriver {
   }
 
   async interrupt(handle: RunHandle, reason: string): Promise<void> {
-    // handle.cancel_token is the key into our internal handle map; we
-    // re-derive the AbortController from a module-level WeakMap keyed by
-    // cancel_token. Simpler: caller passes the same handle object that
-    // came back from start(). For Protocol compatibility we look up by
-    // cancel_token via the registry.
     const state = handleRegistry.get(handle.cancel_token);
     if (!state) {
-      // Already finished or never registered — best-effort no-op.
       return;
     }
     state.controller.abort();
-    if (state.child && !state.child.killed) {
-      try {
-        state.child.kill("SIGTERM");
-      } catch {
-        // already dead
-      }
-    }
-    yieldInterrupted(state, reason);
+    void reason;
   }
 
   async heartbeat(handle: RunHandle): Promise<void> {
-    // No-op at driver level — heartbeats are emitted inside the event
-    // stream by streamEvents() on HEARTBEAT_INTERVAL_MS. This method
-    // exists for Protocol parity with kernel-side ExecutionDriver.
     const state = handleRegistry.get(handle.cancel_token);
     if (state && !state.finished) {
-      // re-emit a heartbeat event inline (caller may consume via their own
-      // queue); for Protocol we just no-op.
       void state;
     }
   }
@@ -137,22 +122,10 @@ export class SpawnDshDriver implements ExecutionDriver {
     const cancel_token = `drv-${randomUUID()}`;
     const driver_kind: DriverKind = "codex_exec";
 
-    // Choose path: primary (spawn) preferred; fallback only if DSH_FORCE_HTTP=1
-    const forceHttp = process.env.DSH_FORCE_HTTP === "1";
-
-    let child: ChildProcess | null = null;
-    if (!forceHttp) {
-      child = this.spawnDsh(request);
-      child.on("error", () => {
-        // spawn-level error (ENOENT etc) — handled by streamEvents via
-        // the 'error' close event; nothing to do here.
-      });
-    }
-
     const handle: DriverHandle = {
       cancel_token,
       controller,
-      child,
+      child: null, // v1.2.0d D16: spawn path removed
       startMs: Date.now(),
       attempt_id,
       driver_kind,
@@ -163,27 +136,6 @@ export class SpawnDshDriver implements ExecutionDriver {
     return handle;
   }
 
-  private spawnDsh(request: RunRequest): ChildProcess {
-    const profile = process.env.DSH_PROFILE ?? DEFAULT_PROFILE;
-    const model = process.env.DSH_MODEL ?? DEFAULT_MODEL;
-    const prompt = stringifyRequestForDsh(request);
-
-    const child = spawn(
-      this.dshBin,
-      ["--profile", profile, "--model", model, "--prompt", prompt],
-      {
-        env: {
-          ...process.env,
-          // Don't pollute parent stdout; we capture via 'data' listener.
-          DSH_DRIVER_ATTEMPT_ID: request.attempt_id,
-          DSH_DRIVER_TASK_ID: request.task_id,
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
-    return child;
-  }
-
   private async *streamEvents(
     handle: DriverHandle,
     request: RunRequest,
@@ -191,37 +143,100 @@ export class SpawnDshDriver implements ExecutionDriver {
     const { attempt_id } = request;
     const startedMs = Date.now();
 
+    const modelClass = (request.metadata?.["model_class"] as "orch" | "commander" | "worker" | undefined) ?? "worker";
+
     yield {
       kind: "driver.started",
       attempt_id,
       payload: {
         driver_kind: handle.driver_kind,
         started_at: new Date(startedMs).toISOString(),
-        model: process.env.DSH_MODEL ?? DEFAULT_MODEL,
-        profile: process.env.DSH_PROFILE ?? DEFAULT_PROFILE,
+        model: process.env["DSH_MODEL"] ?? DEFAULT_MODEL,
+        profile: process.env["DSH_PROFILE"] ?? DEFAULT_PROFILE,
       },
     };
 
     const timeoutMs = (request.metadata?.timeout_seconds as number | undefined) ??
       DEFAULT_TIMEOUT_SECONDS * 1000;
 
-    // ── Primary path: child_process.spawn ──────────────────────────────────
-    if (handle.child) {
-      yield* this.streamSpawnSubprocess(handle, attempt_id, timeoutMs);
-      return;
-    }
+    // ── Primary path: deepseekInvoke() (v1.2.0d D16) ──────────────────────
+    yield* this.streamDeepseekInvoke(handle, attempt_id, timeoutMs, modelClass);
+  }
 
-    // ── Fallback path: routedDsh() 真发远程 (wire-routedDsh per F22 option A) ─
-    // F22 (v1.2.0d): replaced HTTP stub with routedDsh() call so cross-host
-    // dispatch 真发到 MagicDNS 远程 host (per F12 wired into 6host_router.ts).
-    // v1.2.0d formal M-fix: DSH_FORCE_HTTP=1 keeps the v1.2.0b test contract
-    // (direct fetch(dshHttpUrl); unit tests mock globalThis.fetch) — routedDsh
-    // wire fires only on the production dispatch path.
-    if (process.env.DSH_FORCE_HTTP === "1") {
-      yield* this.streamHttpFallback(handle, attempt_id, timeoutMs);
-      return;
+  /**
+   * v1.2.0d NEW (per D16): primary path = deepseekInvoke() direct HTTP call
+   * to api.deepseek.com. Replaces legacy dsh binary invocation.
+   */
+  private async *streamDeepseekInvoke(
+    handle: DriverHandle,
+    attempt_id: string,
+    timeoutMs: number,
+    modelClass: "orch" | "commander" | "worker",
+  ): AsyncIterable<DriverEvent> {
+    const prompt = stringifyRequestForDsh({
+      attempt_id: handle.attempt_id,
+      task_id: handle.attempt_id,
+      workflow_pack: "deepseek",
+      workflow_version: "1.2.0d",
+      input_blob_id: null,
+      capability_profile: this.capability(),
+      lease_token: `lease-${handle.attempt_id}`,
+      fence_version: 1,
+      metadata: { source: "execution_driver_deepseek", model_class: modelClass },
+    });
+
+    try {
+      const resp = await deepseekInvoke(prompt, {
+        modelClass,
+        timeoutMs,
+      });
+      handle.finished = true;
+      // Yield one output_chunk with stdout (preserves event stream shape for callers)
+      const stdout = resp.stdout || "";
+      if (stdout.length > 0) {
+        yield {
+          kind: "driver.output_chunk",
+          attempt_id,
+          payload: {
+            chunk: stdout.slice(0, MAX_CHUNK_BYTES),
+            byte_size: Buffer.byteLength(stdout, "utf8"),
+            source: "deepseek",
+          },
+        };
+      }
+      yield {
+        kind: "driver.finished",
+        attempt_id,
+        payload: {
+          exit_code: resp.exitCode,
+          stdout,
+          wall_ms: Date.now() - handle.startMs,
+          source: "deepseek",
+          trace_id: resp.traceId,
+          token_usage: resp.tokenUsage,
+        },
+      };
+    } catch (err) {
+      const message = (err as Error).message ?? String(err);
+      // v1.2.0d D16: on network failure (api.deepseek.com unreachable from
+      // edge host), fall through to routedDsh() cross-host dispatch.
+      const isNetworkFail = /fetch failed|ENOTFOUND|ETIMEDOUT|ECONNREFUSED|AbortError/i.test(message);
+      if (isNetworkFail && !handle.controller.signal.aborted) {
+        yield* this.streamRoutedDshFallback(handle, attempt_id, timeoutMs);
+        return;
+      }
+      yield {
+        kind: handle.controller.signal.aborted ? "driver.interrupted" : "driver.failed",
+        attempt_id,
+        payload: {
+          error: message,
+          wall_ms: Date.now() - handle.startMs,
+          source: "deepseek",
+        },
+      };
+    } finally {
+      handleRegistry.delete(handle.cancel_token);
     }
-    yield* this.streamRoutedDshFallback(handle, attempt_id, timeoutMs);
   }
 
   /**
@@ -280,291 +295,6 @@ export class SpawnDshDriver implements ExecutionDriver {
       handleRegistry.delete(handle.cancel_token);
     }
   }
-
-  private async *streamSpawnSubprocess(
-    handle: DriverHandle,
-    attempt_id: string,
-    timeoutMs: number,
-  ): AsyncIterable<DriverEvent> {
-    const child = handle.child!;
-    let stdoutTail = "";
-    let stderrTail = "";
-    let heartbeatTimer: NodeJS.Timeout | null = null;
-
-    const timeoutSignal = AbortSignal.timeout(timeoutMs);
-    const onAbort = () => {
-      try {
-        child.kill("SIGTERM");
-      } catch {
-        // already dead
-      }
-    };
-    timeoutSignal.addEventListener("abort", onAbort);
-    handle.controller.signal.addEventListener("abort", onAbort);
-
-    const heartbeatLoop = async function* (
-      this: AsyncIterable<DriverEvent>,
-    ): AsyncGenerator<DriverEvent, void, undefined> {
-      while (!handle.finished) {
-        await sleep(HEARTBEAT_INTERVAL_MS);
-        if (handle.finished) return;
-        yield {
-          kind: "driver.heartbeat",
-          attempt_id,
-          payload: {
-            wall_ms: Date.now() - handle.startMs,
-            cancel_token: handle.cancel_token,
-          },
-        };
-      }
-    };
-
-    const chunkQueue: string[] = [];
-    let resolveNext: (() => void) | null = null;
-    let childClosed = false;
-    let childExitCode: number | null = null;
-    let childError: Error | null = null;
-
-    child.stdout?.on("data", (buf: Buffer) => {
-      stdoutTail += buf.toString("utf8");
-      let nlIdx;
-      while ((nlIdx = stdoutTail.indexOf("\n")) >= 0) {
-        const line = stdoutTail.slice(0, nlIdx);
-        stdoutTail = stdoutTail.slice(nlIdx + 1);
-        chunkQueue.push(line);
-        resolveNext?.();
-      }
-    });
-
-    child.stderr?.on("data", (buf: Buffer) => {
-      stderrTail += buf.toString("utf8");
-      if (stderrTail.length > MAX_CHUNK_BYTES) {
-        stderrTail = stderrTail.slice(-MAX_CHUNK_BYTES);
-      }
-    });
-
-    child.on("error", (err) => {
-      childError = err;
-      childClosed = true;
-      resolveNext?.();
-    });
-
-    child.on("close", (code) => {
-      childExitCode = code;
-      childClosed = true;
-      resolveNext?.();
-    });
-
-    const waitForNext = () =>
-      new Promise<void>((resolve) => {
-        if (chunkQueue.length > 0 || childClosed) {
-          resolve();
-          return;
-        }
-        resolveNext = resolve;
-      });
-
-    try {
-      while (true) {
-        if (handle.controller.signal.aborted) {
-          handle.finished = true;
-          yield {
-            kind: "driver.interrupted",
-            attempt_id,
-            payload: {
-              cancel_token: handle.cancel_token,
-              reason: "controller_aborted",
-              wall_ms: Date.now() - handle.startMs,
-            },
-          };
-          handleRegistry.delete(handle.cancel_token);
-          return;
-        }
-
-        if (chunkQueue.length > 0) {
-          const line = chunkQueue.shift()!;
-          yield {
-            kind: "driver.output_chunk",
-            attempt_id,
-            payload: {
-              chunk: line.slice(0, MAX_CHUNK_BYTES),
-              byte_size: Buffer.byteLength(line, "utf8"),
-            },
-          };
-          continue;
-        }
-
-        if (childClosed) {
-          handle.finished = true;
-          if (chunkQueue.length > 0) continue; // race: more chunks after close
-          if (childError) {
-            // v1.2.0d formal M-fix per F22 option A: local dsh binary missing
-            // (ENOENT) → fall through to routedDsh() cross-host dispatch
-            // instead of hard-failing. This is the F22 production story:
-            // edge containers without a local dsh binary dispatch remotely.
-            const errno = (childError as NodeJS.ErrnoException).code;
-            if (errno === "ENOENT") {
-              handle.finished = false;
-              handleRegistry.set(handle.cancel_token, handle);
-              yield* this.streamRoutedDshFallback(handle, attempt_id, timeoutMs);
-              return;
-            }
-            yield {
-              kind: "driver.failed",
-              attempt_id,
-              payload: {
-                error: childError ? (childError as Error).message : "unknown spawn error",
-                exit_code: childExitCode,
-                stderr_tail: stderrTail.slice(-512),
-                wall_ms: Date.now() - handle.startMs,
-              },
-            };
-          } else if (childExitCode === 0) {
-            yield {
-              kind: "driver.finished",
-              attempt_id,
-              payload: {
-                exit_code: 0,
-                wall_ms: Date.now() - handle.startMs,
-              },
-            };
-          } else {
-            yield {
-              kind: "driver.failed",
-              attempt_id,
-              payload: {
-                error: `dsh exited with code ${childExitCode}`,
-                exit_code: childExitCode,
-                stderr_tail: stderrTail.slice(-512),
-                wall_ms: Date.now() - handle.startMs,
-              },
-            };
-          }
-          handleRegistry.delete(handle.cancel_token);
-          return;
-        }
-
-        // No chunks yet, child still alive — wait or yield heartbeat.
-        const heartbeatRace = Promise.race([
-          waitForNext(),
-          sleep(HEARTBEAT_INTERVAL_MS).then(() => "heartbeat" as const),
-        ]);
-        const raceResult = await heartbeatRace;
-        if (raceResult === "heartbeat") {
-          yield {
-            kind: "driver.heartbeat",
-            attempt_id,
-            payload: {
-              wall_ms: Date.now() - handle.startMs,
-              cancel_token: handle.cancel_token,
-            },
-          };
-        }
-      }
-    } finally {
-      timeoutSignal.removeEventListener("abort", onAbort);
-      handle.controller.signal.removeEventListener("abort", onAbort);
-      if (heartbeatTimer) clearInterval(heartbeatTimer);
-    }
-  }
-
-  private async *streamHttpFallback(
-    handle: DriverHandle,
-    attempt_id: string,
-    timeoutMs: number,
-  ): AsyncIterable<DriverEvent> {
-    const url = `${this.dshHttpUrl}/api/v1/tasks`;
-    const body = JSON.stringify({
-      attempt_id,
-      task_id: handle.attempt_id,
-      workflow_pack: "fallback",
-      prompt_summary: "execution_driver HTTP fallback stub (v1.2.0b)",
-    });
-
-    let heartbeatTimer: NodeJS.Timeout | null = null;
-    try {
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body,
-        signal: handle.controller.signal,
-      });
-
-      if (!resp.ok) {
-        yield {
-          kind: "driver.failed",
-          attempt_id,
-          payload: {
-            error: `dsh HTTP fallback returned status ${resp.status}`,
-            http_status: resp.status,
-            wall_ms: Date.now() - handle.startMs,
-          },
-        };
-        handleRegistry.delete(handle.cancel_token);
-        return;
-      }
-
-      // Stream response body line-by-line via reader. AsyncIterable of lines.
-      const reader = resp.body?.getReader();
-      if (!reader) {
-        yield {
-          kind: "driver.failed",
-          attempt_id,
-          payload: { error: "dsh HTTP fallback: empty body" },
-        };
-        handleRegistry.delete(handle.cancel_token);
-        return;
-      }
-
-      const decoder = new TextDecoder("utf8");
-      let tail = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        tail += decoder.decode(value, { stream: true });
-        let nl;
-        while ((nl = tail.indexOf("\n")) >= 0) {
-          const line = tail.slice(0, nl);
-          tail = tail.slice(nl + 1);
-          yield {
-            kind: "driver.output_chunk",
-            attempt_id,
-            payload: {
-              chunk: line.slice(0, MAX_CHUNK_BYTES),
-              byte_size: Buffer.byteLength(line, "utf8"),
-              source: "http_fallback",
-            },
-          };
-        }
-      }
-
-      handle.finished = true;
-      yield {
-        kind: "driver.finished",
-        attempt_id,
-        payload: {
-          exit_code: 0,
-          wall_ms: Date.now() - handle.startMs,
-          source: "http_fallback",
-        },
-      };
-    } catch (err) {
-      const message = (err as Error).message ?? String(err);
-      yield {
-        kind: handle.controller.signal.aborted
-          ? "driver.interrupted"
-          : "driver.failed",
-        attempt_id,
-        payload: {
-          error: message,
-          wall_ms: Date.now() - handle.startMs,
-        },
-      };
-    } finally {
-      if (heartbeatTimer) clearInterval(heartbeatTimer);
-      handleRegistry.delete(handle.cancel_token);
-    }
-  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -576,17 +306,6 @@ export class SpawnDshDriver implements ExecutionDriver {
  * across a process lifetime under normal operation.
  */
 const handleRegistry = new Map<string, DriverHandle>();
-
-function yieldInterrupted(state: DriverHandle, reason: string): void {
-  // The interrupt() method itself is not async-iterable; instead, the
-  // caller (worker.run) is responsible for observing handle.finished and
-  // emitting driver.interrupted from its own streamEvents consumer. This
-  // helper records the interrupt reason in the handle for the consumer
-  // to pick up.
-  state.finished = true;
-  state.controller.abort();
-  void reason; // reason is already encoded in the consumer-side event
-}
 
 function stringifyRequestForDsh(request: RunRequest): string {
   // dsh binary expects a single --prompt string. For v1.2.0b we collapse
