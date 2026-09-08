@@ -17,10 +17,11 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// Mock dsh_client so planStep() exercises the heuristic fallback path
+// Mock deepseek_client so planStep() exercises the heuristic fallback path
 // (no DEEPSEEK_API_KEY required for unit tests)
-vi.mock('../../orchestrator/../dsh/dsh_client.js', () => ({
-  callDshHeadless: vi.fn(async () => ({
+// v1.2.0d.3 D16 收口修复: mock 迁移 dsh_client(callDshHeadless) → deepseek_client(deepseekInvoke)
+vi.mock('../../orchestrator/../dsh/deepseek_client.js', () => ({
+  deepseekInvoke: vi.fn(async () => ({
     stdout: '',
     stderr: 'mocked: dsh disabled in unit test',
     exitCode: 1,

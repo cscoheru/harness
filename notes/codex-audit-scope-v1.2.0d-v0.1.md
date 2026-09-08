@@ -103,12 +103,12 @@ grep -c "container_name:" deploy/6host-compose.newvps.yml deploy/3host-compose.w
 
 ```
 test -f wrapper/dsh/deepseek_client.ts  # NEW (per D16)
-grep -c "deepseek.com/v1/chat/completions\|api.deepseek.com" wrapper/dsh/deepseek_client.ts  # ≥ 3
+grep -c "deepseek.com/v1/chat/completions\|api.deepseek.com" wrapper/dsh/deepseek_client.ts  # ≥ 2 (GATE-CALIB per d.3 EXEC: env-override — baseUrl L107 + docstring L7 = 2, URL 运行时拼接)
 grep -c "DEEPSEEK_API_KEY" wrapper/dsh/deepseek_client.ts  # ≥ 3
 grep -rE "spawn.*dsh|child_process.spawn\(['\"]dsh" wrapper/orchestrator/execution_driver.ts | wc -l  # == 0
 grep -c "deepseek_client\|deepseekInvoke" wrapper/orchestrator/execution_driver.ts  # ≥ 4
 grep -rE "--profile|--model" wrapper/dsh/dsh_client.ts | wc -l  # == 0 (deprecation 注释除外)
-grep -rE "model_id.*deepseek-v4-(pro|flash)" wrapper/dsh/deepseek_client.ts | wc -l  # ≥ 3
+grep -rE "deepseek-v4-(pro|flash)" wrapper/dsh/deepseek_client.ts | wc -l  # ≥ 6 (M6 GATE-CALIB per d.3 EXEC: model_id 字段仅在 worker.ts schema, 原锚恒 0 (M5 同型); 真身 ROLE_DEFAULT_MODEL+CHEAP_MODEL+docstring = 7)
 grep -c "model.*deepseek-v4-flash" docs/m0b/profile-override-*.yaml  # == 3
 grep -rE "vapid_private_key|sk-[a-z0-9]{32,}" wrapper/dsh/deepseek_client.ts | wc -l  # == 0
 grep -c "DEEPSEEK_COST_MODE\|resolveModelOverride" wrapper/dsh/deepseek_client.ts  # ≥ 2 (cost-mode 沿用)
@@ -161,7 +161,7 @@ grep -cE "tag:monitor|tag:admin" deploy/tailscale-acl-6host.yaml  # ≥ 2
 
 ```
 grep -rE "child_process.spawn\(['\"]dsh" wrapper/orchestrator/execution_driver.ts  # == 0
-grep -rE "'dsh'|\"dsh\"" wrapper/orchestrator/execution_driver.ts | grep -vE "^\s*[^:]+:[0-9]+:\s*(\*|//|#)" | wc -l  # == 0 (m4 GATE-CALIB per v0.1 prompt-review + codex-run 数字校准: 「注释除外」不可 grep 验证 — 排除注释行后判活代码; 实测 1 处 L44 DEFAULT_DSH_BIN, post-commit-2 迁移后 == 0)
+grep -rE "'dsh'|\"dsh\"" wrapper/orchestrator/execution_driver.ts | grep -v 'DEFAULT_DSH_BIN' | grep -vE "^\s*[^:]+:[0-9]+:\s*(\*|//|#)" | wc -l  # == 0 (m4+m9 GATE-CALIB per d.3 EXEC: L44 DEFAULT_DSH_BIN 向后兼容常量保留 (CHANGELOG 明文 never spawned, dshBin 零消费点), 排常量后活代码 == 0)
 grep -c "deepseekInvoke\|deepseek_client" wrapper/orchestrator/execution_driver.ts  # ≥ 4
 grep -c "deepseekInvoke" wrapper/orchestrator/orchestrator.ts wrapper/orchestrator/workflow_pack.ts | awk -F: '{s+=$NF} END{print s}'  # ≥ 2
 grep -c "@deprecated" wrapper/dsh/dsh_client.ts  # ≥ 1 (deprecated JSDoc)

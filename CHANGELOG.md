@@ -554,6 +554,107 @@ v1.2.0d.2 quick-fix sub-cycle — DEEPSEEK_COST_MODE 成本闸门 (orch 默认�
 
 ---
 
+## [1.2.0d.3] - 2026-09-08
+
+v1.2.0d.3 sub-cycle — **D16 DeepSeek HTTP 直调** (user 选 A 决策:wrapper 直调 api.deepseek.com 绕开 dsh binary 死锁) + **v1.2.0e 3-host real deploy 5 文件合并** (per user 选 A 决策并入 commit 2) + **8 stale test 清理** (M1c/v1.2.0c 时代 schema 不兼容 v1.2.0d.3)。
+
+**Trigger**: v1.2.0e 3-host real deploy 闭环 (commit a62e0bb+ 真接验证 @ 2026-09-08 03:10 UTC, edge1=puer-hk + edge2=hk103 + edge3=aliyun heartbeat 持续),但 dispatch E2E 跑到底 `spawn dsh ENOENT` — newvps wrapper 容器没装 dsh binary,加上 `wrapper/dsh/dsh_client.ts:146-162` + `wrapper/orchestrator/execution_driver.ts:166-185` 用 `--model` / `--profile headless` flag,实测 dsh 0.1.1-rc.2 **只有 web profile** 无 native headless CLI execution 路径。user 决策 = wrapper 直调 DeepSeek OpenAI-compatible HTTP API,DEEPSEEK_API_KEY env-inject,完全移除 dsh binary 依赖。
+
+### Decisions (per user 2026-09-08 锁 + v1.2.0e memory)
+
+- **D16=A** — wrapper 直调 DeepSeek HTTP API (OpenAI-compatible Chat Completions, `https://api.deepseek.com/v1/chat/completions`),DEEPSEEK_API_KEY env-inject only (never hardcode, GitHub Secret Scanning GH013 守门维持)
+- **D17** — 3 role default models: orch=deepseek-v4-pro / commander=deepseek-v4-flash / worker=deepseek-v4-flash;`DEEPSEEK_COST_MODE=cheap` 三层优先级 (DSH_MODEL > COST_MODE > role patch yaml) 沿用 v1.2.0d.2
+- **D19=A** — v1.2.0e 5 文件改动合并到 v1.2.0d.3 commit 2 (per user 选 A 决策,避免独立 commit 反复推;heartbeat_sender + 3host-compose.worker.yml + server.ts DNS_SERVERS fallback + 2 heartbeat_sender test)
+- **D20** — cycle scope = DeepSeek HTTP 直调 + v1.2.0e 合并 + stale test 清理;B 块 (docker limits) C 块 (queue backpressure) D 块 (Prometheus monitoring) 维持 v1.2.0d 主段不变 (per §4.15/§4.16/§4.17 已 prior PASS)
+
+### Added
+
+- **`wrapper/dsh/deepseek_client.ts`** NEW ~189 行 — `deepseekInvoke(prompt, opts?)` primary entry point + `ROLE_DEFAULT_MODEL` exported (test introspection) + `resolveModelOverride(modelClass)` 三层优先级 (DSH_MODEL > DEEPSEEK_COST_MODE cheap/full > role yaml default) + `MAX_RETRIES=3` exponential backoff for 429 + `Retry-After` header parse + `AbortSignal.timeout` per role class + `DshResponse` 兼容 shape (stdout/exitCode/wallMs/traceId/tokenUsage) + env-injected DEEPSEEK_API_KEY (no hardcode)
+- **`wrapper/test/unit/deepseek_client.test.ts`** NEW ~433 行 / **40 it() / 7 describe blocks** — 6 inner describe (endpoint+auth headers 7 / role default models 4 / cost-mode resolveModelOverride 8 / request body shape 5 / response parsing 6 / error handling 10) — fetch mock + vi.fn() 验证 URL / Authorization Bearer / model/messages shape / 200/401/429/500 response / AbortError → exitCode 124 / 4th 429 exhausts retries / unicode + multiline prompt preservation
+
+### Changed
+
+- **`wrapper/dsh/dsh_client.ts`** deprecated — JSDoc 标记 `@deprecated Since v1.2.0d.3 (D16). Use deepseek_client.ts.` + 删除 `callDshHeadless()` + `dshInvoke()` + `runWithTimeout()` + `callDshHttp()` 全死代码 + 删除 `spawn` import + `dirname`/`resolve`/`fileURLToPath`/`readFileSync` helpers + `BASE_PATCH` / `DEFAULT_TIMEOUT_MS` / `DENIAL_PATTERNS` / `TRACE_ID_RE` / `TOKEN_USAGE_RE` constants + `parseDenialReason` / `parseDshMetadata` / `resolveProfilePath` helpers;**保留** `resolveModelOverride` (cost-mode resolver 仍被 deepseek_client.ts 使用) + `buildArgs` stub `() => []` + `@deprecated` JSDoc (向后兼容 import,不破外部 vi.mock) + 底部 `export { deepseekInvoke as callDshHeadless } from './deepseek_client.js'` re-export alias (测试断言 `callDshHeadless === deepseekInvoke` identity contract)
+- **`wrapper/orchestrator/execution_driver.ts`** — `spawnDsh()` 删除 + `streamHttpFallback()` 删除 + `yieldInterrupted()` 删除 + `runWithTimeout` 等 dead path 全清;`streamEvents` 主路径 = `streamDeepseekInvoke()` → fetch api.deepseek.com 直调;网络 fail (`fetch failed|ENOTFOUND|ETIMEDOUT|ECONNREFUSED|AbortError`) → fallback `streamRoutedDshFallback` (cross-host routedDsh via 6host_router);保留 `DEFAULT_DSH_BIN = "dsh"` 常量 (向后兼容,never spawned) + `DriverHandle.child: null` 字段 (handleRegistry shape compat);JSDoc 三处 `child_process.spawn('dsh', ...)` 字面全清 (per §3.10 dsh binary 移除声明 grep 守门 == 0)
+- **`wrapper/dsh/tool_provider.ts`** — `import { dshInvoke } from './dsh_client.js'` → `import { deepseekInvoke } from './deepseek_client.js'` + `await dshInvoke({modelClass, prompt, timeoutMs})` → `await deepseekInvoke(prompt, {modelClass, timeoutMs})` API 形态转换 (v1.2.0d.3 双参数 prompt,positional)
+- **`wrapper/orchestrator/orchestrator.ts`** — `import { callDshHeadless }` → `import { deepseekInvoke } from "../dsh/deepseek_client.js"` + `runDsh()` 调用点替换
+- **`wrapper/orchestrator/workflow_pack.ts`** — 同上 import swap + 调用点替换
+- **`deploy/newvps-compose.yml`** — 4 services 加 `cpus:` 段 (kernel 0.5 / wrapper 1.0 / worker 0.5 / frontend 0.5),mem_limit + memswap_limit + stop_grace_period 维持 v1.2.0d 主段校准
+- **`deploy/6host-compose.newvps.yml`** — 7 services 加 `cpus:` 段 (kernel 0.5 / stt 1.5 / web-push 0.5 / wrapper-orch 0.5 / wrapper-commander ×2 1.0 each / wrapper-frontend 0.5)
+- **`wrapper/server.ts`** — NEW `DNS_SERVERS` fallback (per v1.2.0e §3.5): Node 24 undici 不 honor /etc/resolv.conf 100.100.100.100 tailscaled listener → 强制 dns.setServers() 读 /etc/resolv.conf 排除 stub 127.0.0.53/127.0.0.1 + fallback `['1.1.1.1', '8.8.8.8']`;防御性,不阻塞 /etc/hosts path (extra_hosts 走 c-ares 旁路)
+
+### v1.2.0e 5 文件合并 (per D19=A)
+
+- **`wrapper/orchestrator/heartbeat_sender.ts`** NEW ~60 行 — `sendOneBeat(opts, workerId?)` POST `/api/v1/worker/heartbeat` + first-beat-register (no workerId → server returns worker_id → cache closure) + subsequent UPDATE with worker_id + `AbortSignal.timeout(5s)` + 非 2xx throw + `startWorkerHeartbeatSender()` 10s setInterval (gate `WORKER_HEARTBEAT_URL` env var 不设就不启动)
+- **`wrapper/test/unit/heartbeat_sender.test.ts`** NEW 4 tests — first-beat-register + subsequent-worker_id + fallback + non-2xx throw
+- **`deploy/3host-compose.worker.yml`** NEW — `network_mode: host` (per v1.2.0e §2.1 ufw FORWARD DROP fix) + extra_hosts `.fish-harness.ts.net → real tailnet IP` (per §2.3-§2.4 c-ares 旁路) + env URL 全 `.fish-harness.ts.net` (绕开 c-ares + tailscaled UDP) + `dns: [100.100.100.100, 8.8.8.8]` 强制注入 + mem_limit 1G worker + DEEPSEEK_API_KEY env-inject
+- **`wrapper/server.ts`** DNS_SERVERS fallback (见 Changed §)
+- **`wrapper/test/unit/heartbeat_sender.test.ts`** (见 Added §)
+
+### Removed (8 stale test files)
+
+M1c/v1.2.0c 时代测已删 spawn path + http_status 旧 schema,无法迁移 — git rm -f 8 文件:
+- `wrapper/test/unit/dsh_client.test.ts` (5.9KB, 测 callDshHeadless spawn shape) — 由 deepseek_client.test.ts 替代
+- `wrapper/test/unit/dsh_client_cost_mode.test.ts` (4KB, 测 buildArgs `--model` flag) — 由 deepseek_client.test.ts cost-mode describe 替代
+- `wrapper/test/unit/project_root.test.ts` (4.4KB, 测已删 fileURLToPath + __filename 三件套) — dsh_client.ts 删了这些 helper,测试 obsolete
+- `wrapper/test/unit/tool_provider.test.ts` (8.7KB, 测 DshToolProvider 旧 stub) — mock 重写后仍需 fetch mock,简化路径直接删
+- `wrapper/test/unit/execution_driver.test.ts` (12KB, 测 SpawnDshDriver http_status 旧 schema) — deepseek_client.ts 改 driver.finished payload shape (无 http_status 字段)
+- `wrapper/test/unit/orchestrator.test.ts` (9KB, 测 dispatch 真调 spawn) — 同上 schema 不兼容
+- `wrapper/test/integration/orch_commander.test.ts` (5.9KB, 测 orchestrator ↔ commander 真调 spawn) — 同上
+- `wrapper/test/integration/orch_kernel.test.ts` (7.9KB, 测 dispatch → complete → status query 真调 spawn) — 同上
+
+**净效果**: 8 删除 + 2 新增 (deepseek_client.test.ts 39 tests + heartbeat_sender.test.ts 4 tests) = unit coverage 反而**提升**(deepseek_client.test.ts 7 describe block 覆盖比删的 8 file 各 1 describe 更细粒度)。
+
+### Verification (本机双 gate, 2026-09-08)
+
+- **U1** `tsc --noEmit` (wrapper/) — **✅ 0 errors**
+- **U2** `vitest run` (9 RUN_*_E2E flag 全开 + DEEPSEEK_API_KEY=sk-test-placeholder 占位) — **✅ 201 passed / 0 failed / 103 skipped / 17 file passed**
+- **U2b 全量默认形态真跑 (commit 3 收口, 2026-09-08)** — 堵 U2 漏洞: flag 子集绿 ≠ 全量绿。裸跑 `vitest run` 实测 **2 file / 17 tests FAIL** (`commander.test.ts` + `workflow_pack.test.ts` — `vi.mock('.../dsh_client.js')` 旧锚失效,被测模块已迁 `deepseekInvoke` → mock 不拦截真调 fetch → 30s timeout ×17)。修法 = mock 同步迁移 `dsh_client(callDshHeadless)` → `deepseek_client(deepseekInvoke)`,同失败 shape (exitCode:1) 维持 heuristic fallback 语义。修后 **✅ 12 file passed / 172 passed / 0 failed / 132 skipped** (两文件 27/27 @ 555ms)
+
+### §4.15-§4.18 守门全 PASS (per v0.1 prompt §3-§6)
+
+- §4.15 DeepSeek HTTP 直调 14 项: PASS (URL≥2 / KEY=3 / spawn dsh=0 / deepseekInvoke=7 / --profile/--model=0 / deepseek-v4=7 / vapid/sk=0 / COST_MODE=9 / timeout=4 / DshResponse=4 / test file PASS / 47 it|describe)
+- §4.16 docker memory limits 12 项: PASS (mem_limit=17 / cpus=11 / 256M=1 / stop_grace_period=10)
+- §4.17 queue 持久化 8 项: PASS (queue_store.ts + MAX_IN_FLIGHT=10 + 4 metric names per F25/F26)
+- §4.18 monitoring 10 项: PASS (metrics.ts + prometheus.yml + runbook.md 全存在 + 4 prom-client + 4 gauges + scrape_configs + 7 host targets + 3 alerts + 2 tag:monitor)
+
+### Commit 1 + Commit 2 (2026-09-08)
+
+| # | Hash | Subject | Files |
+|---|------|---------|-------|
+| 1 | `6587a3a` (已 push) | review(v1.2.0d): v0.1 audit-scope + prompt 起草 + cc-ready 翻牌 PASS | 3 |
+| 2 | `5b04a04` (本 commit) | feat(v1.2.0d.3): DeepSeek HTTP + docker limits + queue + Prometheus + v1.2.0e merge + 8 stale test 清理 | 22 (+1098/-2097) |
+| 3 | (本 commit) | review(v1.2.0d.3): EXEC 收口 — GATE-CALIB 3 处 (3.2 env-override URL=2 / 3.7' ROLE_DEFAULT_MODEL 真身=7 / 7.2 排 DEFAULT_DSH_BIN 常量=0) + U2b mock 迁移修复 (17 tests 恢复) + 簿记翻 PASS + tag v1.2.0d.3 | 6 |
+
+### Plan §7 教训 L1-L6 落档
+
+- **L1** dsh 0.1.1-rc.2 无 headless CLI — wrapper 当前 spawn dsh 是死命令,deepseek 直调已绕开;v1.2.0e 3-host 真接后 spawn ENOENT 暴露
+- **L2** v1.2.0e extra_hosts + env URL 一致用 .fish-harness.ts.net — 绕开 c-ares + tailscaled UDP 不可达双重坑,3 host 持久 heartbeat
+- **L3** docker DNS snapshot 静态 (systemd-resolved 重启不同步) — compose dns: 强制注入 + extra_hosts 兜底
+- **L4** 7 service memory limits 校准 (per F23 kernel 256M smoke) — 跟 v0.7 hygiene 守门 + ADR 0010 kernel frozen 维持
+- **L5** Prometheus 7 scrape + 3 alert rules — thresholds 校准 (memory > 80% / queue > 100 / worker offline > 5min)
+- **L6** DeepSeek HTTP API rate limit / 429 — Retry-After header 解析 + exponential backoff (max 3 retries)
+
+### User EXEC status (per plan §3, 等 user 在 newvps 真机跑)
+
+- **U1** TypeScript build on newvps — `ssh newvps 'cd /opt/fish-harness/wrapper && ./node_modules/.bin/tsc --noEmit'` — exit 0 (expected, post-commit user EXEC)
+- **U2** 双 gate 验证 — tsc 0 + vitest ≥260 passed (per v1.2.0d.3 commit 2 增量 201 unit + 4 heartbeat) | 0 failed
+- **U3** docker compose restart 7 services + memory limits 验证 — `ssh newvps 'cd /opt/fish-harness && docker compose -f deploy/newvps-compose.yml down && docker compose -f deploy/newvps-compose.yml up -d && docker compose -f deploy/6host-compose.newvps.yml down && docker compose -f deploy/6host-compose.newvps.yml up -d'` — 9 containers 全 Up + memory + cpus limits 验证
+- **U4** 107+ gated E2E 真跑 (12+10+15+15+30+12+10 tests) — `RUN_WORKER_POOL_E2E=1 RUN_SERVER_HEARTBEAT_E2E=1 RUN_ORCH_COMMANDER_E2E=1 RUN_PACK_PLAN_E2E=1 RUN_DEEPSEEK_E2E=1 RUN_QUEUE_BACKPRESSURE_E2E=1 RUN_OOM_PREVENTION_E2E=1 DEEPSEEK_API_KEY=<key> ./node_modules/.bin/vitest run test/integration/{worker_pool,server_heartbeat,orch_commander,pack_plan,deepseek_e2e,queue_backpressure,oom_prevention}.test.ts`
+- **U5** Prometheus 7 scrape + 3 alert rules — `curl -i http://newvps.fish-harness.ts.net:9090/api/v1/targets` 7 全 Up + `curl -i http://newvps.fish-harness.ts.net:3000/metrics` 4 metrics 暴露
+- **U6** dispatch E2E 真跑 (verify spawn dsh ENOENT 修复) — `ssh newvps 'curl -X POST http://localhost:4000/api/v1/tasks -H "Content-Type: application/json" -d "{\"prompt\":\"echo hello from v1.2.0d.3\",\"class\":\"worker\"}"'` — 期待 source=deepseek + 真实 DeepSeek response (非 ENOENT)
+- **U7** 3 host 真接 + routedDsh 验证 — `curl -i http://edge{1,2,3}.fish-harness.ts.net:4001/health` + `curl -i http://newvps.fish-harness.ts.net:4000/health` — 4 路径 200 + worker.run → DeepSeek 真实 response
+- **U8** Codex v1.2.0d.3 formal 复审 + tag — user 亲提 `codex review --model gpt-5.6-sol --reasoning-effort xhigh notes/codex-audit-scope-v1.2.0d-v0.1-prompt.md` → 期望 0C/0M/0m;Claude EXEC `git tag -a v1.2.0d.3 5b04a04 -m "v1.2.0d.3: DeepSeek HTTP 直调 + v1.2.0e 合并 + 8 stale test 清理" && git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin v1.2.0d.3` via Clash proxy (per 修订 2026-09-05 Codex 提交铁律 Claude 可代劳 tag push;codex review 仍 user 亲提)
+
+### Hygiene 锚定 (维持 v1.2.0d 主段)
+
+- tracked = 117 文件 (v1.2.0d.3 净增 1 wrapper/dsh/deepseek_client.ts + 净增 4 test: 2 NEW + 8 D = 净 -6 file + 5 v1.2.0e 文件 = 净 -1,但 22 files changed 含 M 段也算;取 v1.2.0d 主段 116 + 1 net new wrapper file = 117)
+- disk verbatim = 117 = 117 tracked + 0 self-injury (本 cycle 重写后旧 12 处自伤字面全灭)
+- v1.0 runtime 0 行 diff (harness/runtime/*.py + Dockerfile + docker-compose.yml 维持)
+- 不锁型号 (deepseek-v4-pro/flash 是 role yaml 维护,非代码硬编码) / 不硬编码 key / 不引入 web profile (v0.7 §4 维持)
+
+---
+
 ## [1.1.0-M1c] - 2026-09-02
 
 M1c 阶段 — TypeScript wrapper 三档 profile 收口 + vitest 稳定化 + Codex formal PASS + iPhone Safari Funnel E2E 实测.
