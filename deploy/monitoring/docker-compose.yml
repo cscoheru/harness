@@ -34,6 +34,15 @@ services:
       deploy_harness_net:
         aliases:
           - prometheus
+    # v1.2.0e.1 hotfix (per U5 verification 2026-09-09): prometheus must
+    # resolve *.fish-harness.ts.net to scrape edge hosts. Docker's embedded
+    # DNS (127.0.0.11) doesn't forward to Tailscale MagicDNS, so explicitly
+    # point at 100.100.100.100 (Tailscale MagicDNS) + 1.1.1.1/8.8.8.8 for
+    # public DNS. Same pattern as 6host-compose.newvps.yml dns: block.
+    dns:
+      - 100.100.100.100
+      - 1.1.1.1
+      - 8.8.8.8
     mem_limit: 512m
     cpus: "0.5"
     stop_grace_period: 30s
