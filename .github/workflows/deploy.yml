@@ -177,7 +177,7 @@ jobs:
           HMAC=$(printf '%s' "$BODY" \
             | openssl dgst -sha256 -hmac "$SECRET" -hex \
             | awk '{print $2}')
-          URL="https://${HOST}.fish-harness.ts.net/webhook"
+          URL="https://${HOST}.tail1b9878.ts.net/webhook"
           echo "POST $URL (HMAC sha256=${HMAC:0:16}...)"
           curl --fail-with-body --max-time 120 \
             -X POST "$URL" \
