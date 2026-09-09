@@ -1,19 +1,27 @@
-# fish-harness v1.2.0d Prometheus config (per D9 + F25 + F28).
+# fish-harness v1.2.0e.1 Prometheus config (per D9 + F25 + F28).
 #
 # Why this exists (per plan §2 D):
-#   - 7 scrape jobs: newvps + 5 edge + macbook
+#   - 8 scrape jobs: newvps ×4 + edge1/2/3 + prometheus self
 #   - 3 alert rules: memory > 80% / queue > 100 / worker offline > 5min
 #   - Tailscale bind (per F28): tag:admin / tag:monitor reach this file
 #
-# Deploy: `docker compose -f deploy/monitoring/prometheus.yml up -d`
-# Self-test: `curl http://newvps:9090/metrics`
+# v1.2.0e.1 hotfix (per U5 verification 2026-09-09): scrape targets now use
+# the REAL Tailscale tailnet suffix `tail1b9878.ts.net` instead of the custom
+# (unregistered) `fish-harness.ts.net`. Tailscale MagicDNS only auto-resolves
+# `*.<tailnet>.ts.net`; the custom suffix was never delegated via split DNS,
+# so every wrapper DNS lookup failed with NXDOMAIN. Long-term fix (v1.2.0f+)
+# is to configure split DNS in the Tailscale admin to delegate
+# `fish-harness.ts.net → 100.100.100.100`. For now, use the auto suffix.
+#
+# Deploy: `docker compose -f deploy/monitoring/docker-compose.yml up -d`
+# Self-test: `curl http://newvps.tail1b9878.ts.net:9090/metrics`
 
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
     monitor: fish-harness
-    cycle: v1.2.0d
+    cycle: v1.2.0e.1
 
 # ── Alert rules (3 per D9) ─────────────────────────────────────────────────
 rule_files:
@@ -31,7 +39,7 @@ scrape_configs:
   - job_name: newvps-orch
     metrics_path: /metrics
     static_configs:
-      - targets: ["newvps.fish-harness.ts.net:4000"]
+      - targets: ["newvps.tail1b9878.ts.net:4000"]
         labels:
           host: newvps
           role: orchestrator
@@ -40,7 +48,7 @@ scrape_configs:
   - job_name: newvps-commander-1
     metrics_path: /metrics
     static_configs:
-      - targets: ["newvps.fish-harness.ts.net:4001"]
+      - targets: ["newvps.tail1b9878.ts.net:4001"]
         labels:
           host: newvps
           role: commander
@@ -49,7 +57,7 @@ scrape_configs:
   - job_name: newvps-commander-2
     metrics_path: /metrics
     static_configs:
-      - targets: ["newvps.fish-harness.ts.net:4003"]
+      - targets: ["newvps.tail1b9878.ts.net:4003"]
         labels:
           host: newvps
           role: commander
@@ -58,7 +66,7 @@ scrape_configs:
   - job_name: newvps-frontend
     metrics_path: /metrics
     static_configs:
-      - targets: ["newvps.fish-harness.ts.net:4002"]
+      - targets: ["newvps.tail1b9878.ts.net:4002"]
         labels:
           host: newvps
           role: frontend
@@ -67,7 +75,7 @@ scrape_configs:
   - job_name: edge1
     metrics_path: /metrics
     static_configs:
-      - targets: ["edge1.fish-harness.ts.net:4001"]
+      - targets: ["edge1.tail1b9878.ts.net:4001"]
         labels:
           host: edge1
           role: wrapper
@@ -75,7 +83,7 @@ scrape_configs:
   - job_name: edge2
     metrics_path: /metrics
     static_configs:
-      - targets: ["edge2.fish-harness.ts.net:4001"]
+      - targets: ["edge2.tail1b9878.ts.net:4001"]
         labels:
           host: edge2
           role: wrapper
@@ -83,7 +91,7 @@ scrape_configs:
   - job_name: edge3
     metrics_path: /metrics
     static_configs:
-      - targets: ["edge3.fish-harness.ts.net:4001"]
+      - targets: ["edge3.tail1b9878.ts.net:4001"]
         labels:
           host: edge3
           role: wrapper
