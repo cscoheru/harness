@@ -3,12 +3,7 @@
   "commit": "v1.2.0e.1 sub-cycle commit 1 audit-scope 起草 (2026-09-09). 2 NEW + 1 EDIT (notes/codex-audit-scope-v1.2.0e.1-v0.1.md + -prompt.md + cc-ready.json flip). Trigger: user 2026-09-09 「v1.2.0e.1 cleanup」 + v1.2.0d.4 EXEC 收口 (commit 73f97fc + tag v1.2.0d.4) memory §4 残留 4 项. Decision 锁 D1 heartbeat host dedup / D2 metrics worker_count wire / D3 prometheus shared external network deploy_harness_net / D4 Tailscale ACL 4000-4003 / D5 edge webhook Node HTTP server :7777 / D6 per-host HMAC secret / D7 edge dns 顺手清 / D8 DEEPSEEK key startup prefix log.",
   "created_at": "2026-09-09T00:00:00Z",
   "branch": "main",
-  "status": "✅ v1.2.0e.1 cleanup cycle CLOSED @ HEAD `3d320ae` main (2026-09-09). 7 commits total (commit 1 audit-scope pre-compact + commit 2 cleanup 4-block + 1d120c2 dns block + e48c583 tailnet suffix + 51220a4 bridge container IPs + 99b1c6e tsx install/per-host compose + 8fc1c95 tsx binary + --remove-orphans + 3d320ae CI URL suffix). U1-U5 PASS + U6 PARTIAL path A (edge1 + edge2 only; aliyun skipped per user auth) + U7 DEFERRED (Tailscale Funnel per-edge setup required before CI matrix can fire). 8 new lessons L1-L8 (M-bug class 第 6 cycle): L1 Tailscale MagicDNS 只 resolve `*.<tailnet>.ts.net` / L2 docker-proxy on lo 不接 MASQUERADE→tun / L3 `node --import tsx` ESM resolver 找不到 global install / L4 orphan container 端口冲突 / L5 systemd Environment= hardcode vs EnvironmentFile= / L6 ssh cwd 不持久 / L7 auto-classifier flag git init + force-checkout / L8 GH013 secret materialization. 双 gate 验证: tsc 0 errors + vitest 189p/0f/165gated + prometheus 7/8 active targets up + edge1 HMAC 401 invalid/process valid + edge2 HMAC 401 invalid/process valid. tag v1.2.0e.1 未推 (per Codex 提交铁律,需 user 推) + Funnel setup per edge (memory §5 含命令) → v1.2.0e.2 闭环。",
-  "files_modified": [
-    "notes/codex-audit-scope-v1.2.0e.1-v0.1.md (NEW ~250 行: §1 context & 边界 + §2 F41-F46 关键发现 + §3 §4.20-§4.25 NEW 守门 + §4 实施分解 2 commits + §5 self-injury 0 + disk 117 + 5 处引用式机制 + §6 教训 L1-L6 + §7 plan self-check)",
-    "notes/codex-audit-scope-v1.2.0e.1-v0.1-prompt.md (NEW ~200 行: §1 8 决策契约 + §2 ~20 文件清单 + §3 §4.20 metrics wire 6 项 + §4 §4.21 prometheus cross-net 10 项 + §5 §4.22 edge webhook 12 项 + §6 §4.23 edge dns 6 项 + §7 §4.24 DEEPSEEK key log 4 项 + §8 §4.25 heartbeat dedup 8 项 + §9 v0.7 hygiene 8 项 + §10 v1.2.0a/b/c/d 守门维持 + §11 引用式 5 处实测 + §12 hygiene 期望)",
-    "docs/poll/cc-ready.json (Edit v1.2.0d.3 -DEEPSEEK-HTTP-EXEC-COMMIT2-PASS → v1.2.0e.1 -CLEANUP-DRAFT 翻牌 (M4: 起草期 -DRAFT))"
-  ],
+  "status": "✅ v1.2.0e.1 cleanup cycle CLOSED + U7 PASS @ HEAD `81b67f5` main (2026-09-09). 8 commits total (commit 1 audit-scope pre-compact + commit 2 cleanup 4-block + 1d120c2 dns block + e48c583 tailnet suffix + 51220a4 bridge container IPs + 99b1c6e tsx install/per-host compose + 8fc1c95 tsx binary + --remove-orphans + 3d320ae CI URL suffix + 81b67f5 Funnel path-strip fix). U1-U5 PASS + U6 PARTIAL path A (edge1 + edge2 only; aliyun skipped per user auth) + U7 PASS path A (Tailscale Funnel admin enabled by user + per-edge setup done + 401 invalid_signature + 200 noop with valid HMAC verified on both edges; edge3 matrix leg skipped per path A). 9 new lessons L1-L9 (M-bug class 第 6 cycle): L1 Tailscale MagicDNS 只 resolve `*.<tailnet>.ts.net` / L2 docker-proxy on lo 不接 MASQUHER→tun / L3 `node --import tsx` ESM resolver 找不到 global install / L4 orphan container 端口冲突 / L5 systemd Environment= hardcode vs EnvironmentFile= / L6 ssh cwd 不持久 / L7 auto-classifier flag git init + force-checkout / L8 GH013 secret materialization / L9 Tailscale Funnel --set-path STRIPS prefix 后端见 /; 双 gate 验证: tsc 0 errors + vitest 10 webhook tests pass + prometheus 7/8 active targets up + edge1 401 invalid/200 noop + edge2 401 invalid/200 noop. tag v1.2.0e.1 → 81b67f5 待 push (per Codex 提交铁律 authorized); CI matrix 预计 2/3 PASS (edge1 + edge2).",
   "files_modified_count": 3,
   "decisions_locked": {
     "D1_heartbeat_dedup_path": "worker_pool 内 fix (findActiveByHost SELECT-then-INSERT; status 'new'|'already_active'; heartbeat_sender 不动)",
@@ -19,7 +14,8 @@
     "D6_edge_webhook_secret": "per-host random 32B (install.sh 生成 → /etc/edge-webhook.env; CI secret EDGE_WEBHOOK_SECRET_<host>; webhook POST 带 X-Hub-Signature-256: sha256=<hmac>)",
     "D7_edge_dns_incidental": "加 dns: 段 per newvps pattern (dns: [100.100.100.100, 1.1.1.1, 8.8.8.8] 加 5 edge compose)",
     "D8_deepseek_key_log": "startup truncated prefix (slice(0,7) 显 sk-3f55 + length; key missing → console.error)",
-    "D9_cycle_name": "v1.2.0e.1 (per v1.2.0d.x 子循环命名延续; tag @ boundary commit 73f97fc = v1.2.0d.4 closure)"
+    "D9_cycle_name": "v1.2.0e.1 (per v1.2.0d.x 子循环命名延续; tag @ U7-verified commit 81b67f5 = v1.2.0e.1 + path-strip fix)",
+    "D10_funnel_set_path_strip": "Funnel `--set-path=/webhook` 剥离前缀,后端见 `/` (L9 教训);edge-pull.ts 同时接受 `/webhook` (direct :7777) 和 `/` (Funnel-routed)"
   },
   "key_findings": {
     "F41": "wrapper/orchestrator/worker_pool.ts:214-235 register() 总是 randomUUID() 创建新 row;无 host dedup → heartbeat_sender 10s 拍每次 register → 1392 stale rows (edge1 实证)",
@@ -27,6 +23,7 @@
     "F43": "deploy/monitoring/docker-compose.yml:35 monitoring_net 是 local bridge;deploy/6host-compose.newvps.yml:275-277 harness_net 也是 local bridge;两 compose 各自独立 → prometheus 不可 reach wrapper",
     "F44": "deploy/tailscale-acl-6host.yaml:109-114 tag:harness:3000,* 与 scrape 目标 :4000-4003 不一致 → 即便 network 通, ACL 也 block",
     "F45": "edge1=puer-hk HEAD 57dae79 (v1.2.0b),落后 main 多个 cycle;deploy/6host-compose.edge[1-3].yml:25 image: node:24-slim + bind-mount ..:/app:ro;.github/workflows/deploy.yml 推 GHCR 不触发 edge pull → edge 跑 stale 代码",
-    "F46": "wrapper/dsh/deepseek_client.ts 无 startup log;puer-hk 容器 env DEEPSEEK_API_KEY=sk-347b9b09... 与 user 真身 sk-3f55470... 漂移 → 排查 key 漂移靠 env grep 慢"
+    "F46": "wrapper/dsh/deepseek_client.ts 无 startup log;puer-hk 容器 env DEEPSEEK_API_KEY=sk-347b9b09... 与 user 真身 sk-3f55470... 漂移 → 排查 key 漂移靠 env grep 慢",
+    "F47": "edge-pull.ts 路径检查 req.url === '/webhook' 不接受 Funnel-stripped 后端 `/` (D10 + L9);Funnel admin enable 后公网 404 not_found;fix 后 401/200 双向验证 PASS"
   }
 }
