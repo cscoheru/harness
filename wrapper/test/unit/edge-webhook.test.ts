@@ -159,6 +159,25 @@ describe("edge-webhook routing", () => {
     await handle(req as IncomingMessage, res as unknown as ServerResponse);
     expect(res.statusCode).toBe(404);
   });
+
+  it("accepts POST / with valid HMAC (Funnel strips /webhook prefix)", async () => {
+    // Tailscale Funnel with --set-path=/webhook strips the matched prefix
+    // before forwarding to the backend, so public POSTs to /webhook arrive
+    // at the Node handler as POST /. The handler must accept both forms.
+    const { handle } = await loadHandler();
+    const commit = "newheadabc456";
+    vi.mocked(cp.spawn)
+      .mockImplementationOnce(makeSuccessSpawn("oldhead1234") as never)
+      .mockImplementationOnce(makeSuccessSpawn("Already up to date.") as never)
+      .mockImplementationOnce(makeSuccessSpawn("") as never)
+      .mockImplementationOnce(makeSuccessSpawn("Container edge-wrapper  Started") as never);
+    const body = JSON.stringify({ ref: "v1.2.0e.2", commit });
+    const req = makeReq("POST", "/", body, sign(body));
+    const res = new FakeRes();
+    await handle(req as IncomingMessage, res as unknown as ServerResponse);
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toMatchObject({ ok: true, status: "reloaded" });
+  });
 });
 
 describe("edge-webhook idempotence", () => {

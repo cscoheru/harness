@@ -100,10 +100,14 @@ function run(cmd: string, args: string[], cwd: string, timeoutMs: number): Promi
 // ─── Request handler (exported for unit testing) ────────────────────────────
 
 export async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  // Only POST /webhook accepted.
-  if (req.method !== "POST" || req.url !== "/webhook") {
+  // Only POST /webhook accepted. Tailscale Funnel with `--set-path=/webhook`
+  // STRIPS that prefix before forwarding, so the backend sees `/` for public
+  // POSTs to `/webhook`; accept both forms (direct :7777 access still uses
+  // `/webhook`, Funnel-routed traffic arrives as `/`).
+  const urlPath = (req.url ?? "/").split("?")[0];
+  if (req.method !== "POST" || (urlPath !== "/webhook" && urlPath !== "/")) {
     res.writeHead(404, { "content-type": "application/json" });
-    res.end(JSON.stringify({ error: "not_found" }));
+    res.end(JSON.stringify({ error: "not_found", path: urlPath }));
     return;
   }
 
