@@ -19,7 +19,7 @@
 | C: Prometheus shared net | 4 (4 EDIT) | D3/D4 决策 — `docker network create deploy_harness_net` + 两 compose external:true + Tailscale ACL 4000-4003 取代 3000 |
 | D: Edge webhook | 8 (4 NEW + 2 EDIT + 2 helper) | D5/D6 决策 — Node 最小 HTTP server :7777 + HMAC SHA-256 + systemd unit + install.sh + CI notify-edge job |
 | E: DEEPSEEK key log | 2 (2 EDIT) | D8 决策 — startup truncated prefix (slice 0-7) + missing error |
-| F: 类型 | 1 (1 EDIT) | `{worker_id, status: 'new'\|'already_active'}` + EdgeWebhook HMAC types |
+| F: 类型 | 1 (1 EDIT) | `RegisterStatus` ("new"\|"already_active") + `WorkerRegisterResult` 导出 (M3 GATE-CALIB: register() dedup = return 已存在 worker_id, 不返回 status 对象) + EdgeWebhook HMAC types |
 | G: edge dns 顺手清 | 5 (5 EDIT) | D7 决策 — edge compose `dns: [100.100.100.100, 1.1.1.1, 8.8.8.8]` (同 newvps pattern) |
 
 ### §1.2 不动范围(v1.2.0e.1 cycle 不触)
@@ -44,7 +44,7 @@
 
 | # | 发现 | 影响 | 解决 |
 |---|------|------|------|
-| **F41** | `wrapper/orchestrator/worker_pool.ts:214-235` `register()` 总是 `randomUUID()` 创建新 row;无 host dedup | heartbeat_sender 10s 拍每次 register → 1392 stale rows(edge1 实证) | D1 修法:`findActiveByHost(host)` SELECT-then-INSERT 模式(SQLite 无 UPSERT);返回 status `already_active` |
+| **F41** | `wrapper/orchestrator/worker_pool.ts:214-235` `register()` 总是 `randomUUID()` 创建新 row;无 host dedup | heartbeat_sender 10s 拍每次 register → 1392 stale rows(edge1 实证) | D1 修法:`findActiveByHost(host)` SELECT-then-INSERT 模式(SQLite 无 UPSERT);dedup 返回已存在 worker_id (M3 GATE-CALIB: impl 不返回 status 对象, RegisterStatus 仅 types.ts 导出) |
 | **F42** | `wrapper/orchestrator/metrics.ts:58-62` `workerCount` Gauge 声明但从未 set;`worker_pool.countActive()` (worker_pool.ts:199-201) 存在 | /metrics 端点 `worker_count 0`;Prometheus `worker_offline` alert 永久 fire | D2 修法:`startMetricsSampling()` 15s interval callback 内加 `workerCount.set(getDefaultWorkerPool().countActive())` |
 | **F43** | `deploy/monitoring/docker-compose.yml:35` `monitoring_net` 是 local bridge;`deploy/6host-compose.newvps.yml:275-277` `harness_net` 也是 local bridge;两 compose 各自独立 | prometheus 在 monitoring_net 不可 reach wrapper 在 harness_net | D3 修法:`docker network create deploy_harness_net` + 两 compose 都 `external: true` join |
 | **F44** | `deploy/tailscale-acl-6host.yaml:109-114` `tag:harness:3000,*` 与 scrape 目标 `:4000-4003` 不一致 | 即便 network 通, ACL 也 block | D4 修法:`tag:harness:4000,4001,4002,4003,*` 取代 3000 |
@@ -88,8 +88,8 @@ grep -c "container_name:" deploy/6host-compose.newvps.yml deploy/3host-compose.w
 
 ### §3.3 §4.20 NEW metrics worker_count 守门 6 项 (per plan §2 commit 1 §4.20)
 ```
-grep -c "workerCount.set\|getDefaultWorkerPool\(\).countActive" wrapper/orchestrator/metrics.ts  # ≥ 2 (post-commit-2)
-grep -rE "workerCount\." wrapper/orchestrator/metrics.ts | wc -l                                  # ≥ 3 (declared + set + reset path)
+grep -c "workerCount.set\|getDefaultWorkerPool\(\).countActive" wrapper/orchestrator/metrics.ts  # ≥ 1 (m5 GATE-CALIB per precommit 审验: L88 单行同含双 pattern, grep 计行不计次 → 实测 1)
+grep -rE "workerCount\." wrapper/orchestrator/metrics.ts | wc -l                                  # ≥ 1 (m1 GATE-CALIB per precommit 审验: 实测 1 — 声明行无尾点 + 无 reset path; 交叉锚 bare `workerCount` = 4)
 grep -rE "worker_count" wrapper/test/unit/metrics.test.ts | wc -l                                  # ≥ 2 (新测试断言)
 ```
 
