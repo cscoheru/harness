@@ -6,7 +6,12 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { deepseekInvoke, resolveModelOverride, ROLE_DEFAULT_MODEL } from '../../dsh/deepseek_client.js';
+import {
+  deepseekInvoke,
+  resolveModelOverride,
+  ROLE_DEFAULT_MODEL,
+  logDeepseekKeyFingerprint,
+} from '../../dsh/deepseek_client.js';
 import type { DshResponse } from '../../dsh/types.js';
 
 // ---------------------------------------------------------------------------
@@ -428,6 +433,56 @@ describe('deepseek_client unit', () => {
       expect(callCount).toBe(4); // initial + 3 retries
     });
 
+  });
+
+  // ============================================================
+  // describe 7 — v1.2.0e.1 NEW (per D8 + F46): key fingerprint log
+  // ============================================================
+  describe('key fingerprint log (D8)', () => {
+    it('logs truncated prefix (slice 0..7) + length, never the full key', () => {
+      const logs: string[] = [];
+      const errs: string[] = [];
+      const origLog = console.log;
+      const origErr = console.error;
+      console.log = (msg: string) => logs.push(msg);
+      console.error = (msg: string) => errs.push(msg);
+      try {
+        process.env.DEEPSEEK_API_KEY = 'sk-TESTFIX-3f55470a1b2c3d4e5f6a7b8c9d0e1f2a';
+        // Reset the idempotency flag inside deepseek_client so the auto-init
+        // log fired at module-load time doesn't pollute our capture.
+        // (We exercise logDeepseekKeyFingerprint directly here.)
+        logDeepseekKeyFingerprint();
+        expect(logs.some((l) => l.includes('key_prefix=sk-TEST'))).toBe(true);
+        expect(logs.some((l) => l.includes('key_len=43'))).toBe(true);
+        // The full key body must NEVER appear in any log line.
+        for (const l of logs) {
+          expect(l).not.toContain('3f55470a1b2c3d4e5f6a7b8c9d0e1f2a');
+        }
+        expect(errs).toHaveLength(0);
+      } finally {
+        console.log = origLog;
+        console.error = origErr;
+      }
+    });
+
+    it('logs FATAL error when DEEPSEEK_API_KEY missing', () => {
+      const logs: string[] = [];
+      const errs: string[] = [];
+      const origLog = console.log;
+      const origErr = console.error;
+      console.log = (msg: string) => logs.push(msg);
+      console.error = (msg: string) => errs.push(msg);
+      try {
+        delete process.env.DEEPSEEK_API_KEY;
+        logDeepseekKeyFingerprint();
+        expect(logs).toHaveLength(0);
+        expect(errs).toHaveLength(1);
+        expect(errs[0]).toContain('FATAL: DEEPSEEK_API_KEY missing');
+      } finally {
+        console.log = origLog;
+        console.error = origErr;
+      }
+    });
   });
 
 });

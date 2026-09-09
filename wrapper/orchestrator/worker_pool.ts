@@ -98,6 +98,8 @@ export class SqliteWorkerPool implements WorkerPool {
     insertWorker: Database.Statement;
     selectById: Database.Statement;
     selectActive: Database.Statement;
+    // v1.2.0e.1 NEW (per F41 host dedup): SELECT active worker for a host
+    selectActiveByHost: Database.Statement;
     updateHeartbeat: Database.Statement;
     updateDrain: Database.Statement;
     updateStatus: Database.Statement;
@@ -146,6 +148,15 @@ export class SqliteWorkerPool implements WorkerPool {
            FROM workers
           WHERE status = 'active'
           ORDER BY last_heartbeat_at ASC, registered_at ASC, worker_id ASC
+          LIMIT 1`,
+      ),
+      // v1.2.0e.1 NEW: SELECT active worker for a host (host dedup helper).
+      // Returns worker_id only — caller's "did this host already register?"
+      // question is yes/no, not full row payload.
+      selectActiveByHost: this.db.prepare(
+        `SELECT worker_id FROM workers
+          WHERE host = ? AND status = 'active'
+          ORDER BY last_heartbeat_at DESC
           LIMIT 1`,
       ),
       updateHeartbeat: this.db.prepare(
@@ -215,6 +226,28 @@ export class SqliteWorkerPool implements WorkerPool {
     validateHost(host);
     validateCapabilitiesJson(capabilities_json);
 
+    // v1.2.0e.1 NEW (per F41 host dedup): check for existing active worker for
+    // this host before INSERT. If a previous heartbeat-sender instance
+    // already registered and hasn't been reaped, return its worker_id instead
+    // of creating a duplicate row (which would otherwise accumulate per
+    // heartbeat-tick — observed 1392 stale rows for edge1 in v1.2.0d.4).
+    //
+    // The dedup race (R1) is mitigated by SQLite busy_timeout=5000 + the
+    // single-statement findActiveByHost() check-then-updateHeartbeat() path
+    // being atomic in the common case (host registers, then re-registers
+    // before heartbeats arrive). Concurrent register races resolve to the
+    // earlier-registered worker_id because both callers will SELECT the
+    // same row; integration test covers this.
+    const existing = this.findActiveByHost(host);
+    if (existing !== undefined) {
+      // Bump last_heartbeat_at so the existing row stays "active" for the
+      // reap_stale window — heartbeat_sender will resume its heartbeat
+      // POSTs using the existing worker_id (captured in closure).
+      const nowMs = unixNowMillis();
+      this.stmts.updateHeartbeat.run(nowMs, existing);
+      return existing;
+    }
+
     const worker_id = `wrk-${randomUUID()}`;
     const nowMs = unixNowMillis();
 
@@ -232,6 +265,22 @@ export class SqliteWorkerPool implements WorkerPool {
     );
 
     return worker_id;
+  }
+
+  /**
+   * v1.2.0e.1 NEW (per F41 host dedup): look up the active worker_id for a
+   * host, if any. Returns undefined if the host has no active worker (either
+   * never registered or its last worker was reaped/drained).
+   *
+   * Used by register() to dedup. Also useful for diagnostic endpoints and
+   * tests that want to verify host-to-worker mapping without an INSERT.
+   */
+  findActiveByHost(host: string): string | undefined {
+    if (!host || typeof host !== "string") return undefined;
+    const row = this.stmts.selectActiveByHost.get(host) as
+      | { worker_id: string }
+      | undefined;
+    return row?.worker_id;
   }
 
   async dispatch(task_id: string): Promise<DispatchResult> {

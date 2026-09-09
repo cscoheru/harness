@@ -82,6 +82,14 @@ export function startWorkerHeartbeatSender(): void {
       .then((id) => { workerId = id; })
       .catch(() => {/* retried on next tick */});
   }, intervalMs);
-  // Don't hold the event loop open just for heartbeats.
-  timer.unref?.();
+  // v1.2.0e.1 L7 (per memory fish-harness-v1.2.0e.1-puerhk-restart-loop-emergency.md):
+  //   Intentionally KEEP this timer ref'd. Earlier versions called
+  //   `timer.unref?.()` here — but in bind-mount + network_mode=host deploys,
+  //   `app.listen()`'s TCP listener does NOT reliably hold the Node event
+  //   loop open on its own; the heartbeat initial POST returns and the loop
+  //   empties, Node exits cleanly with code 0, and docker
+  //   `restart: unless-stopped` immediately restarts (~60s cycle, infinite
+  //   restart loop, daemon pressure). KEEP TIMER REF'D so the heartbeat
+  //   interval holds the loop open alongside app.listen. Confirmed fix on
+  //   puer-hk 2026-09-09: daemon events 30+/5min → 0 after patch.
 }

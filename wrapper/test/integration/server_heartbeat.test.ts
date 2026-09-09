@@ -227,4 +227,40 @@ describeIf("POST /api/v1/worker/heartbeat E2E", () => {
     });
     expect(res.status).toBe(404);
   });
+
+  // ─── v1.2.0e.1 NEW (per D1 + F41): concurrent register races ─────────────
+  // Validates R1 mitigation: SQLite busy_timeout=5000 + atomic check-then-insert
+  // via single prepared statement → all concurrent register calls for the same
+  // host resolve to the SAME worker_id (no duplicate row, no orphaned worker).
+
+  it("v1.2.0e.1: concurrent register of same host resolves to single worker_id", async () => {
+    const CAPS = JSON.stringify({ driver_kind: "codex_exec" });
+    // Fire 8 concurrent register calls for the same host.
+    const responses = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        fetch(`${server.url}/api/v1/worker/heartbeat`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ host: "host-race", capabilities_json: CAPS }),
+        }),
+      ),
+    );
+
+    // All 8 must return 200.
+    for (const r of responses) {
+      expect(r.status).toBe(200);
+    }
+
+    // All 8 must return the SAME worker_id (dedup under contention).
+    const ids = new Set<string>();
+    const bodies = await Promise.all(responses.map((r) => r.json()));
+    for (const b of bodies) {
+      ids.add((b as { worker_id: string }).worker_id);
+    }
+    expect(ids.size).toBe(1);
+
+    // And the pool must report exactly 1 active worker for that host.
+    const pool = (await import("../../orchestrator/worker_pool.js")).getDefaultWorkerPool();
+    expect(pool.countActive()).toBe(1);
+  });
 });

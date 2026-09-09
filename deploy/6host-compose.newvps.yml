@@ -273,7 +273,16 @@ services:
 
 networks:
   harness_net:
+    # v1.2.0e.1 NEW per D3: rename to `deploy_harness_net` (shared external
+    # network) so monitoring/docker-compose.yml's prometheus container can
+    # reach wrapper via the same network. Without `external: true` and the
+    # shared name, prometheus in monitoring_net cannot scrape wrapper on
+    # :4000/:4001 — each compose file creates its own local bridge by
+    # default. Run `docker network create --driver bridge deploy_harness_net`
+    # once on the host before bringing up these stacks.
+    name: deploy_harness_net
     driver: bridge
+    external: true
     # No external exposure; Tailscale Funnel provides HTTPS entrypoint
 
 volumes:

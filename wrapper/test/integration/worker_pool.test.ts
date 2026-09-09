@@ -119,4 +119,35 @@ describeIf("SqliteWorkerPool E2E — full lifecycle", () => {
     expect(info?.status).toBe("active");
     reopened.close();
   });
+
+  // ─── v1.2.0e.1 NEW (per D2 + F42): /metrics endpoint exposes live worker_count ─
+  // Validates R2 mitigation: workerCount gauge wired to
+  // getDefaultWorkerPool().countActive() — observable via Prometheus exposition.
+
+  it("v1.2.0e.1: renderMetrics exposes worker_count = pool.countActive()", async () => {
+    // Register 3 workers against the default singleton (which shares this
+    // file path via env in the e2e setup above).
+    process.env["WORKER_POOL_DB"] = join(tempDir, "metrics-pool.db");
+    const { _resetWorkerPoolForTests, getDefaultWorkerPool } = await import(
+      "../../orchestrator/worker_pool.js"
+    );
+    _resetWorkerPoolForTests();
+    const metricsPool = getDefaultWorkerPool();
+    await metricsPool.register("metrics-host-a", JSON.stringify({ driver_kind: "codex_exec" }));
+    await metricsPool.register("metrics-host-b", JSON.stringify({ driver_kind: "codex_exec" }));
+    await metricsPool.register("metrics-host-c", JSON.stringify({ driver_kind: "codex_exec" }));
+
+    // Wire the metric: mimic the startMetricsSampling() callback.
+    const { workerCount, renderMetrics } = await import("../../orchestrator/metrics.js");
+    workerCount.set(metricsPool.countActive());
+
+    const text = await renderMetrics();
+    expect(text).toMatch(/^worker_count 3$/m);
+    expect(text).toMatch(/^# TYPE worker_count gauge$/m);
+
+    // Cleanup.
+    metricsPool.close();
+    delete process.env["WORKER_POOL_DB"];
+    _resetWorkerPoolForTests();
+  });
 });

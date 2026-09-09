@@ -26,14 +26,27 @@ services:
     ports:
       - "9090:9090"  # Tailscale bind only (no public exposure)
     networks:
-      - monitoring_net
+      # v1.2.0e.1 NEW per D3: prometheus joins the SHARED EXTERNAL network
+      # deploy_harness_net so it can scrape wrapper containers running on
+      # the same shared network (newvps + 5 edge hosts). Without this join,
+      # prometheus sits on its own monitoring_net bridge and DNS-resolves
+      # nothing — every scrape fails with "no such host".
+      deploy_harness_net:
+        aliases:
+          - prometheus
     mem_limit: 512m
     cpus: "0.5"
     stop_grace_period: 30s
 
 networks:
-  monitoring_net:
-    driver: bridge
+  # v1.2.0e.1 NEW per D3: rename monitoring_net → deploy_harness_net and mark
+  # `external: true` so it joins the SAME shared bridge as the wrapper
+  # compose (deploy/6host-compose.newvps.yml). One network, two compose
+  # stacks — that's the whole point. Prereq: `docker network create
+  # --driver bridge deploy_harness_net` once on the host.
+  deploy_harness_net:
+    name: deploy_harness_net
+    external: true
 
 volumes:
   prometheus_data:

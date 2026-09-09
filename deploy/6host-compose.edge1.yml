@@ -47,6 +47,14 @@ services:
       - harness_net
     ports:
       - "4001:4001"
+    # v1.2.0e.1 NEW per D7: Tailscale MagicDNS + public DNS fallback (same as
+    # newvps-compose.yml wrapper service). Without 1.1.1.1/8.8.8.8, containers
+    # can resolve *.fish-harness.ts.net (100.100.100.100) but fail on public
+    # domains like api.deepseek.com (D16 direct call).
+    dns:
+      - 100.100.100.100
+      - 1.1.1.1
+      - 8.8.8.8
     command: ["node", "build/server.js"]
     mem_limit: 1g
     memswap_limit: 1g

@@ -190,6 +190,38 @@ export async function deepseekInvoke(
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * v1.2.0e.1 NEW (per D8 + F46): log a non-secret fingerprint of the API key
+ * at module init time. Helps triage env drift between compose profiles
+ * (e.g., puer-hk container's env showed sk-347b9b09... while the real key
+ * is sk-3f55470...; finding this took an env grep across containers).
+ *
+ * NEVER log the full key or any prefix > 7 chars. `slice(0,7)` only exposes
+ * the vendor prefix + first few chars (e.g., "sk-3f55") — not enough to
+ * reconstruct the secret. Length is non-sensitive.
+ */
+export function logDeepseekKeyFingerprint(): void {
+  const key = process.env.DEEPSEEK_API_KEY;
+  if (!key) {
+    console.error('[deepseek] FATAL: DEEPSEEK_API_KEY missing');
+    return;
+  }
+  const key_prefix = key.slice(0, 7);
+  const key_len = key.length;
+  console.log(`[deepseek] key_prefix=${key_prefix}... key_len=${key_len}`);
+}
+
+// Auto-run at module init — runs once when deepseek_client is first imported.
+// Gated by an idempotent flag so test imports that have already evaluated
+// the module don't re-log on each test.
+let _keyFingerprintLogged = false;
+function _maybeLogKeyFingerprint(): void {
+  if (_keyFingerprintLogged) return;
+  _keyFingerprintLogged = true;
+  logDeepseekKeyFingerprint();
+}
+_maybeLogKeyFingerprint();
+
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }

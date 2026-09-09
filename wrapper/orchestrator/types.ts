@@ -137,11 +137,25 @@ export interface DispatchResult {
 /** Worker pool stub — HTTP/FFI calls to v1.0 SqliteWorkerPool */
 export interface WorkerPool {
   register(host: string, capabilities_json: string): Promise<string>;
+  /** v1.2.0e.1 NEW: find existing active worker for a host (host dedup helper). */
+  findActiveByHost(host: string): string | undefined;
   dispatch(task_id: string): Promise<DispatchResult>;
   heartbeat(worker_id: string): Promise<string>;
   drain(worker_id: string): Promise<string>;
   reap_stale(now_iso: string, threshold_seconds?: number): Promise<number>;
   claim_via_pool(task_id: string): Promise<[attempt_id: string, worker_id: string]>;
+}
+
+/**
+ * v1.2.0e.1 NEW: register() outcome for callers who need to know whether the
+ * returned id was newly registered vs reused from an existing host-active row.
+ * Most callers only need the worker_id and can ignore status; the helper is
+ * exposed for diagnostics + integration tests.
+ */
+export type RegisterStatus = "new" | "already_active";
+export interface RegisterResult {
+  worker_id: string;
+  status: RegisterStatus;
 }
 
 // ─── Event sink ───────────────────────────────────────────────────────────────

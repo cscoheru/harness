@@ -292,7 +292,7 @@ suite('DeepSeek E2E (real api.deepseek.com)', () => {
 });
 
 // Always pass dummy test so vitest reports the suite as discovered
-describe('DeepSeek E2E gate', () => {
+suite('DeepSeek E2E gate', () => {
   it('RUN_E2E flag check', () => {
     expect(typeof process.env.RUN_DEEPSEEK_E2E).toBe('string');
   });

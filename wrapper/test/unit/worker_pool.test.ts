@@ -123,6 +123,47 @@ describe("SqliteWorkerPool — register()", () => {
       pool.register("host-a", null as unknown as string),
     ).rejects.toThrow();
   });
+
+  // ─── v1.2.0e.1 NEW (per D1 + F41): host dedup ─────────────────────────────
+
+  it("v1.2.0e.1: register same host twice returns same worker_id (dedup)", async () => {
+    const wid1 = await pool.register("host-a", SAMPLE_CAPABILITIES);
+    const wid2 = await pool.register("host-a", SAMPLE_CAPABILITIES);
+    expect(wid1).toBe(wid2);
+    // No duplicate row created.
+    expect(pool.countActive()).toBe(1);
+  });
+
+  it("v1.2.0e.1: register different hosts creates different worker_ids", async () => {
+    const widA = await pool.register("host-a", SAMPLE_CAPABILITIES);
+    const widB = await pool.register("host-b", SAMPLE_CAPABILITIES);
+    expect(widA).not.toBe(widB);
+    expect(pool.countActive()).toBe(2);
+  });
+
+  it("v1.2.0e.1: findActiveByHost returns undefined for unknown host", () => {
+    expect(pool.findActiveByHost("nope")).toBeUndefined();
+  });
+
+  it("v1.2.0e.1: findActiveByHost returns worker_id after register", async () => {
+    const wid = await pool.register("host-a", SAMPLE_CAPABILITIES);
+    expect(pool.findActiveByHost("host-a")).toBe(wid);
+  });
+
+  it("v1.2.0e.1: register same host advances last_heartbeat_at (no new row)", async () => {
+    const wid1 = await pool.register("host-a", SAMPLE_CAPABILITIES);
+    const firstHeartbeat = pool.getWorker(wid1)?.last_heartbeat_at;
+    // Wait > 1ms so unixNowMillis() returns strictly newer.
+    await new Promise((r) => setTimeout(r, 5));
+    const wid2 = await pool.register("host-a", SAMPLE_CAPABILITIES);
+    expect(wid2).toBe(wid1);
+    const secondHeartbeat = pool.getWorker(wid1)?.last_heartbeat_at;
+    expect(new Date(secondHeartbeat!).getTime()).toBeGreaterThanOrEqual(
+      new Date(firstHeartbeat!).getTime(),
+    );
+    // countActive() stays at 1 (no duplicate row).
+    expect(pool.countActive()).toBe(1);
+  });
 });
 
 // ─── dispatch() ─────────────────────────────────────────────────────────────

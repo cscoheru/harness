@@ -106,11 +106,16 @@
     },
 
     # Monitor hosts can scrape wrapper /metrics on all harness/edge/macbook
-    # (port 3000 — Prometheus scrapes, NOT data-plane).
+    # (ports 4000-4003 — Prometheus scrapes, NOT data-plane; per v1.2.0d.4
+    # F44, 3000 was a stale port from v1.1 era and blocked all scraping).
     {
       "action": "accept",
       "src": ["tag:monitor"],
-      "dst": ["tag:harness:3000,*", "tag:edge:3000,*", "tag:macbook:3000,*"]
+      "dst": [
+        "tag:harness:4000,4001,4002,4003,*",
+        "tag:edge:4000,4001,4002,4003,*",
+        "tag:macbook:4000,4001,4002,4003,*"
+      ]
     },
 
     # iPhone Safari device: Funnel 443 only (no internal port access)

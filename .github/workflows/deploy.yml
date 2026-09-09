@@ -141,3 +141,47 @@ jobs:
           tags: |
             ${{ needs.build.outputs.image }}:${{ needs.build.outputs.tag }}
             ${{ needs.build.outputs.image }}:latest
+
+  # ---------------------------------------------------------------------
+  # 3. notify-edge — POST GitHub webhook to each of 5 edge hosts so they
+  #    git pull main + rebuild + compose reload. Per-host HMAC secret at
+  #    EDGE_WEBHOOK_SECRET_<host> (set via wrapper/deploy/edge-webhook/install.sh
+  #    on each edge host). Triggered only on `v*` tag pushes (same gate
+  #    as push job above). See docs/deploy/6host-deploy.md §2.4.
+  # ---------------------------------------------------------------------
+  notify-edge:
+    name: Notify edge hosts (webhook pull + reload)
+    needs: push
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [edge1, edge2, edge3, edge4, edge5]
+    steps:
+      - name: POST webhook to ${{ matrix.host }}
+        env:
+          HOST: ${{ matrix.host }}
+          REF: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          SECRET: ${{ secrets[format('EDGE_WEBHOOK_SECRET_{0}', matrix.host)] }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SECRET" ]; then
+            echo "::error::Missing EDGE_WEBHOOK_SECRET_${HOST} secret"
+            exit 1
+          fi
+          BODY=$(printf '{"ref":"%s","commit":"%s","host":"%s"}' "$REF" "$SHA" "$HOST")
+          HMAC=$(printf '%s' "$BODY" \
+            | openssl dgst -sha256 -hmac "$SECRET" -hex \
+            | awk '{print $2}')
+          URL="https://${HOST}.fish-harness.ts.net/webhook"
+          echo "POST $URL (HMAC sha256=${HMAC:0:16}...)"
+          curl --fail-with-body --max-time 120 \
+            -X POST "$URL" \
+            -H "content-type: application/json" \
+            -H "X-Hub-Signature-256: sha256=${HMAC}" \
+            -d "$BODY"
+          echo "OK: edge host $HOST reloaded to $REF"

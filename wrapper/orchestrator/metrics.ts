@@ -23,6 +23,11 @@
 
 import { collectDefaultMetrics, Gauge, Registry } from "prom-client";
 
+// v1.2.0e.1 NEW (per D2 + F42): wire workerCount gauge to worker_pool.
+// ONE-WAY import — metrics.ts → worker_pool.ts — keeps worker_pool.ts free
+// of metrics.ts (no circular dep). worker_pool.ts already has countActive().
+import { getDefaultWorkerPool } from "./worker_pool.js";
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 /** Process-wide Prometheus registry. */
@@ -76,6 +81,11 @@ export function startMetricsSampling(): void {
   const sample = () => {
     const rss = process.memoryUsage().rss;
     memoryUsed.set(Math.round(rss / (1024 * 1024)));
+    // v1.2.0e.1 NEW (per D2 + F42): wire workerCount gauge to live pool.
+    // Previously this gauge was declared but never set — Prometheus's
+    // worker_offline alert would fire forever. countActive() returns the
+    // number of rows with status='active' (after host dedup from D1).
+    workerCount.set(getDefaultWorkerPool().countActive());
   };
   sample();
   _samplingTimer = setInterval(sample, SAMPLE_INTERVAL_MS);

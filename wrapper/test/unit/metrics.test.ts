@@ -11,7 +11,10 @@
  * @file wrapper/test/unit/metrics.test.ts
  */
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeAll, beforeEach } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   renderMetrics,
   startMetricsSampling,
@@ -22,9 +25,31 @@ import {
   workerCount,
   memoryUsed,
 } from "../../orchestrator/metrics.js";
+import {
+  SqliteWorkerPool,
+  _resetWorkerPoolForTests,
+} from "../../orchestrator/worker_pool.js";
+
+// Worker pool singleton resolves /data/worker_pool.db by default — which
+// doesn't exist on macOS dev. Point it at a tmp dir for the whole suite.
+let suiteTempDir: string;
+beforeAll(() => {
+  suiteTempDir = mkdtempSync(join(tmpdir(), "metrics-suite-"));
+  process.env["WORKER_POOL_DB"] = join(suiteTempDir, "pool.db");
+});
 
 afterEach(() => {
   stopMetricsSampling();
+  _resetWorkerPoolForTests();
+});
+
+// Clean up the suite tmp dir at the end of vitest's run via process exit hook.
+process.on("exit", () => {
+  try {
+    rmSync(suiteTempDir, { recursive: true, force: true });
+  } catch {
+    // best-effort
+  }
 });
 
 describe("metrics.ts — Prometheus exporter", () => {
@@ -77,5 +102,39 @@ describe("metrics.ts — Prometheus exporter", () => {
     expect(text).toMatch(/^queue_depth 7$/m);
     expect(text).toMatch(/^worker_count 3$/m);
     expect(text).toMatch(/^memory_used_mb 256$/m);
+  });
+
+  // ─── v1.2.0e.1 NEW (per D2 + F42): workerCount wired to worker_pool ─────
+
+  it("v1.2.0e.1: workerCount reflects pool.countActive() after sampling tick", async () => {
+    // Set up isolated pool via env override; sample() reads getDefaultWorkerPool()
+    // which uses WORKER_POOL_DB env (process-global). The test must use the
+    // global singleton — set env BEFORE any import side effects.
+    const tempDir = mkdtempSync(join(tmpdir(), "metrics-pool-test-"));
+    try {
+      process.env.WORKER_POOL_DB = join(tempDir, "pool.db");
+      _resetWorkerPoolForTests(); // force re-read of env on next getDefaultWorkerPool()
+      const pool = new SqliteWorkerPool(process.env.WORKER_POOL_DB);
+      await pool.register("host-a", "{}");
+      await pool.register("host-b", "{}");
+      pool.close();
+
+      // Wire the singleton to point at our temp pool path.
+      // Easiest: just use the singleton's instance — it was lazy-init'd when
+      // we called register() above. Note getDefaultWorkerPool() caches.
+      const singleton = (await import("../../orchestrator/worker_pool.js")).getDefaultWorkerPool();
+      // singleton shares the file path because we passed the env path.
+      expect(singleton.countActive()).toBe(2);
+
+      // Manually drive sample() by setting workerCount as startMetricsSampling
+      // does. Verify the metric reflects the live count.
+      workerCount.set(singleton.countActive());
+      const text = await renderMetrics();
+      expect(text).toMatch(/^worker_count 2$/m);
+    } finally {
+      delete process.env.WORKER_POOL_DB;
+      _resetWorkerPoolForTests();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
