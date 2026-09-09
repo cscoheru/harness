@@ -162,7 +162,10 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
   }
 
   // Step 3: docker compose up -d (per-host compose file from env).
-  const compose = await run("docker", ["compose", "-f", COMPOSE_FILE, "up", "-d"], REPO_DIR, 120_000);
+  // `--remove-orphans` cleans up any stale containers from prior versions
+  // (e.g. v1.2.0b `harness-edge-worker` vs v1.2.0e.1 `harness-edge1-wrapper`)
+  // whose name no longer matches the compose service, freeing 0.0.0.0:4001.
+  const compose = await run("docker", ["compose", "-f", COMPOSE_FILE, "up", "-d", "--remove-orphans"], REPO_DIR, 120_000);
   if (!compose.ok) {
     console.error(`[edge-webhook] compose up failed: ${compose.stderr}`);
     res.writeHead(500, { "content-type": "application/json" });
