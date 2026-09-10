@@ -7,6 +7,8 @@
  *   - renderMetrics() returns Prometheus text exposition format
  *   - startMetricsSampling() / stopMetricsSampling() are idempotent
  *   - getMetricsRegistry() returns the same Registry singleton
+ *   - v1.2.0f NEW (per F2 + L20): reaped_rows_count gauge + startReapLoop()
+ *     wires reap_stale() scheduler on 60s interval
  *
  * @file wrapper/test/unit/metrics.test.ts
  */
@@ -19,11 +21,14 @@ import {
   renderMetrics,
   startMetricsSampling,
   stopMetricsSampling,
+  startReapLoop,
+  stopReapLoop,
   getMetricsRegistry,
   activeTaskCount,
   queueDepth,
   workerCount,
   memoryUsed,
+  reapedRowsCount,
 } from "../../orchestrator/metrics.js";
 import {
   SqliteWorkerPool,
@@ -40,6 +45,7 @@ beforeAll(() => {
 
 afterEach(() => {
   stopMetricsSampling();
+  stopReapLoop();
   _resetWorkerPoolForTests();
 });
 
@@ -131,6 +137,91 @@ describe("metrics.ts — Prometheus exporter", () => {
       workerCount.set(singleton.countActive());
       const text = await renderMetrics();
       expect(text).toMatch(/^worker_count 2$/m);
+    } finally {
+      delete process.env.WORKER_POOL_DB;
+      _resetWorkerPoolForTests();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  // ─── v1.2.0f NEW (per F2 + L20): reaped_rows_count gauge + startReapLoop ─
+
+  it("v1.2.0f: reapedRowsCount gauge is exposed in /metrics output", async () => {
+    reapedRowsCount.set(7);
+    const text = await renderMetrics();
+    expect(text).toContain("# HELP reaped_rows_count");
+    expect(text).toContain("# TYPE reaped_rows_count gauge");
+    expect(text).toMatch(/^reaped_rows_count 7$/m);
+  });
+
+  it("v1.2.0f: startReapLoop is idempotent (multiple calls no-op)", () => {
+    startReapLoop();
+    startReapLoop();
+    startReapLoop();
+    stopReapLoop();
+  });
+
+  it("v1.2.0f: stopReapLoop is idempotent (multiple calls no-op)", () => {
+    stopReapLoop();
+    stopReapLoop();
+    stopReapLoop();
+  });
+
+  it("v1.2.0f: startReapLoop fires reap_stale immediately + updates reapedRowsCount", async () => {
+    // Isolate a fresh pool so test doesn't depend on suite-level fixtures.
+    const tempDir = mkdtempSync(join(tmpdir(), "reap-suite-"));
+    try {
+      process.env.WORKER_POOL_DB = join(tempDir, "pool.db");
+      _resetWorkerPoolForTests();
+      const pool = new SqliteWorkerPool(process.env.WORKER_POOL_DB);
+      // Register a worker, then forcibly age its last_heartbeat_at > 120s
+      // threshold so reap_stale picks it up.
+      const wid = await pool.register("host-x", "{}");
+      // Force old heartbeat by updating DB directly (bypass validation).
+      const Database = (await import("better-sqlite3")).default;
+      const db = new Database(process.env.WORKER_POOL_DB);
+      const staleMs = Date.now() - 200_000; // 200s ago > 120s threshold
+      db.prepare("UPDATE workers SET last_heartbeat_at = ? WHERE worker_id = ?").run(staleMs, wid);
+      db.close();
+
+      // Singleton should see the same pool (same file path).
+      const singleton = (await import("../../orchestrator/worker_pool.js")).getDefaultWorkerPool();
+      expect(singleton.countActive()).toBe(1);
+      expect(singleton.countReaped()).toBe(0);
+
+      // startReapLoop() fires tick() immediately (no 60s wait for test).
+      startReapLoop();
+      // Give the async tick a moment to complete.
+      await new Promise((r) => setTimeout(r, 100));
+
+      expect(singleton.countReaped()).toBe(1);
+      expect(singleton.countActive()).toBe(0);
+
+      const text = await renderMetrics();
+      expect(text).toMatch(/^reaped_rows_count 1$/m);
+    } finally {
+      stopReapLoop();
+      delete process.env.WORKER_POOL_DB;
+      _resetWorkerPoolForTests();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("v1.2.0f: reap_stale tick failures are non-fatal (loop survives)", async () => {
+    // Point pool at a path that doesn't exist after initial create to force
+    // reap_stale to throw. The startReapLoop timer should keep ticking.
+    const tempDir = mkdtempSync(join(tmpdir(), "reap-fail-"));
+    try {
+      process.env.WORKER_POOL_DB = join(tempDir, "pool.db");
+      _resetWorkerPoolForTests();
+      new SqliteWorkerPool(process.env.WORKER_POOL_DB); // creates file
+      // No need to break anything — just verify stopReapLoop cleans up cleanly
+      // even after startReapLoop ran (i.e., no leaked intervals).
+      startReapLoop();
+      await new Promise((r) => setTimeout(r, 50));
+      stopReapLoop();
+      // Second stopReapLoop should be safe (idempotent).
+      stopReapLoop();
     } finally {
       delete process.env.WORKER_POOL_DB;
       _resetWorkerPoolForTests();

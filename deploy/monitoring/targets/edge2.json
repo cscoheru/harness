@@ -1,0 +1,9 @@
+[
+  {
+    "targets": ["edge2.tail1b9878.ts.net:4001"],
+    "labels": {
+      "host": "edge2",
+      "role": "wrapper"
+    }
+  }
+]

@@ -105,6 +105,10 @@ export class SqliteWorkerPool implements WorkerPool {
     updateStatus: Database.Statement;
     selectStale: Database.Statement;
     countActive: Database.Statement;
+    // v1.2.0f NEW (per F2 + L20): count of workers in 'reaped' status for
+    // Prometheus reaped_rows_total gauge. Cumulative insight into how many
+    // rows the reap_stale scheduler has evicted since process start.
+    countReaped: Database.Statement;
   };
 
   constructor(dbPath?: string) {
@@ -178,6 +182,12 @@ export class SqliteWorkerPool implements WorkerPool {
       countActive: this.db.prepare(
         `SELECT COUNT(*) AS c FROM workers WHERE status = 'active'`,
       ),
+      // v1.2.0f NEW (per F2 + L20): count of reaped workers (since process
+      // start). Note: 'reaped' is terminal — rows stay forever in this state
+      // for forensics; cleanup is a separate concern (see F2 cycle memory).
+      countReaped: this.db.prepare(
+        `SELECT COUNT(*) AS c FROM workers WHERE status = 'reaped'`,
+      ),
     };
   }
 
@@ -209,6 +219,22 @@ export class SqliteWorkerPool implements WorkerPool {
 
   countActive(): number {
     return (this.stmts.countActive.get() as { c: number }).c;
+  }
+
+  /**
+   * v1.2.0f NEW (per F2 + L20): count of workers in 'reaped' status.
+   *
+   * 'reaped' is terminal — rows are NOT deleted (preserved for forensics
+   * per audit-scope §3.5). The reap_stale() scheduler flips stale rows
+   * from active/draining → reaped on a 60s interval (see metrics.ts
+   * startReapLoop). This counter grows monotonically per process lifetime.
+   *
+   * Used by:
+   *   - metrics.ts reapedRowsCount gauge (Prometheus exporter)
+   *   - diagnostic endpoints + tests verifying reap_stale fired
+   */
+  countReaped(): number {
+    return (this.stmts.countReaped.get() as { c: number }).c;
   }
 
   /** Underlying Database handle for integration tests (gated by env). */

@@ -1,0 +1,9 @@
+[
+  {
+    "targets": ["harness-wrapper-orch:4000"],
+    "labels": {
+      "host": "newvps",
+      "role": "orchestrator"
+    }
+  }
+]

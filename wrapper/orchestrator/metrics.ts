@@ -66,9 +66,29 @@ export const workerCount = new Gauge({
   registers: [REGISTRY],
 });
 
+/**
+ * v1.2.0f NEW (per F2 + L20): count of workers in 'reaped' terminal status.
+ * Grows monotonically per process lifetime (rows are never deleted from
+ * workers table, only transitioned active→reaped by reap_stale scheduler).
+ * Backs the worker_offline alert resolution: when this counter stops
+ * growing, no more workers are timing out.
+ */
+export const reapedRowsCount = new Gauge({
+  name: "reaped_rows_count",
+  help: "Number of workers in 'reaped' terminal status (cumulative since process start)",
+  registers: [REGISTRY],
+});
+
 // ─── Sampling ────────────────────────────────────────────────────────────────
 
 let _samplingTimer: NodeJS.Timeout | null = null;
+
+// v1.2.0f NEW (per F2 + L20): independent reap_stale scheduler. Runs on a
+// 60s interval (not 15s like metrics) because reap_stale is a write op
+// (UPDATE workers SET status='reaped') and shouldn't spam the DB.
+let _reapTimer: NodeJS.Timeout | null = null;
+/** Default reap_stale cadence: 60s. */
+const REAP_INTERVAL_MS = 60_000;
 
 /**
  * Start periodic sampling of process metrics (memory_used every 15s).
@@ -96,6 +116,53 @@ export function stopMetricsSampling(): void {
   if (_samplingTimer !== null) {
     clearInterval(_samplingTimer);
     _samplingTimer = null;
+  }
+}
+
+/**
+ * v1.2.0f NEW (per F2 + L20): start the reap_stale scheduler.
+ *
+ * Calls `worker_pool.reap_stale(now_iso, 120)` every 60s. The 120s threshold
+ * matches DEFAULT_REAP_THRESHOLD_SECONDS in worker_pool.ts — workers silent
+ * >120s are transitioned from active/draining → reaped. reapedRowsCount
+ * gauge is updated after each reap tick.
+ *
+ * Edge cases:
+ *   - Idempotent: multiple calls are no-ops (mirrors startMetricsSampling).
+ *   - Non-fatal errors: a failed reap (DB lock, etc.) is logged but does
+ *     NOT stop the timer (transient failures auto-recover next interval).
+ *
+ * Call once at server startup (or lazy-start on first /metrics scrape,
+ * same as startMetricsSampling).
+ */
+export function startReapLoop(): void {
+  if (_reapTimer !== null) return;
+
+  const tick = async () => {
+    try {
+      const pool = getDefaultWorkerPool();
+      const nowIso = new Date().toISOString();
+      const reaped = await pool.reap_stale(nowIso, 120);
+      if (reaped > 0) {
+        console.log(`[metrics] reap_stale: ${reaped} worker(s) reaped`);
+      }
+      reapedRowsCount.set(pool.countReaped());
+    } catch (err) {
+      console.warn(`[metrics] reap_stale tick failed (non-fatal): ${String(err)}`);
+    }
+  };
+
+  // Fire immediately so a fresh process doesn't wait 60s for first cleanup
+  // (this matters for the 982-stale-rows backlog on edge1 from v1.2.0d.4).
+  void tick();
+  _reapTimer = setInterval(() => { void tick(); }, REAP_INTERVAL_MS);
+}
+
+/** Stop the reap scheduler (for graceful shutdown). */
+export function stopReapLoop(): void {
+  if (_reapTimer !== null) {
+    clearInterval(_reapTimer);
+    _reapTimer = null;
   }
 }
 

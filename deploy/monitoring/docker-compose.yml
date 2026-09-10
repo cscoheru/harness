@@ -22,6 +22,15 @@ services:
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./alerts.yml:/etc/prometheus/alerts.yml:ro
+      # v1.2.0f NEW (per F1 + L21): mount the file_sd_configs targets
+      # directory. Each JSON file under targets/ declares one scrape job's
+      # targets + labels. Prometheus watches this directory via the
+      # file_sd_configs block in prometheus.yml. Add a new wrapper host
+      # by dropping a new *.json file (e.g., edge4.json) + restart —
+      # auto-discovered within 15s (refresh_interval in prometheus.yml).
+      # Host-mounted (not named volume) so file changes from the deploy
+      # repo are picked up on the next compose up without volume dance.
+      - ./targets:/etc/prometheus/targets:ro
       - prometheus_data:/prometheus
     ports:
       - "9090:9090"  # Tailscale bind only (no public exposure)

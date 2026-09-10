@@ -317,11 +317,14 @@ registerApiRoute("get", "/api/v1/commander/health", handleCommanderHealth);
 // content-type per Prometheus exposition format spec (v0.0.4).
 const handleMetrics: RouteHandler = async (_req, res) => {
   try {
-    const { renderMetrics, startMetricsSampling } = await import(
+    const { renderMetrics, startMetricsSampling, startReapLoop } = await import(
       "./orchestrator/metrics.js"
     );
     // Lazy-start the 15s RSS sampler on first scrape (idempotent)
     startMetricsSampling();
+    // v1.2.0f NEW (per F2 + L20): also lazy-start the 60s reap_stale
+    // scheduler. Both timers are idempotent so concurrent scrapes are safe.
+    startReapLoop();
     const text = await renderMetrics();
     res.set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
     res.send(text);

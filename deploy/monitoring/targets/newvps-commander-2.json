@@ -1,0 +1,10 @@
+[
+  {
+    "targets": ["harness-wrapper-commander-2:4003"],
+    "labels": {
+      "host": "newvps",
+      "role": "commander",
+      "replica": "2"
+    }
+  }
+]

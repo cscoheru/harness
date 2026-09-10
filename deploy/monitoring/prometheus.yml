@@ -1,17 +1,26 @@
-# fish-harness v1.2.0e.1 Prometheus config (per D9 + F25 + F28).
+# fish-harness v1.2.0f monitoring config (per F1 + L21).
 #
-# Why this exists (per plan §2 D):
+# Why this exists (per plan §2 D + §3 U5):
 #   - 8 scrape jobs: newvps ×4 + edge1/2/3 + prometheus self
 #   - 3 alert rules: memory > 80% / queue > 100 / worker offline > 5min
 #   - Tailscale bind (per F28): tag:admin / tag:monitor reach this file
 #
-# v1.2.0e.1 hotfix (per U5 verification 2026-09-09): scrape targets now use
-# the REAL Tailscale tailnet suffix `tail1b9878.ts.net` instead of the custom
-# (unregistered) `fish-harness.ts.net`. Tailscale MagicDNS only auto-resolves
-# `*.<tailnet>.ts.net`; the custom suffix was never delegated via split DNS,
-# so every wrapper DNS lookup failed with NXDOMAIN. Long-term fix (v1.2.0f+)
-# is to configure split DNS in the Tailscale admin to delegate
-# `fish-harness.ts.net → 100.100.100.100`. For now, use the auto suffix.
+# v1.2.0e.1 hotfix (per U5 verification 2026-09-09): scrape targets use the
+# REAL Tailscale tailnet suffix `tail1b9878.ts.net` for edge hosts. newvps-
+# internal targets use docker container_name (resolved via deploy_harness_net
+# shared network DNS per v1.2.0e.1 D3). MagicDNS only auto-resolves the
+# `*.<tailnet>.ts.net` suffix; the custom `fish-harness.ts.net` was never
+# delegated via split DNS. Long-term fix (v1.2.0g+) is split DNS admin toggle
+# per L1.
+#
+# v1.2.0f NEW (per F1 + L21): scrape_configs switched from inline static_configs
+# (with hardcoded container IPs like 172.25.0.6:4000) to `file_sd_configs`
+# pointing at deploy/monitoring/targets/*.json. Each JSON file declares one
+# job's targets. Adding a new wrapper host = drop a new JSON file + commit.
+# Prom watches the directory every 15s (refresh_interval) and auto-picks up
+# changes without restart. Container IPs no longer pinned — when docker
+# compose restarts and renumbers the bridge, no manual config update needed.
+# This closes the long-standing TODO at the bottom of this file.
 #
 # Deploy: `docker compose -f deploy/monitoring/docker-compose.yml up -d`
 # Self-test: `curl http://newvps.tail1b9878.ts.net:9090/metrics`
@@ -21,13 +30,18 @@ global:
   evaluation_interval: 15s
   external_labels:
     monitor: fish-harness
-    cycle: v1.2.0e.1
+    cycle: v1.2.0f
 
 # ── Alert rules (3 per D9) ─────────────────────────────────────────────────
 rule_files:
   - alerts.yml
 
-# ── Scrape configs (7 hosts per F25) ──────────────────────────────────────
+# ── Scrape configs (file_sd_configs per F1) ────────────────────────────────
+# v1.2.0f NEW: all wrapper jobs (newvps ×4 + 5 edges) moved to file_sd_configs.
+# Each *.json file under /etc/prometheus/targets/ declares one job. Adding a
+# host = drop a JSON file; prometheus auto-discovers within 15s.
+# Edge hosts use Tailscale MagicDNS (tail1b9878.ts.net); newvps containers
+# use docker container_name resolved via the shared deploy_harness_net bridge.
 scrape_configs:
   - job_name: prometheus
     static_configs:
@@ -35,73 +49,17 @@ scrape_configs:
         labels:
           host: prometheus
 
-  # newvps = fish-harness orchestrator (per U5 verification 2026-09-09:
-  # scrape via CONTAINER IP on the shared `deploy_harness_net` bridge,
-  # not via Tailscale IP. docker-proxy on lo refuses container→tun traffic
-  # due to the kernel's local-table route `100.99.5.90 dev lo`. Bridge
-  # gateway 172.25.0.1 routes through docker-proxy cleanly. IPs below
-  # match the wrapper container IPs assigned by docker on deploy_harness_net;
-  # if compose restarts renumber the bridge, run `docker inspect` to find
-  # the new IPs and update this list, or convert to a service-discovery
-  # config block (TODO: v1.2.0f+).
-  - job_name: newvps-orch
+  # All other jobs use file_sd_configs (per F1).
+  # Targets directory mounted at /etc/prometheus/targets/ via
+  # deploy/monitoring/docker-compose.yml volume block.
+  - job_name: file_sd_discovery
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/*.json
+        # Refresh every 15s (matches global scrape_interval). When a JSON
+        # file is added/removed/modified, prometheus re-reads on the next
+        # refresh tick without restart. The targets inherit labels from
+        # the JSON files (host / role / replica), preserving the v1.2.0e.1
+        # labeling scheme.
+        refresh_interval: 15s
     metrics_path: /metrics
-    static_configs:
-      - targets: ["172.25.0.6:4000"]
-        labels:
-          host: newvps
-          role: orchestrator
-
-  # 3 commander replicas on newvps
-  - job_name: newvps-commander-1
-    metrics_path: /metrics
-    static_configs:
-      - targets: ["172.25.0.5:4001"]
-        labels:
-          host: newvps
-          role: commander
-          replica: "1"
-
-  - job_name: newvps-commander-2
-    metrics_path: /metrics
-    static_configs:
-      - targets: ["172.25.0.9:4003"]
-        labels:
-          host: newvps
-          role: commander
-          replica: "2"
-
-  # newvps-frontend has no /metrics endpoint (Next.js app) — this job
-  # intentionally stays 'down' until a metrics exporter is added in v1.2.0f+.
-  - job_name: newvps-frontend
-    metrics_path: /metrics
-    static_configs:
-      - targets: ["172.25.0.7:4002"]
-        labels:
-          host: newvps
-          role: frontend
-
-  # 5 edge hosts — wrapper only (per F25)
-  - job_name: edge1
-    metrics_path: /metrics
-    static_configs:
-      - targets: ["edge1.tail1b9878.ts.net:4001"]
-        labels:
-          host: edge1
-          role: wrapper
-
-  - job_name: edge2
-    metrics_path: /metrics
-    static_configs:
-      - targets: ["edge2.tail1b9878.ts.net:4001"]
-        labels:
-          host: edge2
-          role: wrapper
-
-  - job_name: edge3
-    metrics_path: /metrics
-    static_configs:
-      - targets: ["edge3.tail1b9878.ts.net:4001"]
-        labels:
-          host: edge3
-          role: wrapper
