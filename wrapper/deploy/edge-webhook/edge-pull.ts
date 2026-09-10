@@ -189,10 +189,40 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
   }
   console.log(`[edge-webhook] compose up ok (${composeMs}ms)`);
 
+  // Step 4: self-restart edge-webhook.service so the in-memory process loads
+  // the new source code we just pulled + tsc'd (per L15 / v1.2.0e.3 M-class
+  // gap). Uses `spawn` with `detached: true` + `unref()` so the child runs
+  // independently; `systemctl restart --no-block` makes systemctl return
+  // immediately and let systemd schedule the restart asynchronously. The
+  // current process is SIGTERM'd by systemd after the response is flushed;
+  // the existing SIGTERM handler closes the server gracefully and exits.
+  // Edge cases:
+  //   - If systemctl is unavailable (no systemd), the spawn error is logged
+  //     but the response still returns 200 (the reload already succeeded;
+  //     the next webhook will pick up the new code).
+  //   - If the SIGTERM arrives before res.end() flushes, the response is
+  //     dropped (caller sees connection reset). Mitigated by Node's
+  //     res.end() being synchronous in writing to the OS socket buffer.
+  const restartStart = Date.now();
+  try {
+    const selfRestart = spawn("systemctl", ["restart", "edge-webhook.service", "--no-block"], {
+      detached: true,
+      stdio: "ignore",
+    });
+    selfRestart.unref();
+    selfRestart.on("error", (err) => {
+      console.warn(`[edge-webhook] self-restart spawn error (non-fatal): ${String(err)}`);
+    });
+  } catch (err) {
+    console.warn(`[edge-webhook] self-restart threw (non-fatal): ${String(err)}`);
+  }
+  const restartMs = Date.now() - restartStart;
+  console.log(`[edge-webhook] self-restart scheduled (${restartMs}ms; --no-block)`);
+
   const totalMs = pullMs + buildMs + composeMs;
-  console.log(`[edge-webhook] ok; pulled ${commit.slice(0, 12)} + reloaded; total=${totalMs}ms (pull=${pullMs} build=${buildMs} compose=${composeMs})`);
+  console.log(`[edge-webhook] ok; pulled ${commit.slice(0, 12)} + reloaded; total=${totalMs}ms (pull=${pullMs} build=${buildMs} compose=${composeMs} restart=${restartMs})`);
   res.writeHead(200, { "content-type": "application/json" });
-  res.end(JSON.stringify({ ok: true, status: "reloaded", commit, compose: "up_to_date", elapsed_ms: { pull: pullMs, build: buildMs, compose: composeMs, total: totalMs } }));
+  res.end(JSON.stringify({ ok: true, status: "reloaded", commit, compose: "up_to_date", elapsed_ms: { pull: pullMs, build: buildMs, compose: composeMs, restart: restartMs, total: totalMs + restartMs } }));
 }
 
 // ─── Server boot ────────────────────────────────────────────────────────────

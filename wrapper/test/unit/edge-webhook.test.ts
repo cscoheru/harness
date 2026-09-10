@@ -126,31 +126,31 @@ describe("edge-webhook HMAC verification", () => {
   it("accepts POST with correct HMAC signature → 200", async () => {
     const { handle } = await loadHandler();
     const body = JSON.stringify({ ref: "v1.2.0e.1", commit: "abc1234567890def" });
-    // Mock spawn: 1st call = git rev-parse HEAD returns old commit (not equal to abc1234)
-    // 2nd call = git pull returns success
-    // 3rd call = tsc --incremental returns success (v1.2.0e.3 E1)
-    // 4th call = docker compose up returns success
+    // Mock spawn: 1st = git rev-parse HEAD (old), 2nd = git pull, 3rd = tsc --incremental,
+    // 4th = docker compose up, 5th = systemctl restart --no-block (v1.2.0e.4 NEW)
     vi.mocked(cp.spawn)
       .mockImplementationOnce(makeSuccessSpawn("oldhead1234") as never)
       .mockImplementationOnce(makeSuccessSpawn("Already up to date.") as never)
       .mockImplementationOnce(makeSuccessSpawn("") as never)
-      .mockImplementationOnce(makeSuccessSpawn("Container edge-wrapper  Started") as never);
+      .mockImplementationOnce(makeSuccessSpawn("Container edge-wrapper  Started") as never)
+      .mockImplementationOnce(makeDetachedSpawn() as never);
     const req = makeReq("POST", "/webhook", body, sign(body));
     const res = new FakeRes();
     await handle(req as IncomingMessage, res as unknown as ServerResponse);
     expect(res.statusCode).toBe(200);
     const parsed = JSON.parse(res.body);
     expect(parsed).toMatchObject({ ok: true, status: "reloaded" });
-    // v1.2.0e.3 NEW (E2): elapsed_ms for all 3 steps + total in success response
+    // v1.2.0e.3 + v1.2.0e.4: elapsed_ms for all 4 steps + total in success response
     expect(parsed.elapsed_ms).toMatchObject({
       pull: expect.any(Number),
       build: expect.any(Number),
       compose: expect.any(Number),
+      restart: expect.any(Number),
       total: expect.any(Number),
     });
     // Total should equal sum of parts (within tolerance)
     expect(parsed.elapsed_ms.total).toBeGreaterThanOrEqual(
-      parsed.elapsed_ms.pull + parsed.elapsed_ms.build + parsed.elapsed_ms.compose - 50,
+      parsed.elapsed_ms.pull + parsed.elapsed_ms.build + parsed.elapsed_ms.compose + parsed.elapsed_ms.restart - 50,
     );
   });
 });
@@ -182,7 +182,8 @@ describe("edge-webhook routing", () => {
       .mockImplementationOnce(makeSuccessSpawn("oldhead1234") as never)
       .mockImplementationOnce(makeSuccessSpawn("Already up to date.") as never)
       .mockImplementationOnce(makeSuccessSpawn("") as never)
-      .mockImplementationOnce(makeSuccessSpawn("Container edge-wrapper  Started") as never);
+      .mockImplementationOnce(makeSuccessSpawn("Container edge-wrapper  Started") as never)
+      .mockImplementationOnce(makeDetachedSpawn() as never);
     const body = JSON.stringify({ ref: "v1.2.0e.2", commit });
     const req = makeReq("POST", "/", body, sign(body));
     const res = new FakeRes();
@@ -216,7 +217,8 @@ describe("edge-webhook v1.2.0e.3 incremental tsc (E1)", () => {
       .mockImplementationOnce(makeSuccessSpawn("oldhead1234") as never) // rev-parse
       .mockImplementationOnce(makeSuccessSpawn("Already up to date.") as never) // git pull
       .mockImplementationOnce(makeSuccessSpawn("") as never) // tsc
-      .mockImplementationOnce(makeSuccessSpawn("Container edge-wrapper Started") as never); // compose
+      .mockImplementationOnce(makeSuccessSpawn("Container edge-wrapper Started") as never) // compose
+      .mockImplementationOnce(makeDetachedSpawn() as never); // self-restart (v1.2.0e.4)
     const req = makeReq("POST", "/webhook", body, sign(body));
     const res = new FakeRes();
     await handle(req as IncomingMessage, res as unknown as ServerResponse);
@@ -228,6 +230,55 @@ describe("edge-webhook v1.2.0e.3 incremental tsc (E1)", () => {
     expect(tscCall[1]).toContain("--incremental");
     // cwd must be wrapper dir (3rd arg of spawn)
     expect((tscCall[2] as { cwd?: string }).cwd).toBe("/opt/fish-harness/wrapper");
+  });
+});
+
+describe("edge-webhook v1.2.0e.4 self-restart (chicken-and-egg fix)", () => {
+  it("invokes systemctl restart --no-block with detached option after compose up", async () => {
+    const { handle } = await loadHandler();
+    const body = JSON.stringify({ ref: "v1.2.0e.4", commit: "newheaddef789" });
+    const spawnSpy = vi.mocked(cp.spawn);
+    spawnSpy
+      .mockImplementationOnce(makeSuccessSpawn("oldhead1234") as never) // rev-parse
+      .mockImplementationOnce(makeSuccessSpawn("Already up to date.") as never) // git pull
+      .mockImplementationOnce(makeSuccessSpawn("") as never) // tsc
+      .mockImplementationOnce(makeSuccessSpawn("Container edge-wrapper Started") as never) // compose
+      .mockImplementationOnce(makeDetachedSpawn() as never); // self-restart
+    const req = makeReq("POST", "/webhook", body, sign(body));
+    const res = new FakeRes();
+    await handle(req as IncomingMessage, res as unknown as ServerResponse);
+    expect(res.statusCode).toBe(200);
+
+    // 5th spawn (index 4) = self-restart systemctl
+    const restartCall = spawnSpy.mock.calls[4];
+    expect(restartCall[0]).toBe("systemctl");
+    expect(restartCall[1]).toEqual(["restart", "edge-webhook.service", "--no-block"]);
+    // detached option must be true (so the child runs independently)
+    expect((restartCall[2] as { detached?: boolean }).detached).toBe(true);
+    // stdio should be ignore (we don't capture self-restart output)
+    expect((restartCall[2] as { stdio?: string }).stdio).toBe("ignore");
+  });
+
+  it("survives systemctl spawn error (returns 200 even if restart fails)", async () => {
+    const { handle } = await loadHandler();
+    const body = JSON.stringify({ ref: "v1.2.0e.4", commit: "newheaddef789" });
+    const spawnSpy = vi.mocked(cp.spawn);
+    spawnSpy
+      .mockImplementationOnce(makeSuccessSpawn("oldhead1234") as never)
+      .mockImplementationOnce(makeSuccessSpawn("Already up to date.") as never)
+      .mockImplementationOnce(makeSuccessSpawn("") as never)
+      .mockImplementationOnce(makeSuccessSpawn("Container edge-wrapper Started") as never)
+      // 5th call: systemctl spawn FAILS (e.g., no systemd on host)
+      .mockImplementationOnce(makeFailureSpawn("systemctl: command not found") as never);
+    const req = makeReq("POST", "/webhook", body, sign(body));
+    const res = new FakeRes();
+    await handle(req as IncomingMessage, res as unknown as ServerResponse);
+    // Response must still be 200 because the reload (git pull + tsc + compose) succeeded
+    // The self-restart failure is non-fatal (per L15 + handler design)
+    expect(res.statusCode).toBe(200);
+    const parsed = JSON.parse(res.body);
+    expect(parsed).toMatchObject({ ok: true, status: "reloaded" });
+    expect(parsed.elapsed_ms.restart).toBeGreaterThanOrEqual(0);
   });
 });
 
@@ -308,6 +359,22 @@ function makeFailureSpawn(stderr: string) {
       child.stderr.emit("data", Buffer.from(stderr, "utf8"));
       child.emit("close", 1);
     });
+    return child;
+  };
+}
+
+// v1.2.0e.4 NEW: detached spawn (systemctl restart --no-block). The actual
+// spawn doesn't emit `close` because it's unref'd and runs independently —
+// the test only needs to verify that the spawn was called with the correct
+// args + options. Return a plain EventEmitter with a no-op unref() shim so
+// vi.mock assertions on spawn calls don't crash on cleanup.
+function makeDetachedSpawn() {
+  return () => {
+    const EventEmitter = require("node:events").EventEmitter;
+    const child: any = new EventEmitter();
+    child.stdout = null;
+    child.stderr = null;
+    child.unref = () => child;
     return child;
   };
 }
