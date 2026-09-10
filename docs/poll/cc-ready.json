@@ -56,14 +56,20 @@
     "edge1_evidence": {
       "pre_webhook_HEAD": "5c23664",
       "post_webhook_HEAD": "bd10620",
-      "webhook_log": ["Sep 10 01:47:14 valid signature; ref=v1.2.0e.2 commit=bd106203b8fd", "Sep 10 01:47:53 ok; pulled bd106203b8fd + reloaded"],
+      "webhook_log": [
+        "Sep 10 01:47:14 valid signature; ref=v1.2.0e.2 commit=bd106203b8fd",
+        "Sep 10 01:47:53 ok; pulled bd106203b8fd + reloaded"
+      ],
       "wrapper_container": "harness-edge1-wrapper Up 39 seconds (fresh reload via compose recreate)",
       "reload_latency": "39s = git pull (~1s) + tsc full emit (~30s) + compose up recreate (~8s)"
     },
     "edge2_evidence": {
       "pre_webhook_HEAD": "5c23664",
       "post_webhook_HEAD": "bd10620",
-      "webhook_log": ["Sep 10 01:47:13 valid signature; ref=v1.2.0e.2 commit=bd106203b8fd", "Sep 10 01:47:21 ok; pulled bd106203b8fd + reloaded"],
+      "webhook_log": [
+        "Sep 10 01:47:13 valid signature; ref=v1.2.0e.2 commit=bd106203b8fd",
+        "Sep 10 01:47:21 ok; pulled bd106203b8fd + reloaded"
+      ],
       "wrapper_container": "harness-edge2-wrapper Up 10 hours (bind-mount hot reload, container not recreated)",
       "reload_latency": "8s = git pull (~1s) + tsc incremental (~1s) + process restart (~6s)"
     },
@@ -144,7 +150,12 @@
         "systemctl_ExecMainStartTimestamp": "2026-09-10T03:54:25Z",
         "self_restart_scheduled_ms": 4,
         "total_reload_ms": 4085,
-        "breakdown": { "pull": 1126, "build": 2720, "compose": 239, "restart": 4 },
+        "breakdown": {
+          "pull": 1126,
+          "build": 2720,
+          "compose": 239,
+          "restart": 4
+        },
         "log_evidence": "[edge-webhook] self-restart scheduled (4ms; --no-block) + [edge-webhook] SIGTERM received; closing + new tsx[341361] listening on 127.0.0.1:7777"
       },
       "edge2_hk": {
@@ -154,7 +165,12 @@
         "systemctl_ExecMainStartTimestamp": "2026-09-10T03:54:26Z",
         "self_restart_scheduled_ms": 2,
         "total_reload_ms": 4609,
-        "breakdown": { "pull": 1103, "build": 3317, "compose": 189, "restart": 2 },
+        "breakdown": {
+          "pull": 1103,
+          "build": 3317,
+          "compose": 189,
+          "restart": 2
+        },
         "log_evidence": "[edge-webhook] self-restart scheduled (2ms; --no-block) + [edge-webhook] SIGTERM received; closing + new tsx[970484] listening on 127.0.0.1:7777"
       }
     },
@@ -291,6 +307,58 @@
         "deployment": "需 push + 在 newvps 上 docker exec fish-harness-prometheus kill -HUP 1 (reload config, 15s file_sd refresh 也可) 或 docker compose restart fish-harness-prometheus",
         "deploy_status": "⏸️ DEFERRED (push 待 user 授权, deploy 待 user OOB)"
       }
+    }
+  },
+  "v1.2.0g_wrapper_auto_restart_and_kernel_cap_closure": {
+    "task_id": "T-V1.2.0G-WRAPPER-RESTART-KERNEL-CAP-CLOSURE-PASS",
+    "commit": "v1.2.0g G1 + G6 quick-win sub-cycle (2026-09-10). 2 commits: ccd8577 feat(edge-pull): G1 wrapper container auto-restart (Step 5 docker restart wrapper, parallels v1.2.0e.4 Step 4 self-restart pattern, EDGE_WRAPPER_CONTAINER env var per-host) + 16fca28 fix(kernel): G6 cap harness-kernel restart loop with on-failure:3. 4 file changes (3 MOD G1 + 1 MOD G6, +163/-6 total). Trigger: v1.2.0f cycle closure §7 forward scope G1 (P0 wrapper auto-restart from §3.4 NEW M-class gap) + G6 (P1 harness-kernel restart loop from E3) + user 2026-09-10「push, start v1.2.0g plan」. Tag: v1.2.0g → 16fca28 (annotated, message clean no secrets per L8 hygiene); pushed via Clash proxy per Codex 提交铁律 authorization.",
+    "created_at": "2026-09-10T07:15:00Z",
+    "branch": "main",
+    "status": "✅ v1.2.0g quick-win cycle CLOSED @ HEAD `16fca28` main (2026-09-10). G1 wrapper container auto-restart (P0, NEW M-class gap closure): edge-pull.ts Step 5 docker restart wrapper container (parallels v1.2.0e.4 Step 4 detached+unref+non-fatal pattern). Container name via EDGE_WRAPPER_CONTAINER env var, default `harness-edge1-wrapper` (install.sh writes per-edge value to /etc/edge-webhook.env heredoc). 3 file changes: edge-pull.ts +27 lines Step 5 block (inserted between Step 4 close + restartMs measurement, timing rolls into existing restartMs field) / install.sh +9 lines EDGE_WRAPPER_CONTAINER heredoc entry (with re-run warning to avoid regenerate EDGE_WEBHOOK_SECRET) / edge-webhook.test.ts +120 lines (6th makeDetachedSpawn() mock on 5 existing tests + new describe block 'G1 wrapper container auto-restart' with 3 tests: docker restart wrapper with detached / EDGE_WRAPPER_CONTAINER env var override / survives docker restart spawn error). G6 harness-kernel restart loop fix (P1, E3 closure): deploy/6host-compose.newvps.yml harness-kernel restart: unless-stopped → on-failure:3 + 18-line YAML comment documenting root cause (17h ~1610 cycles @ ~38s/cycle, exitCode=0 clean exit + unless-stopped = runaway loop) + tradeoffs (host reboot no longer auto-restarts kernel, manual `docker start` needed; rare event). Other 7 services retain unless-stopped (they are stable 17h per F1 verification). Why on-failure:3 not on-failure alone: cap 3 restart attempts before stopped state → fail-safe vs infinite loop. Why harness-kernel only: kernel 是唯一 show loop symptom, 其他 services 17h 稳定. 201 unit tests passed (was 198, +3 G1), tsc 0 errors, docker compose config --quiet exit=0, python yaml parse confirmed only harness-kernel uses on-failure:3 (wrapper-orchestrator + stt-worker unchanged). 2 new lessons L22+L23 (M-bug class cycle #12): L22 docker compose up -d 是 no-op for bind-mount + static-image services, container restart is the only way to reload in-memory JS / L23 restart: unless-stopped + exitCode=0 daemon = infinite restart loop, prefer on-failure:N for any daemon known to exit cleanly by design. Pushed via Clash proxy with --follow-tags: `git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin main --follow-tags` → main: e6a373e..16fca28 (2 commits advanced) + new tag v1.2.0g → 16fca28.",
+    "files_modified_count": 4,
+    "G1_wrapper_container_auto_restart_verified": {
+      "edge_pull_ts_change": "+27 lines: Step 5 block. `const wrapperContainer = process.env['EDGE_WRAPPER_CONTAINER'] ?? 'harness-edge1-wrapper'` + try/catch + spawn('docker', ['restart', wrapperContainer], {detached: true, stdio: 'ignore'}) + wrapperRestart.unref() + wrapperRestart.on('error', ...) non-fatal handler. Inserted between Step 4 closing try/catch and `const restartMs = Date.now() - restartStart`, so Step 5 timing rolls into existing restartMs field (no new contract field). Log message updated to `self+wrapper restart scheduled (${restartMs}ms; --no-block + docker restart ${wrapperContainer})`.",
+      "install_sh_change": "+9 lines: append `EDGE_WRAPPER_CONTAINER=harness-edge${EDGE_NUM}-wrapper` to the /etc/edge-webhook.env heredoc alongside EDGE_WEBHOOK_SECRET + EDGE_COMPOSE_FILE. 3-line comment block warns against re-running install.sh on existing edges (regenerates EDGE_WEBHOOK_SECRET → break GitHub webhook HMAC). Existing edges use U2 `echo >>` pattern instead.",
+      "test_changes": "+120 lines: 5 existing 5-mock-chain tests (HMAC verify / Funnel strips / v1.2.0e.3 E1 tsc / v1.2.0e.4 self-restart 1+2) each got 6th `mockImplementationOnce(makeDetachedSpawn())` for Step 5. NEW describe block `v1.2.0g G1 wrapper container auto-restart (Step 5)` with 3 tests: (1) `invokes docker restart wrapper with detached option after Step 4` — verifies `['docker', 'restart', 'harness-edge1-wrapper']` + `detached:true` + `stdio:'ignore'`; (2) `uses EDGE_WRAPPER_CONTAINER env var when set` — sets `harness-edge99-wrapper`, verifies override (cleanup in `finally` to not affect other tests); (3) `survives docker restart spawn error` — makeFailureSpawn('docker: command not found') non-fatal try/catch, returns 200 with elapsed_ms.restart ≥ 0.",
+      "vitest_201_passed": "Test Files 13 passed | 15 skipped (28); Tests 201 passed | 165 skipped (366); Duration 6.72s; was 198, +3 G1 tests",
+      "tsc_0_errors": "verified via `ssh newvps 'cd /opt/fish-harness/wrapper && ./node_modules/.bin/tsc'`",
+      "deployment_status": "⏸️ DEFERRED user OOB: U2 edge hosts need `echo 'EDGE_WRAPPER_CONTAINER=harness-edgeN-wrapper' >> /etc/edge-webhook.env && systemctl restart edge-webhook.service` (avoid reinstall to preserve EDGE_WEBHOOK_SECRET); U4 smoke test POST /webhook to verify Step 5 fires + journalctl shows docker restart harness-edge1-wrapper"
+    },
+    "G6_harness_kernel_restart_loop_cap_verified": {
+      "compose_yaml_change": "+13/-1 lines: `deploy/6host-compose.newvps.yml` harness-kernel service: `restart: unless-stopped` → `restart: on-failure:3`. 18-line YAML comment documents root cause (17h ~1610 cycles @ ~38s/cycle, exitCode=0 clean exit), why on-failure:3 (cap 3 restart attempts before stopped state, fail-safe), tradeoffs (host reboot no longer auto-restarts kernel → manual `docker start harness-kernel` needed; rare event).",
+      "scope_harness_kernel_only": "Other 7 services (wrapper-orchestrator, wrapper-commander, wrapper-commander-2, wrapper-frontend, stt-worker, web-push) retain `unless-stopped` — they are stable 17h per F1 verification, no loop symptom, no need to change restart policy.",
+      "why_no_root_cause_investigation": "harness/ kernel code is frozen v1.0 runtime per ADR 0010 + T-DD-6 冻结规则; investigation belongs to separate repo (out of fish-harness scope). on-failure:3 is safe fail-stop mitigation pending long-term fix.",
+      "yaml_resolved_verification": "via `docker compose -f deploy/6host-compose.newvps.yml config` + python yaml parse: harness-kernel restart=on-failure:3 ✓; wrapper-orchestrator restart=unless-stopped ✓ (unchanged); stt-worker restart=unless-stopped ✓ (unchanged)",
+      "deployment_status": "⏸️ DEFERRED user OOB: U3 `ssh newvps 'cd /opt/fish-harness && git pull && docker compose -f deploy/6host-compose.newvps.yml up -d harness-kernel'`. Expected post-deploy +30 min: `docker inspect harness-kernel --format '{{.State.Status}} {{.RestartCount}}'` shows Status=running RestartCount stable (was incrementing every ~38s pre-fix). Loop symptom CLOSED if RestartCount stable."
+    },
+    "verification_summary": {
+      "tsc": "ssh newvps 'cd /opt/fish-harness/wrapper && ./node_modules/.bin/tsc' → 0 errors",
+      "vitest": "ssh newvps 'cd /opt/fish-harness/wrapper && ./node_modules/.bin/vitest run' → 201 passed (was 198, +3 G1), 0 failed, 13 test files passed",
+      "docker_compose_config": "ssh newvps 'docker compose -f deploy/6host-compose.newvps.yml config --quiet' → exit=0",
+      "yaml_resolve_check": "python3 yaml parse → harness-kernel=on-failure:3, others=unless-stopped ✓",
+      "git_push_via_clash": "`git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin main --follow-tags` → main e6a373e..16fca28 (2 commits) + new tag v1.2.0g → 16fca28",
+      "remote_verify": "`git ls-remote origin v1.2.0g main` → main=16fca2810b4f48f0ffd05a9227dd9b5e9a803cd1 + tag=940563184e1266e29d8f274a04199ec406e47aba (annotated, points to commit 16fca28) ✓"
+    },
+    "new_lessons": {
+      "L22": "docker compose up -d 是 no-op for bind-mount + static-image services. 修改 source code → git pull 改 disk → tsc 重 build/ → `docker compose up -d` 显示 'Already up to date' → wrapper 进程跑 OLD code despite disk updates. 根因: `docker compose up -d` 只在 image 变化或 service config 变化时 recreate 容器; bind-mount + 基础镜像 (无 pinned GHCR tag) = 无 recreate trigger. 修法: webhook handler Step 5 显式 `docker restart <container>`, 利用 edge deploy 必经的 webhook 流程自动 reload in-memory JS. 应用: 任何用 bind-mount + 基础镜像的服务, deploy workflow 必须显式 container restart, 不依赖 docker compose up -d 自动 reload.",
+      "L23": "restart: unless-stopped + exitCode=0 daemon = infinite restart loop. 症状: harness-kernel 17h ~1610 cycles @ ~38s/cycle, exitCode=0 clean exit (类似 v1.2.0e.1 L7 timer.unref() 紧急模式). 根因: unless-stopped triggers immediate restart on ANY exit (clean or crash). daemon 设计上 clean-exit (e.g., python sys.exit(0) after main loop done) → 立即重启 → loop. 修法: on-failure:N cap 最大重试次数 → 多次失败后进入 stopped state → 需人工 `docker start` 才能再起. fail-safe design. 应用: 任何 daemon 设计上 clean-exit (kernel, batch job, one-shot runner) 必须用 on-failure:N 而非 unless-stopped. N=3 适合 critical kernel; N=5+ 适合 transient errors."
+    },
+    "ci_matrix_status": "⏸️ DEFERRED user 亲提 codex review per Codex 提交铁律 (Claude 不触发 CI; codex review = user 亲提 gpt-5.6-sol + xhigh). Tag v1.2.0g push 应触发 GitHub Actions deploy workflow on next user run.",
+    "tag_pushed": {
+      "v1.2.0g": "→ 16fca28 (annotated, message clean no secrets per L8 hygiene, via Clash proxy per Codex 提交铁律 authorization)"
+    },
+    "forward_scope_v1_2_0h": {
+      "G2_aliyun_edge3_install_MEDIUM": "⏸️ DEFERRED (user OOB auth for git init on unconfirmed host pending)",
+      "G4_3_edge_gh_secrets_copy_LOW": "⏸️ DEFERRED (blocked on G2 aliyun install)",
+      "G5_tailscale_split_dns_LOW": "⏸️ DEFERRED (admin toggle required)",
+      "G7_on_failure_N_tune_LOW": "If real kernel crash appears 3 cap 不够, bump to on-failure:5",
+      "G8_wrapper_orchestrator_restart_policy_LOW": "同 G6 模式套到 wrapper-orchestrator (预防未来类似 loop)"
+    },
+    "user_exec_pending": {
+      "U1_ts_vitest_verify": "ssh newvps 'cd /opt/fish-harness/wrapper && ./node_modules/.bin/tsc && ./node_modules/.bin/vitest run' — 自验 PASS 201 tests; post-pull re-verify HEAD=16fca28",
+      "U2_edge_wrapper_container_env": "ssh edge1 'echo \"EDGE_WRAPPER_CONTAINER=harness-edge1-wrapper\" >> /etc/edge-webhook.env && systemctl restart edge-webhook.service' (edge2..edge5 同, container name increments). DO NOT re-run install.sh on existing edges (regenerates EDGE_WEBHOOK_SECRET)",
+      "U3_deploy_g6_yaml_newvps": "ssh newvps 'cd /opt/fish-harness && git pull && docker compose -f deploy/6host-compose.newvps.yml up -d harness-kernel'. Expected post-deploy +30 min: RestartCount stable (not incrementing every ~38s)",
+      "U4_smoke_test_webhook": "curl -X POST https://edge1.fish-harness.ts.net/webhook -H 'X-Hub-Signature-256: sha256=<hmac>' -d '{\"ref\":\"refs/tags/v999.999.999\",\"commit\":\"<HEAD>\"}' → 期望 200 {ok:true, status:'reloaded', elapsed_ms: {pull:N, build:N, compose:N, restart:N, total:N}}; journalctl -u edge-webhook 显示 docker restart harness-edge1-wrapper 触发"
     }
   }
 }
