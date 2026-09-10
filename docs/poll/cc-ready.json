@@ -281,7 +281,16 @@
       "G2_aliyun_edge3_install_MEDIUM": "⏸️ DEFERRED (user OOB auth for git init on unconfirmed host pending)",
       "G3_newvps_sshd_recovery_MEDIUM": "⏸️ DEFERRED (user OOB cloud console restart; sshd dead >48h)",
       "G4_3_edge_gh_secrets_copy_LOW": "⏸️ DEFERRED (blocked on G2 aliyun install)",
-      "G5_tailscale_split_dns_LOW": "⏸️ DEFERRED (admin toggle required)"
+      "G5_tailscale_split_dns_LOW": "⏸️ DEFERRED (admin toggle required)",
+      "G6_harness_kernel_restart_loop_P1": "🐛 NEW 2026-09-10 from F1 deploy verification. harness-kernel container (ghcr.io/cscoheru/fish-harness:1.0.0, Cmd=[python -m harness]) in restart loop: Status=Restarting (0) 38 seconds ago, exitCode=0 (clean exit), 17h uptime 但每个 cycle 仅跑 ~38s (估算 ~1610 cycles). 类似 v1.2.0e.1 L7 timer.unref() 紧急事故模式. 修法候选: A wrapper/orchestrator/kernel_bridge.ts 加 restart 节流 (1-min cooldown after clean exit) / B kernel exit code 非 0 时才 restart (改 docker unless-stopped → on-failure) / C 调查 python -m harness 干净退出的根因. 需 investigate.py -m harness log 找 exit reason; 与 wrapper metrics 无关但 production unstable."
+    },
+    "post_closure_fixes": {
+      "E1_frontend_target_misconfig": {
+        "commit": "fa853b6 fix(monitoring): remove misconfigured newvps-frontend scrape target",
+        "reason": "harness-wrapper-frontend 实际 Cmd=[node build/orchestrator/pwa_server.js] (PWA web server, NOT metrics exporter). v1.2.0f F1 targets/newvps-frontend.json 误配 → prometheus scrape 4002 返回 HTML → target down (1/8 false-positive). 移除目标, F1 deploy verification 期望 7/7 active (was 7/8).",
+        "deployment": "需 push + 在 newvps 上 docker exec fish-harness-prometheus kill -HUP 1 (reload config, 15s file_sd refresh 也可) 或 docker compose restart fish-harness-prometheus",
+        "deploy_status": "⏸️ DEFERRED (push 待 user 授权, deploy 待 user OOB)"
+      }
     }
   }
 }
