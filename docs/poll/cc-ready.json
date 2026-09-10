@@ -25,5 +25,52 @@
     "F45": "edge1=puer-hk HEAD 57dae79 (v1.2.0b),落后 main 多个 cycle;deploy/6host-compose.edge[1-3].yml:25 image: node:24-slim + bind-mount ..:/app:ro;.github/workflows/deploy.yml 推 GHCR 不触发 edge pull → edge 跑 stale 代码",
     "F46": "wrapper/dsh/deepseek_client.ts 无 startup log;puer-hk 容器 env DEEPSEEK_API_KEY=sk-347b9b09... 与 user 真身 sk-3f55470... 漂移 → 排查 key 漂移靠 env grep 慢",
     "F47": "edge-pull.ts 路径检查 req.url === '/webhook' 不接受 Funnel-stripped 后端 `/` (D10 + L9);Funnel admin enable 后公网 404 not_found;fix 后 401/200 双向验证 PASS"
+  },
+  "v1.2.0e.2_e2e_closure": {
+    "task_id": "T-V1.2.0E.2-E2E-CLOSURE-PASS",
+    "commit": "v1.2.0e.2 U7 E2E full pipeline verification (2026-09-10). 1 commit (bd10620 README E2E trigger marker used to create fresh tag for non-noop CI re-trigger). Trigger: user 2026-09-10 '现在我可以测试fish harness了吗' + '跑 #3' (CI matrix E2E authorization). Tag: v1.2.0e.2 → bd10620 (annotated, message clean no secrets per L8 hygiene);pushed via Clash proxy per Codex 提交铁律 authorization. CI matrix run 34426742249 — 4/7 jobs PASS (build + GHCR push + edge1 webhook + edge2 webhook), 3/7 FAIL path A secrets missing (edge3/4/5).",
+    "created_at": "2026-09-10T01:50:00Z",
+    "branch": "main",
+    "status": "✅ v1.2.0e.2 U7 E2E cycle CLOSED @ HEAD `bd10620` main (2026-09-10). 1 commit (bd10620 E2E trigger) + tag v1.2.0e.2 → bd10620. 2/5 edges live (edge1=puer-hk + edge2=hk) with real reload verified (edge1: 39s full tsc + compose recreate;edge2: 8s incremental tsc + bind-mount hot reload). 3/5 edges path A skipped (GH secrets not set for edge3/4/5). Pipeline 5 段全链路实测: tag push → CI build → image push → GitHub webhook → edge HMAC verify → git pull → tsc → docker compose reload. 3 new lessons L12-L14 (M-bug class 第 8 cycle): L12 re-tagging same commit 不触发 CI matrix, must new commit + new tag / L13 edge1 full tsc (30s) vs edge2 incremental tsc (1s) — bind-mount is decisive factor / L14 webhook idempotence via HEAD rev-parse prevents spam reload. 10 forward RISK itemized for v1.2.0f (prometheus file_sd / heartbeat dedup old rows / edge3 aliyun install / newvps sshd OOB recovery / 3 edge GH secrets / Tailscale split DNS / edge1 tsc optimization). next cycle = v1.2.0e.3 quick win (edge1 tsc → tsx --check) OR v1.2.0f big block (file_sd + heartbeat cleanup + edge3 install + newvps sshd + split DNS).",
+    "files_modified_count": 1,
+    "v1.2.0e.2_forward_items_status": {
+      "A_funnel_per_edge_setup": "✅ DONE (edge1 + edge2 setup 2026-09-09;edge3 pending install)",
+      "B_edge_webhook_hmac_e2e": "✅ DONE (401 invalid + 200 noop + 200 reloaded 3 mode 全验证)",
+      "C_tag_v1.2.0e.1_push": "✅ DONE (v1.2.0e.1 → 5c23664 Sept 9;v1.2.0e.2 → bd10620 Sept 10)",
+      "D_ci_matrix_verify": "✅ DONE (run 34426742249 — 2/5 edges PASS path A)",
+      "E_edge_pull_tsc_optimization": "⏸️ DEFERRED v1.2.0f (current 30s full tsc;tsc --check skip emit ~5s)",
+      "F_prometheus_file_sd_configs": "⏸️ DEFERRED v1.2.0f (container IP hardcode 172.25.0.{5,6,7,9} drift on restart)",
+      "G_aliyun_edge3_install": "⏸️ DEFERRED v1.2.0f (user auth for git init on unconfirmed host pending)",
+      "H_heartbeat_dedup_old_rows_cleanup": "⏸️ DEFERRED v1.2.0f (D1 fix committed but 1392 stale rows not cleaned)",
+      "I_newvps_sshd_recovery": "⏸️ DEFERRED (user OOB cloud console restart; sshd dead >48h)"
+    },
+    "ci_matrix_run_34426742249": {
+      "build_smoke": "✅ success",
+      "push_to_ghcr": "✅ success (48s)",
+      "notify_edge1_puer_hk": "✅ success (43s) — HEAD 5c23664 → bd10620 real reload",
+      "notify_edge2_hk": "✅ success (10s) — HEAD 5c23664 → bd10620 real reload (bind-mount hot)",
+      "notify_edge3": "❌ failure (3s) — GH secret EDGE_WEBHOOK_SECRET_edge3 not set (path A skipped)",
+      "notify_edge4": "❌ failure (3s) — GH secret EDGE_WEBHOOK_SECRET_edge4 not set (path A skipped)",
+      "notify_edge5": "❌ failure (4s) — GH secret EDGE_WEBHOOK_SECRET_edge5 not set (path A skipped)"
+    },
+    "edge1_evidence": {
+      "pre_webhook_HEAD": "5c23664",
+      "post_webhook_HEAD": "bd10620",
+      "webhook_log": ["Sep 10 01:47:14 valid signature; ref=v1.2.0e.2 commit=bd106203b8fd", "Sep 10 01:47:53 ok; pulled bd106203b8fd + reloaded"],
+      "wrapper_container": "harness-edge1-wrapper Up 39 seconds (fresh reload via compose recreate)",
+      "reload_latency": "39s = git pull (~1s) + tsc full emit (~30s) + compose up recreate (~8s)"
+    },
+    "edge2_evidence": {
+      "pre_webhook_HEAD": "5c23664",
+      "post_webhook_HEAD": "bd10620",
+      "webhook_log": ["Sep 10 01:47:13 valid signature; ref=v1.2.0e.2 commit=bd106203b8fd", "Sep 10 01:47:21 ok; pulled bd106203b8fd + reloaded"],
+      "wrapper_container": "harness-edge2-wrapper Up 10 hours (bind-mount hot reload, container not recreated)",
+      "reload_latency": "8s = git pull (~1s) + tsc incremental (~1s) + process restart (~6s)"
+    },
+    "new_lessons": {
+      "L12": "re-tagging same commit 不触发 CI matrix, 必须新 commit + 新 tag name. on: push: tags 只对**新增** tag 触发, delete + recreate 不触发. E2E verify 必用 v1.2.0e.<n+1> tag on a fresh commit.",
+      "L13": "edge1 full tsc (30s) vs edge2 incremental tsc (1s) — bind-mount is decisive factor. edge1: ./node_modules/.bin/tsc emit JS. edge2: bind-mount + tsx runtime, tsc only check. v1.2.0f 优化 edge1 → tsx --check skip emit.",
+      "L14": "webhook idempotence via HEAD rev-parse prevents spam reload. edge-pull.ts:142-148 早返守卫: HEAD == payload.commit → 200 noop. 实证: edge1 log Sep 09 15:25:21 '5c23664 commit → already at 5c23664; noop'. 任何 destructive action 必带 idempotence 守门."
+    }
   }
 }
