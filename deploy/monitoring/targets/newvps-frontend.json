@@ -1,9 +1,0 @@
-[
-  {
-    "targets": ["harness-wrapper-frontend:4002"],
-    "labels": {
-      "host": "newvps",
-      "role": "frontend"
-    }
-  }
-]
