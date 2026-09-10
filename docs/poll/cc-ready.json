@@ -72,5 +72,61 @@
       "L13": "edge1 full tsc (30s) vs edge2 incremental tsc (1s) — bind-mount is decisive factor. edge1: ./node_modules/.bin/tsc emit JS. edge2: bind-mount + tsx runtime, tsc only check. v1.2.0f 优化 edge1 → tsx --check skip emit.",
       "L14": "webhook idempotence via HEAD rev-parse prevents spam reload. edge-pull.ts:142-148 早返守卫: HEAD == payload.commit → 200 noop. 实证: edge1 log Sep 09 15:25:21 '5c23664 commit → already at 5c23664; noop'. 任何 destructive action 必带 idempotence 守门."
     }
+  },
+  "v1.2.0e.3_quickwin_closure": {
+    "task_id": "T-V1.2.0E.3-QUICKWIN-CLOSURE-PASS",
+    "commit": "v1.2.0e.3 quick-win sub-cycle (2026-09-10). 1 commit (f3e809c perf(edge-webhook): v1.2.0e.3 E1 tsc --incremental + E2 elapsed_ms per step). Trigger: v1.2.0e.2 closure §6.1 forward scope E1+E2+E3 + user 2026-09-10「请完成全部收口工作,继续v1.2.0e.3」. Tag: v1.2.0e.3 → f3e809c (annotated, message clean no secrets per L8 hygiene); pushed via Clash proxy per Codex 提交铁律 authorization. CI matrix run 34429377437 — 4/7 jobs PASS (build + GHCR + edge1 webhook 10s + edge2 webhook 10s), 3/7 FAIL path A secrets missing (edge3/4/5).",
+    "created_at": "2026-09-10T02:35:00Z",
+    "branch": "main",
+    "status": "✅ v1.2.0e.3 quick-win cycle CLOSED @ HEAD `f3e809c` main (2026-09-10). 1 commit + 3 file changes (.gitignore + edge-pull.ts + edge-webhook.test.ts +71/-15) + tag v1.2.0e.3 → f3e809c. E1 (perf): tsc --incremental flag adds .tsbuildinfo cache; first build 30s (full), subsequent ~4-7s (incremental). E2 (observability): per-step elapsed_ms in success/failure responses + console.log; format { pull, build, compose, total } success 200, partial { pull } / { pull, build } / { pull, build, compose } failure 500. E3 (hygiene): tsconfig test/ exclude already in place per 5c23664 (confirmed via Read); no change. 11 unit tests passed (was 10, +1 for E1 --incremental flag verification); full suite 191 passed / 165 skipped / 0 failed. Real reload verified post-restart: edge1 39s (v1.2.0e.2) → 5.2s (v1.2.0e.3) = 87% reduction (git pull 763ms + incremental tsc 4150ms + compose noop 250ms). edge2 8s → 7.5s (modest, dominated by tsc 6.5s cold cache). 4 new lessons L15-L18 (M-bug class 第 9 cycle): L15 self-updating service 必带 self-restart trigger (chicken-and-egg) / L16 tsc --incremental 在 small codebase 收益 ~2-5s (not 30s→1s) / L17 39s 真正 wins 在 compose noop 而非 tsc (per profile) / L18 HTTP response body 加 elapsed_ms 让外部 monitoring 0 依赖. 1 M-class gap itemized: edge-webhook service self-restart missing (systemd 进程 in-memory 旧代码,disk 上 source 更新不触发 reload). v1.2.0e.4 P0 scope = CI deploy.yml 加 post-webhook ssh step 调 systemctl restart edge-webhook (per L15 方案 B).",
+    "files_modified_count": 3,
+    "perf_verified": {
+      "edge1_puer_hk": {
+        "v1.2.0e.2_total_ms": 39000,
+        "v1.2.0e.3_total_ms": 5163,
+        "reduction_pct": 87,
+        "v1.2.0e.3_breakdown": {
+          "pull_ms": 763,
+          "build_ms": 4150,
+          "compose_ms": 250
+        }
+      },
+      "edge2_hk": {
+        "v1.2.0e.2_total_ms": 8000,
+        "v1.2.0e.3_total_ms": 7491,
+        "reduction_pct": 6,
+        "v1.2.0e.3_breakdown": {
+          "pull_ms": 791,
+          "build_ms": 6516,
+          "compose_ms": 184
+        }
+      }
+    },
+    "new_lessons": {
+      "L15": "self-updating service 必带 self-restart trigger. edge-pull.ts 改自己 → git pull 拉新 source → systemd 进程仍 in-memory 旧代码 (disk 更新不触发 reload). 修法 4 选 1: A handler self-restart via mtime check / B CI deploy.yml ssh systemctl restart / C tsx --watch (dev only) / D systemd ExecStartPost. 推荐 B (CI 加 ssh step) 最干净 + 可控.",
+      "L16": "tsc --incremental 在 small codebase 收益有限 (~2-5s, not 30s→1s). tsc 必须 traverse 整个 type graph 才能判断 changed files, 即使 cache hit 也需 ~3s. 大型 codebase (1k+ files) --incremental 收益显著; 小型主要受益于 elapsed_ms 观测性. 进一步优化: tsc --build + project references / swc / esbuild (10-100x faster).",
+      "L17": "39s 真正 wins 不在 tsc --incremental 而是 compose up 决定不 recreate (image unchanged + bind-mount). v1.2.0e.2 39s 分解: git pull 1s + full tsc 15-20s + compose recreate 15-20s. v1.2.0e.3 5.2s 分解: git pull 0.7s + incremental tsc 4s + compose noop 0.25s. 优化 deploy pipeline 时先 profile 找 dominant cost, 别假设.",
+      "L18": "HTTP response body 加 elapsed_ms 让外部 monitoring 0 依赖. webhook 慢时只能 ssh 上 edge 翻 journalctl (旧模式). handler 直接写 elapsed_ms 进 JSON response, GH Actions step / external monitor 可直接 parse, 便于 SLO 监控. 任何 webhook / RPC handler 必带 timing field."
+    },
+    "m_class_gap": {
+      "title": "edge-webhook service self-restart missing (chicken-and-egg)",
+      "symptom": "v1.2.0e.3 commit f3e809c push 后, edge 收到 webhook POST, git pull 拉新 source 到 disk, 但 systemd edge-webhook.service 进程 (PID 17873) 仍是旧 in-memory 代码. 实证: journalctl 显示 'ok; pulled f3e809c9a8a8 + reloaded' — OLD format, 没 elapsed_ms.",
+      "fix_options": {
+        "A_handler_self_restart_mtime": "LOW complexity, MEDIUM risk (self-restart may hang)",
+        "B_ci_ssh_systemctl_restart_P0_RECOMMENDED": "LOW complexity, LOW risk, clean",
+        "C_tsx_watch_dev_only": "LOW complexity, HIGH risk in prod",
+        "D_systemd_ExecStartPost": "MEDIUM complexity, MEDIUM risk (double reload loop)"
+      },
+      "next_cycle": "v1.2.0e.4 P0: CI deploy.yml 加 post-webhook ssh step 调 systemctl restart edge-webhook (per L15 方案 B)"
+    },
+    "ci_matrix_run_34429377437": {
+      "build_smoke": "✅ success",
+      "push_to_ghcr": "✅ success (48s)",
+      "notify_edge1_puer_hk": "✅ success (10s) — was 39s in v1.2.0e.2 (87% reduction post-restart with E1+E2 code loaded)",
+      "notify_edge2_hk": "✅ success (10s) — was 8s in v1.2.0e.2",
+      "notify_edge3": "❌ failure (3s) — GH secret EDGE_WEBHOOK_SECRET_edge3 not set (path A skipped)",
+      "notify_edge4": "❌ failure (3s) — GH secret EDGE_WEBHOOK_SECRET_edge4 not set (path A skipped)",
+      "notify_edge5": "❌ failure (3s) — GH secret EDGE_WEBHOOK_SECRET_edge5 not set (path A skipped)"
+    }
   }
 }
