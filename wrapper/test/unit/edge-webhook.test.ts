@@ -128,7 +128,7 @@ describe("edge-webhook HMAC verification", () => {
     const body = JSON.stringify({ ref: "v1.2.0e.1", commit: "abc1234567890def" });
     // Mock spawn: 1st call = git rev-parse HEAD returns old commit (not equal to abc1234)
     // 2nd call = git pull returns success
-    // 3rd call = tsc returns success
+    // 3rd call = tsc --incremental returns success (v1.2.0e.3 E1)
     // 4th call = docker compose up returns success
     vi.mocked(cp.spawn)
       .mockImplementationOnce(makeSuccessSpawn("oldhead1234") as never)
@@ -139,7 +139,19 @@ describe("edge-webhook HMAC verification", () => {
     const res = new FakeRes();
     await handle(req as IncomingMessage, res as unknown as ServerResponse);
     expect(res.statusCode).toBe(200);
-    expect(JSON.parse(res.body)).toMatchObject({ ok: true, status: "reloaded" });
+    const parsed = JSON.parse(res.body);
+    expect(parsed).toMatchObject({ ok: true, status: "reloaded" });
+    // v1.2.0e.3 NEW (E2): elapsed_ms for all 3 steps + total in success response
+    expect(parsed.elapsed_ms).toMatchObject({
+      pull: expect.any(Number),
+      build: expect.any(Number),
+      compose: expect.any(Number),
+      total: expect.any(Number),
+    });
+    // Total should equal sum of parts (within tolerance)
+    expect(parsed.elapsed_ms.total).toBeGreaterThanOrEqual(
+      parsed.elapsed_ms.pull + parsed.elapsed_ms.build + parsed.elapsed_ms.compose - 50,
+    );
   });
 });
 
@@ -195,6 +207,30 @@ describe("edge-webhook idempotence", () => {
   });
 });
 
+describe("edge-webhook v1.2.0e.3 incremental tsc (E1)", () => {
+  it("invokes tsc with --incremental flag for incremental compile cache", async () => {
+    const { handle } = await loadHandler();
+    const body = JSON.stringify({ ref: "v1.2.0e.3", commit: "newheadabc456" });
+    const spawnSpy = vi.mocked(cp.spawn);
+    spawnSpy
+      .mockImplementationOnce(makeSuccessSpawn("oldhead1234") as never) // rev-parse
+      .mockImplementationOnce(makeSuccessSpawn("Already up to date.") as never) // git pull
+      .mockImplementationOnce(makeSuccessSpawn("") as never) // tsc
+      .mockImplementationOnce(makeSuccessSpawn("Container edge-wrapper Started") as never); // compose
+    const req = makeReq("POST", "/webhook", body, sign(body));
+    const res = new FakeRes();
+    await handle(req as IncomingMessage, res as unknown as ServerResponse);
+    expect(res.statusCode).toBe(200);
+
+    // 3rd spawn (index 2) = tsc — must include --incremental flag (E1)
+    const tscCall = spawnSpy.mock.calls[2];
+    expect(tscCall[0]).toBe("./node_modules/.bin/tsc");
+    expect(tscCall[1]).toContain("--incremental");
+    // cwd must be wrapper dir (3rd arg of spawn)
+    expect((tscCall[2] as { cwd?: string }).cwd).toBe("/opt/fish-harness/wrapper");
+  });
+});
+
 describe("edge-webhook failure modes", () => {
   it("500 on git pull failure with stderr excerpt", async () => {
     const { handle } = await loadHandler();
@@ -206,8 +242,11 @@ describe("edge-webhook failure modes", () => {
     const res = new FakeRes();
     await handle(req as IncomingMessage, res as unknown as ServerResponse);
     expect(res.statusCode).toBe(500);
-    expect(JSON.parse(res.body)).toMatchObject({ error: "git_pull_failed" });
-    expect(JSON.parse(res.body).stderr).toContain("fatal: not a git repo");
+    const parsed = JSON.parse(res.body);
+    expect(parsed).toMatchObject({ error: "git_pull_failed" });
+    expect(parsed.stderr).toContain("fatal: not a git repo");
+    // v1.2.0e.3 NEW (E2): elapsed_ms reported per step in failure response
+    expect(parsed.elapsed_ms).toMatchObject({ pull: expect.any(Number) });
   });
 
   it("500 on tsc failure", async () => {
@@ -221,8 +260,10 @@ describe("edge-webhook failure modes", () => {
     const res = new FakeRes();
     await handle(req as IncomingMessage, res as unknown as ServerResponse);
     expect(res.statusCode).toBe(500);
-    expect(JSON.parse(res.body)).toMatchObject({ error: "tsc_failed" });
-    expect(JSON.parse(res.body).stderr).toContain("error TS1234");
+    const parsed = JSON.parse(res.body);
+    expect(parsed).toMatchObject({ error: "tsc_failed" });
+    expect(parsed.stderr).toContain("error TS1234");
+    expect(parsed.elapsed_ms).toMatchObject({ pull: expect.any(Number), build: expect.any(Number) });
   });
 
   it("500 on compose up failure", async () => {

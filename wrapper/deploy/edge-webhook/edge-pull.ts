@@ -148,38 +148,51 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
   }
 
   // Step 1: git pull.
+  const pullStart = Date.now();
   const pull = await run("git", ["pull", "origin", "main"], REPO_DIR, 60_000);
+  const pullMs = Date.now() - pullStart;
   if (!pull.ok) {
-    console.error(`[edge-webhook] git pull failed: ${pull.stderr}`);
+    console.error(`[edge-webhook] git pull failed (${pullMs}ms): ${pull.stderr}`);
     res.writeHead(500, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: false, error: "git_pull_failed", stderr: pull.stderr.slice(0, 1000) }));
+    res.end(JSON.stringify({ ok: false, error: "git_pull_failed", elapsed_ms: { pull: pullMs }, stderr: pull.stderr.slice(0, 1000) }));
     return;
   }
+  console.log(`[edge-webhook] git pull ok (${pullMs}ms)`);
 
   // Step 2: rebuild wrapper (host-side, so the bind-mounted /app picks up new code).
-  const build = await run("./node_modules/.bin/tsc", [], `${REPO_DIR}/wrapper`, 120_000);
+  // Use --incremental to keep a .tsbuildinfo cache; first run ~30s (full), subsequent ~1-3s
+  // (only changed files recompiled). Cache file lives at /opt/fish-harness/wrapper/.tsbuildinfo
+  // and is excluded from git via .gitignore.
+  const buildStart = Date.now();
+  const build = await run("./node_modules/.bin/tsc", ["--incremental"], `${REPO_DIR}/wrapper`, 120_000);
+  const buildMs = Date.now() - buildStart;
   if (!build.ok) {
-    console.error(`[edge-webhook] tsc failed: ${build.stderr}`);
+    console.error(`[edge-webhook] tsc failed (${buildMs}ms): ${build.stderr}`);
     res.writeHead(500, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: false, error: "tsc_failed", stderr: build.stderr.slice(0, 1000) }));
+    res.end(JSON.stringify({ ok: false, error: "tsc_failed", elapsed_ms: { pull: pullMs, build: buildMs }, stderr: build.stderr.slice(0, 1000) }));
     return;
   }
+  console.log(`[edge-webhook] tsc ok (${buildMs}ms)`);
 
   // Step 3: docker compose up -d (per-host compose file from env).
   // `--remove-orphans` cleans up any stale containers from prior versions
   // (e.g. v1.2.0b `harness-edge-worker` vs v1.2.0e.1 `harness-edge1-wrapper`)
   // whose name no longer matches the compose service, freeing 0.0.0.0:4001.
+  const composeStart = Date.now();
   const compose = await run("docker", ["compose", "-f", COMPOSE_FILE, "up", "-d", "--remove-orphans"], REPO_DIR, 120_000);
+  const composeMs = Date.now() - composeStart;
   if (!compose.ok) {
-    console.error(`[edge-webhook] compose up failed: ${compose.stderr}`);
+    console.error(`[edge-webhook] compose up failed (${composeMs}ms): ${compose.stderr}`);
     res.writeHead(500, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: false, error: "compose_up_failed", stderr: compose.stderr.slice(0, 1000) }));
+    res.end(JSON.stringify({ ok: false, error: "compose_up_failed", elapsed_ms: { pull: pullMs, build: buildMs, compose: composeMs }, stderr: compose.stderr.slice(0, 1000) }));
     return;
   }
+  console.log(`[edge-webhook] compose up ok (${composeMs}ms)`);
 
-  console.log(`[edge-webhook] ok; pulled ${commit.slice(0, 12)} + reloaded`);
+  const totalMs = pullMs + buildMs + composeMs;
+  console.log(`[edge-webhook] ok; pulled ${commit.slice(0, 12)} + reloaded; total=${totalMs}ms (pull=${pullMs} build=${buildMs} compose=${composeMs})`);
   res.writeHead(200, { "content-type": "application/json" });
-  res.end(JSON.stringify({ ok: true, status: "reloaded", commit, compose: "up_to_date" }));
+  res.end(JSON.stringify({ ok: true, status: "reloaded", commit, compose: "up_to_date", elapsed_ms: { pull: pullMs, build: buildMs, compose: composeMs, total: totalMs } }));
 }
 
 // ─── Server boot ────────────────────────────────────────────────────────────
