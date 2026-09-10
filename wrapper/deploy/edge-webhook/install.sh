@@ -52,6 +52,15 @@ cat > "$ENV_FILE" <<EOF
 # Operator must copy the EDGE_WEBHOOK_SECRET value to GitHub secrets.
 EDGE_WEBHOOK_SECRET=$SECRET
 EDGE_COMPOSE_FILE=/opt/fish-harness/deploy/6host-compose.edge${EDGE_NUM}.yml
+# v1.2.0g NEW (per G1): per-host wrapper container name for Step 5 docker restart.
+# Step 5 fires `docker restart <container>` after Step 4 self-restart to reload
+# in-memory bind-mount code (closes v1.2.0f NEW M-class gap). Defaults to
+# harness-edge1-wrapper if env var missing. For existing edges, append manually:
+#   echo "EDGE_WRAPPER_CONTAINER=harness-edgeN-wrapper" >> /etc/edge-webhook.env
+#   systemctl restart edge-webhook.service
+# DO NOT re-run install.sh on existing edges — it regenerates EDGE_WEBHOOK_SECRET
+# and breaks the GitHub webhook HMAC signature.
+EDGE_WRAPPER_CONTAINER=harness-edge${EDGE_NUM}-wrapper
 EOF
 chmod 600 "$ENV_FILE"
 chown root:root "$ENV_FILE"

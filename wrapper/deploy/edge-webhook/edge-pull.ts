@@ -216,8 +216,32 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
   } catch (err) {
     console.warn(`[edge-webhook] self-restart threw (non-fatal): ${String(err)}`);
   }
+
+  // v1.2.0g NEW (per G1): Step 5 docker restart wrapper container so the
+  // bind-mount + node build/server.js in-memory JS reloads. Parallels Step 4
+  // pattern (detached + unref + non-fatal). Container name per-host via
+  // EDGE_WRAPPER_CONTAINER env var (default harness-edge1-wrapper; install.sh
+  // writes per-edge value to /etc/edge-webhook.env). docker restart default =
+  // 10s SIGTERM grace then SIGKILL — acceptable ~1-2s wrapper downtime per
+  // edge deploy. Root cause: `docker compose up -d` is a no-op when image +
+  // config unchanged, so the running container keeps OLD in-memory code
+  // despite disk updates. Step 5 closes this v1.2.0f NEW M-class gap.
+  const wrapperContainer = process.env["EDGE_WRAPPER_CONTAINER"] ?? "harness-edge1-wrapper";
+  try {
+    const wrapperRestart = spawn("docker", ["restart", wrapperContainer], {
+      detached: true,
+      stdio: "ignore",
+    });
+    wrapperRestart.unref();
+    wrapperRestart.on("error", (err) => {
+      console.warn(`[edge-webhook] docker restart ${wrapperContainer} spawn error (non-fatal): ${String(err)}`);
+    });
+  } catch (err) {
+    console.warn(`[edge-webhook] docker restart ${wrapperContainer} threw (non-fatal): ${String(err)}`);
+  }
+
   const restartMs = Date.now() - restartStart;
-  console.log(`[edge-webhook] self-restart scheduled (${restartMs}ms; --no-block)`);
+  console.log(`[edge-webhook] self+wrapper restart scheduled (${restartMs}ms; --no-block + docker restart ${wrapperContainer})`);
 
   const totalMs = pullMs + buildMs + composeMs;
   console.log(`[edge-webhook] ok; pulled ${commit.slice(0, 12)} + reloaded; total=${totalMs}ms (pull=${pullMs} build=${buildMs} compose=${composeMs} restart=${restartMs})`);

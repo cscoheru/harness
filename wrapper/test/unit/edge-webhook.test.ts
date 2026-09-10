@@ -127,12 +127,14 @@ describe("edge-webhook HMAC verification", () => {
     const { handle } = await loadHandler();
     const body = JSON.stringify({ ref: "v1.2.0e.1", commit: "abc1234567890def" });
     // Mock spawn: 1st = git rev-parse HEAD (old), 2nd = git pull, 3rd = tsc --incremental,
-    // 4th = docker compose up, 5th = systemctl restart --no-block (v1.2.0e.4 NEW)
+    // 4th = docker compose up, 5th = systemctl restart --no-block (v1.2.0e.4 NEW),
+    // 6th = docker restart wrapper (v1.2.0g NEW per G1) — also detached + unref
     vi.mocked(cp.spawn)
       .mockImplementationOnce(makeSuccessSpawn("oldhead1234") as never)
       .mockImplementationOnce(makeSuccessSpawn("Already up to date.") as never)
       .mockImplementationOnce(makeSuccessSpawn("") as never)
       .mockImplementationOnce(makeSuccessSpawn("Container edge-wrapper  Started") as never)
+      .mockImplementationOnce(makeDetachedSpawn() as never)
       .mockImplementationOnce(makeDetachedSpawn() as never);
     const req = makeReq("POST", "/webhook", body, sign(body));
     const res = new FakeRes();
@@ -183,6 +185,7 @@ describe("edge-webhook routing", () => {
       .mockImplementationOnce(makeSuccessSpawn("Already up to date.") as never)
       .mockImplementationOnce(makeSuccessSpawn("") as never)
       .mockImplementationOnce(makeSuccessSpawn("Container edge-wrapper  Started") as never)
+      .mockImplementationOnce(makeDetachedSpawn() as never)
       .mockImplementationOnce(makeDetachedSpawn() as never);
     const body = JSON.stringify({ ref: "v1.2.0e.2", commit });
     const req = makeReq("POST", "/", body, sign(body));
@@ -214,11 +217,15 @@ describe("edge-webhook v1.2.0e.3 incremental tsc (E1)", () => {
     const body = JSON.stringify({ ref: "v1.2.0e.3", commit: "newheadabc456" });
     const spawnSpy = vi.mocked(cp.spawn);
     spawnSpy
+      // Mock spawn: 1st = git rev-parse HEAD (old), 2nd = git pull, 3rd = tsc --incremental,
+      // 4th = docker compose up, 5th = systemctl restart --no-block (v1.2.0e.4),
+      // 6th = docker restart wrapper (v1.2.0g G1)
       .mockImplementationOnce(makeSuccessSpawn("oldhead1234") as never) // rev-parse
       .mockImplementationOnce(makeSuccessSpawn("Already up to date.") as never) // git pull
       .mockImplementationOnce(makeSuccessSpawn("") as never) // tsc
       .mockImplementationOnce(makeSuccessSpawn("Container edge-wrapper Started") as never) // compose
-      .mockImplementationOnce(makeDetachedSpawn() as never); // self-restart (v1.2.0e.4)
+      .mockImplementationOnce(makeDetachedSpawn() as never) // self-restart (v1.2.0e.4)
+      .mockImplementationOnce(makeDetachedSpawn() as never); // docker restart wrapper (v1.2.0g G1)
     const req = makeReq("POST", "/webhook", body, sign(body));
     const res = new FakeRes();
     await handle(req as IncomingMessage, res as unknown as ServerResponse);
@@ -243,7 +250,8 @@ describe("edge-webhook v1.2.0e.4 self-restart (chicken-and-egg fix)", () => {
       .mockImplementationOnce(makeSuccessSpawn("Already up to date.") as never) // git pull
       .mockImplementationOnce(makeSuccessSpawn("") as never) // tsc
       .mockImplementationOnce(makeSuccessSpawn("Container edge-wrapper Started") as never) // compose
-      .mockImplementationOnce(makeDetachedSpawn() as never); // self-restart
+      .mockImplementationOnce(makeDetachedSpawn() as never) // self-restart (Step 4)
+      .mockImplementationOnce(makeDetachedSpawn() as never); // docker restart wrapper (Step 5, v1.2.0g G1)
     const req = makeReq("POST", "/webhook", body, sign(body));
     const res = new FakeRes();
     await handle(req as IncomingMessage, res as unknown as ServerResponse);
@@ -269,7 +277,10 @@ describe("edge-webhook v1.2.0e.4 self-restart (chicken-and-egg fix)", () => {
       .mockImplementationOnce(makeSuccessSpawn("") as never)
       .mockImplementationOnce(makeSuccessSpawn("Container edge-wrapper Started") as never)
       // 5th call: systemctl spawn FAILS (e.g., no systemd on host)
-      .mockImplementationOnce(makeFailureSpawn("systemctl: command not found") as never);
+      .mockImplementationOnce(makeFailureSpawn("systemctl: command not found") as never)
+      // 6th call: docker restart wrapper spawn — must still succeed (Step 5
+      // independent of Step 4 error; both are non-fatal in their own try/catch)
+      .mockImplementationOnce(makeDetachedSpawn() as never);
     const req = makeReq("POST", "/webhook", body, sign(body));
     const res = new FakeRes();
     await handle(req as IncomingMessage, res as unknown as ServerResponse);
@@ -278,6 +289,107 @@ describe("edge-webhook v1.2.0e.4 self-restart (chicken-and-egg fix)", () => {
     expect(res.statusCode).toBe(200);
     const parsed = JSON.parse(res.body);
     expect(parsed).toMatchObject({ ok: true, status: "reloaded" });
+    expect(parsed.elapsed_ms.restart).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("edge-webhook v1.2.0g G1 wrapper container auto-restart (Step 5)", () => {
+  // v1.2.0f NEW M-class gap: docker compose up -d is no-op when image/config
+  // unchanged; bind-mount + node build/server.js requires container restart
+  // to load new in-memory JS. Step 5 closes this by running `docker restart
+  // <container>` after Step 4 self-restart. Container name via env var
+  // EDGE_WRAPPER_CONTAINER (default harness-edge1-wrapper; install.sh writes
+  // per-edge value).
+
+  it("invokes docker restart wrapper with detached option after Step 4", async () => {
+    const { handle } = await loadHandler();
+    const body = JSON.stringify({ ref: "v1.2.0g", commit: "newheadghi012" });
+    const spawnSpy = vi.mocked(cp.spawn);
+    spawnSpy
+      .mockImplementationOnce(makeSuccessSpawn("oldhead1234") as never) // rev-parse
+      .mockImplementationOnce(makeSuccessSpawn("Already up to date.") as never) // git pull
+      .mockImplementationOnce(makeSuccessSpawn("") as never) // tsc
+      .mockImplementationOnce(makeSuccessSpawn("Container edge-wrapper Started") as never) // compose
+      .mockImplementationOnce(makeDetachedSpawn() as never) // Step 4 self-restart
+      .mockImplementationOnce(makeDetachedSpawn() as never); // Step 5 docker restart wrapper
+    const req = makeReq("POST", "/webhook", body, sign(body));
+    const res = new FakeRes();
+    await handle(req as IncomingMessage, res as unknown as ServerResponse);
+    expect(res.statusCode).toBe(200);
+
+    // 6th spawn (index 5) = Step 5 docker restart wrapper
+    const wrapperRestartCall = spawnSpy.mock.calls[5];
+    expect(wrapperRestartCall[0]).toBe("docker");
+    expect(wrapperRestartCall[1]).toEqual(["restart", "harness-edge1-wrapper"]);
+    // detached option must be true (so the child runs independently)
+    expect((wrapperRestartCall[2] as { detached?: boolean }).detached).toBe(true);
+    // stdio should be ignore (we don't capture docker restart output)
+    expect((wrapperRestartCall[2] as { stdio?: string }).stdio).toBe("ignore");
+  });
+
+  it("uses EDGE_WRAPPER_CONTAINER env var when set (per-host override)", async () => {
+    const { handle } = await loadHandler();
+    const body = JSON.stringify({ ref: "v1.2.0g", commit: "newheadghi012" });
+    const spawnSpy = vi.mocked(cp.spawn);
+    spawnSpy
+      .mockImplementationOnce(makeSuccessSpawn("oldhead1234") as never)
+      .mockImplementationOnce(makeSuccessSpawn("Already up to date.") as never)
+      .mockImplementationOnce(makeSuccessSpawn("") as never)
+      .mockImplementationOnce(makeSuccessSpawn("Container edge-wrapper Started") as never)
+      .mockImplementationOnce(makeDetachedSpawn() as never)
+      .mockImplementationOnce(makeDetachedSpawn() as never);
+
+    // Override env var to simulate edge99 — Step 5 must use the override,
+    // not the hardcoded default. install.sh writes this per-edge value to
+    // /etc/edge-webhook.env; systemd `EnvironmentFile=` reads it at boot.
+    const originalContainer = process.env["EDGE_WRAPPER_CONTAINER"];
+    process.env["EDGE_WRAPPER_CONTAINER"] = "harness-edge99-wrapper";
+    try {
+      const req = makeReq("POST", "/webhook", body, sign(body));
+      const res = new FakeRes();
+      await handle(req as IncomingMessage, res as unknown as ServerResponse);
+      expect(res.statusCode).toBe(200);
+
+      const wrapperRestartCall = spawnSpy.mock.calls[5];
+      expect(wrapperRestartCall[0]).toBe("docker");
+      // Container name must be the env var value, NOT the default
+      expect(wrapperRestartCall[1]).toEqual(["restart", "harness-edge99-wrapper"]);
+    } finally {
+      // Restore env var so other tests aren't affected
+      if (originalContainer === undefined) {
+        delete process.env["EDGE_WRAPPER_CONTAINER"];
+      } else {
+        process.env["EDGE_WRAPPER_CONTAINER"] = originalContainer;
+      }
+    }
+  });
+
+  it("survives docker restart spawn error (returns 200 even if Step 5 fails)", async () => {
+    // Parallels Step 4 'survives systemctl spawn error' test pattern. Step 5
+    // wraps spawn in try/catch + .on("error") — handler must still return
+    // 200 {ok:true, status:"reloaded"} because the actual deploy (pull + tsc
+    // + compose) succeeded; only the post-deploy restart is non-fatal.
+    const { handle } = await loadHandler();
+    const body = JSON.stringify({ ref: "v1.2.0g", commit: "newheadghi012" });
+    const spawnSpy = vi.mocked(cp.spawn);
+    spawnSpy
+      .mockImplementationOnce(makeSuccessSpawn("oldhead1234") as never)
+      .mockImplementationOnce(makeSuccessSpawn("Already up to date.") as never)
+      .mockImplementationOnce(makeSuccessSpawn("") as never)
+      .mockImplementationOnce(makeSuccessSpawn("Container edge-wrapper Started") as never)
+      .mockImplementationOnce(makeDetachedSpawn() as never) // Step 4 OK
+      // 6th call: docker restart wrapper spawn FAILS (e.g., no docker binary)
+      .mockImplementationOnce(makeFailureSpawn("docker: command not found") as never);
+    const req = makeReq("POST", "/webhook", body, sign(body));
+    const res = new FakeRes();
+    await handle(req as IncomingMessage, res as unknown as ServerResponse);
+    // Response must still be 200 because reload succeeded; Step 5 failure is
+    // non-fatal (per handler design — wrapper container still running OLD code
+    // until manual `docker restart`, but webhook ack is fine)
+    expect(res.statusCode).toBe(200);
+    const parsed = JSON.parse(res.body);
+    expect(parsed).toMatchObject({ ok: true, status: "reloaded" });
+    // elapsed_ms.restart still reported (includes both Step 4 + Step 5 timing)
     expect(parsed.elapsed_ms.restart).toBeGreaterThanOrEqual(0);
   });
 });
