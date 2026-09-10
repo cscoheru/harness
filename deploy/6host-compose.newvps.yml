@@ -35,7 +35,19 @@ services:
   harness-kernel:
     image: ghcr.io/cscoheru/fish-harness:1.0.0
     container_name: harness-kernel
-    restart: unless-stopped
+    # v1.2.0g NEW per G6 (harness-kernel restart loop fix): replaced
+    # `unless-stopped` with `on-failure:3`. Root cause per v1.2.0f E3
+    # discovery 2026-09-10: kernel Status=Restarting (0) 38s ago,
+    # exitCode=0 (clean exit), 17h ~1610 cycles @ ~38s/cycle. Kernel exits
+    # cleanly by design (frozen v1.0 runtime per ADR 0010), but
+    # `unless-stopped` triggered immediate restart on every exit → runaway
+    # loop. `on-failure:3` caps at 3 restart attempts before entering
+    # `stopped` state. Tradeoffs: (1) host reboot does NOT auto-restart
+    # kernel (manual `docker start harness-kernel` needed; rare); (2) actual
+    # kernel crashes (exitCode != 0) still restart up to 3 times before
+    # giving up. Other services below retain `unless-stopped` — they're
+    # stable 17h with no loop symptom (per v1.2.0f F1 deploy verification).
+    restart: on-failure:3
     volumes:
       - harness_db:/data
     env_file:
