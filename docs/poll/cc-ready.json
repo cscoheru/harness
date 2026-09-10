@@ -128,5 +128,75 @@
       "notify_edge4": "❌ failure (3s) — GH secret EDGE_WEBHOOK_SECRET_edge4 not set (path A skipped)",
       "notify_edge5": "❌ failure (3s) — GH secret EDGE_WEBHOOK_SECRET_edge5 not set (path A skipped)"
     }
+  },
+  "v1.2.0e.4_self_restart_closure": {
+    "task_id": "T-V1.2.0E.4-SELF-RESTART-CLOSURE-PASS",
+    "commit": "v1.2.0e.4 chicken-and-egg CLOSED (2026-09-10). 2 commits: 6acdd7e (perf(edge-webhook): v1.2.0e.4 self-restart to close L15 chicken-and-egg, 2 files +108/-11) + e20d946 (chore: bump E2E trigger timestamp for v1.2.0e.4 self-restart verification). Trigger: v1.2.0e.3 cycle closure §2.1 M-class gap (edge-webhook service 不自动 reload 自己) + user 2026-09-10「继续做 v1.2.0e.4」. Tags: v1.2.0e.4 → 6acdd7e + v1.2.0e.4-rerun → e20d946 (verify 用, 触发完整 reload path); both pushed via Clash proxy per Codex 提交铁律 authorization.",
+    "created_at": "2026-09-10T03:55:00Z",
+    "branch": "main",
+    "status": "✅ v1.2.0e.4 chicken-and-egg cycle CLOSED @ HEAD `e20d946` main (2026-09-10). 2 commits + 2 file changes (edge-pull.ts +34 行 Step 4 + edge-webhook.test.ts +74 行 +2 tests + makeDetachedSpawn helper) + 2 tags (v1.2.0e.4 + v1.2.0e.4-rerun). Step 4 (handler self-restart): after compose up ok, spawn('systemctl', ['restart', 'edge-webhook.service', '--no-block'], {detached: true, stdio: 'ignore'}) + unref() + try/catch + on('error') warn. Design choices: (1) detached:true + unref() so child doesn't keep parent alive, (2) --no-block so systemctl returns immediately and systemd schedules async restart, (3) try/catch wraps spawn — failure non-fatal (next webhook will pick up new code), (4) restartMs added to elapsed_ms observability payload. 193 unit tests passed (was 191, +2 new: 'invokes systemctl restart --no-block with detached option after compose up' + 'survives systemctl spawn error (returns 200 even if restart fails)'); full suite 193/165/0. 3 CI matrix runs: 34434159420 (initial deploy, 4/7 PASS edge1+edge2 webhook ok + edge3/4/5 missing secrets) + 34434707775 (verify-noop, HEAD == 6acdd7e so handler returned early noop, PID didn't change → bumped README) + 34435000831 (verify-rerun, HEAD e20d946 != 6acdd7e → full reload path executed → self-restart spawn fired → PID changed on both edges). Real-edge proof (run 34435000831 journal): edge1=puer-hk OLD PID 334387 → NEW PID 341361 (systemctl show MainPID=341350, ExecMainStartTimestamp=03:54:25 UTC), log sequence 'git pull ok (1126ms)' → 'tsc ok (2720ms)' → 'compose up ok (239ms)' → 'self-restart scheduled (4ms; --no-block)' → 'ok; pulled e20d9461f4dd + reloaded; total=4085ms (pull=1126 build=2720 compose=239 restart=4)' → 'SIGTERM received; closing' → new tsx[341361] listening on 127.0.0.1:7777. edge2=hk OLD PID 970181 → NEW PID 970484 (systemctl show MainPID=970472, ExecMainStartTimestamp=03:54:26 UTC), log sequence 'git pull ok (1103ms)' → 'tsc ok (3317ms)' → 'compose up ok (189ms)' → 'self-restart scheduled (2ms; --no-block)' → 'ok; pulled e20d9461f4dd + reloaded; total=4609ms (pull=1103 build=3317 compose=189 restart=2)' → 'SIGTERM received; closing' → new tsx[970484] listening on 127.0.0.1:7777. CONFIRMED: self-restart auto-triggered on next webhook delivery (after one-time manual restart per L19 paradox). 2 new lessons L15+L19 (M-bug class cycle #10): L15 self-updating service 必带 self-restart trigger (systemd unit ExecStart 启动时 load source, 运行时 source 更新不触发 reload → 需 spawn detached systemctl restart), L19 self-update paradox: 第一次部署 self-restart feature 时 OLD process 不知道该 self-restart, 必须 cycle closure 包含一次性手动 systemctl restart (无解, 只能文档化).",
+    "files_modified_count": 2,
+    "real_edge_proof": {
+      "edge1_puer_hk": {
+        "old_pid": 334387,
+        "new_pid": 341361,
+        "systemctl_MainPID": 341350,
+        "systemctl_ExecMainStartTimestamp": "2026-09-10T03:54:25Z",
+        "self_restart_scheduled_ms": 4,
+        "total_reload_ms": 4085,
+        "breakdown": { "pull": 1126, "build": 2720, "compose": 239, "restart": 4 },
+        "log_evidence": "[edge-webhook] self-restart scheduled (4ms; --no-block) + [edge-webhook] SIGTERM received; closing + new tsx[341361] listening on 127.0.0.1:7777"
+      },
+      "edge2_hk": {
+        "old_pid": 970181,
+        "new_pid": 970484,
+        "systemctl_MainPID": 970472,
+        "systemctl_ExecMainStartTimestamp": "2026-09-10T03:54:26Z",
+        "self_restart_scheduled_ms": 2,
+        "total_reload_ms": 4609,
+        "breakdown": { "pull": 1103, "build": 3317, "compose": 189, "restart": 2 },
+        "log_evidence": "[edge-webhook] self-restart scheduled (2ms; --no-block) + [edge-webhook] SIGTERM received; closing + new tsx[970484] listening on 127.0.0.1:7777"
+      }
+    },
+    "new_lessons": {
+      "L15_reinforced": "self-updating service 必带 self-restart trigger. v1.2.0e.4 实测闭环: handler self-restart (chosen over CI ssh / tsx --watch / systemd ExecStartPost) via spawn('systemctl restart --no-block', {detached: true, unref}). LOW complexity + 全自动 (5 edges 通用) + LOW risk (--no-block async + try/catch + non-fatal on error).",
+      "L19_NEW": "self-update paradox: 第一次部署 self-restart feature 时 OLD process 不知道该 self-restart, 必须 cycle closure 包含一次性手动 systemctl restart <service> 在每个 deploy target. 无解 (无 prior code 知道要 self-update), 只能文档化 + 一次性手动操作. 验证: v1.2.0e.4 commit 6acdd7e 第一次 webhook 到 edge1 (OLD PID 299948) 跑了 git pull+tsc+compose 但没 self-restart (OLD code 没那个 step), 必须手动 restart 才能让 NEW code 接管. 之后每次 webhook 自动 self-restart (per run 34435000831 验证)."
+    },
+    "p0_gap_closed": {
+      "title": "L15 edge-webhook chicken-and-egg",
+      "before": "edge-pull.ts 改自己 → git pull 拉到 disk → systemd 进程仍 in-memory 旧代码, 改进无效",
+      "after": "Step 4 spawn detached systemctl restart --no-block → systemd SIGTERM OLD PID → NEW process 加载新 source → elapsed_ms/restart 字段出现",
+      "scope_change_note": "Implementation chose Option A (handler self-restart) over originally-planned Option B (CI deploy.yml ssh step), per cycle closure reasoning: 1 file change (vs multi-file for B), 5 edges auto-handled (no per-edge jump host setup like B needs), --no-block async 化 mitigates risk. Tradeoff: B is more explicit/visible; A is more self-contained."
+    },
+    "ci_matrix_runs": {
+      "34434159420_initial": {
+        "build_smoke": "✅ success",
+        "push_to_ghcr": "✅ success (53s)",
+        "notify_edge1": "✅ success (8s)",
+        "notify_edge2": "✅ success (8s)",
+        "notify_edge3": "❌ failure — GH secret EDGE_WEBHOOK_SECRET_edge3 not set (path A skipped)",
+        "notify_edge4": "❌ failure — GH secret EDGE_WEBHOOK_SECRET_edge4 not set (path A skipped)",
+        "notify_edge5": "❌ failure — GH secret EDGE_WEBHOOK_SECRET_edge5 not set (path A skipped)"
+      },
+      "34434707775_verify_noop": {
+        "note": "Same commit (6acdd7e) re-tagged as v1.2.0e.4-verify. Handler returned 'already at 6acdd7e37f1f; noop' early, didn't fire self-restart. PID unchanged (edge1=334375, edge2=970167). Triggered README bump → new commit e20d946 to force full reload path.",
+        "notify_edge1": "✅ noop (HEAD matches)",
+        "notify_edge2": "✅ noop (HEAD matches)"
+      },
+      "34435000831_verify_rerun_full_path": {
+        "build_smoke": "✅ success",
+        "push_to_ghcr": "✅ success",
+        "notify_edge1": "✅ success (8s) — FULL RELOAD + SELF-RESTART FIRED (PID 334387 → 341361)",
+        "notify_edge2": "✅ success (8s) — FULL RELOAD + SELF-RESTART FIRED (PID 970181 → 970484)",
+        "notify_edge3": "❌ failure — GH secret EDGE_WEBHOOK_SECRET_edge3 not set (path A skipped)",
+        "notify_edge4": "❌ failure — GH secret EDGE_WEBHOOK_SECRET_edge4 not set (path A skipped)",
+        "notify_edge5": "❌ failure — GH secret EDGE_WEBHOOK_SECRET_edge5 not set (path A skipped)"
+      }
+    },
+    "tags_pushed": {
+      "v1.2.0e.4": "→ 6acdd7e (annotated, message clean no secrets per L8 hygiene)",
+      "v1.2.0e.4-rerun": "→ e20d946 (verify tag, triggers full reload path for self-restart proof)"
+    },
+    "next_cycle": "v1.2.0f (大项): F1 prometheus file_sd_configs + F2 heartbeat old-rows cleanup (982 stale) + F3 aliyun/edge3 install (user auth) + F4 newvps sshd recovery (user OOB) + F5 3 edge GH secrets copy + F6 Tailscale split DNS fish-harness.ts.net"
   }
 }
