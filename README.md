@@ -1057,3 +1057,5 @@ POST /api/v1/worker/heartbeat
 - [`docs/reports/T-M2-TG-1-report.md`](docs/reports/T-M2-TG-1-report.md) — M2 TG-1 实施报告 (dsh 6 host + STT + VAPID)
 - [`adr/0010-v1.1-cycle-scope-admission.md`](adr/0010-v1.1-cycle-scope-admission.md) — v1.1 cycle scope admission (Status: Accepted)
 - [`CHANGELOG.md`](CHANGELOG.md) — v1.1.0-M0c / M1c / M2 release notes
+
+# U7 E2E CI matrix test trigger at 2026-09-10T01:43:43Z
