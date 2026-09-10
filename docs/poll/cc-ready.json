@@ -198,5 +198,90 @@
       "v1.2.0e.4-rerun": "→ e20d946 (verify tag, triggers full reload path for self-restart proof)"
     },
     "next_cycle": "v1.2.0f (大项): F1 prometheus file_sd_configs + F2 heartbeat old-rows cleanup (982 stale) + F3 aliyun/edge3 install (user auth) + F4 newvps sshd recovery (user OOB) + F5 3 edge GH secrets copy + F6 Tailscale split DNS fish-harness.ts.net"
+  },
+  "v1.2.0f_file_sd_reap_closure": {
+    "task_id": "T-V1.2.0F-FILE-SD-REAP-CLOSURE-PASS",
+    "commit": "v1.2.0f F1 + F2 quick-win sub-cycle (2026-09-10). 1 commit (abdbd08 feat(monitoring+worker_pool): v1.2.0f F1 file_sd_configs + F2 reap_stale scheduler, 13 file changes 6 MOD + 7 NEW JSON). Trigger: v1.2.0e.4 cycle closure §next_cycle forward scope F1+F2 (small scope, internal code only, no user OOB blockers) + user 2026-09-10「先做v1.2.0f,本会话仅处理fish-harness项目,不涉及其他任何项目,切记!」. Tag: v1.2.0f → abdbd08 (annotated, message clean no secrets per L8 hygiene); pushed via Clash proxy per Codex 提交铁律 authorization. CI matrix run 34436595441 — 4/7 jobs PASS (build + GHCR + edge1 webhook + edge2 webhook), 3/7 FAIL path A secrets missing.",
+    "created_at": "2026-09-10T04:30:00Z",
+    "branch": "main",
+    "status": "✅ v1.2.0f quick-win cycle CLOSED @ HEAD `abdbd08` main (2026-09-10). F1 prometheus file_sd_configs: 8 inline static_configs (含硬编码 172.25.0.x IP) → 1 file_sd_configs job watching /etc/prometheus/targets/*.json (15s refresh_interval). 新增 7 JSON target 文件: newvps-orch.json (harness-wrapper-orch:4000 via docker DNS) + newvps-commander-1.json (harness-wrapper-commander:4001) + newvps-commander-2.json (harness-wrapper-commander-2:4003) + newvps-frontend.json (harness-wrapper-frontend:4002) + edge1.json (edge1.tail1b9878.ts.net:4001) + edge2.json (edge2.tail1b9878.ts.net:4001) + edge3.json (edge3.tail1b9878.ts.net:4001). newvps-internal 用 container_name (依赖 v1.2.0e.1 D3 共享网络 deploy_harness_net docker DNS); edge hosts 用 Tailscale MagicDNS (沿用 v1.2.0e.1 hotfix). F2 reap_stale scheduler: wrapper/orchestrator/worker_pool.ts 加 countReaped() 方法 + countReaped prepared statement; wrapper/orchestrator/metrics.ts 加 reapedRowsCount Gauge (type + value) + startReapLoop() 60s interval + stopReapLoop() (首次 tick 立即触发,为 fresh process 立即清 982 stale rows backlog from v1.2.0d.4); wrapper/server.ts /metrics handler 加 startReapLoop() lazy-start (mirrors startMetricsSampling() pattern, idempotent). 198 unit tests passed (was 193, +5 F2: 'reapedRowsCount gauge is exposed in /metrics output' + 'startReapLoop is idempotent' + 'stopReapLoop is idempotent' + 'startReapLoop fires reap_stale immediately + updates reapedRowsCount' + 'tick failure is non-fatal'). Real-edge proof: edge1 wrapper 重启 (StartedAt 01:47:53Z → 04:22:14Z) + edge2 wrapper 重启 (13h → 04:23:05Z), /metrics 实测 reaped_rows_count 0 (gauge 暴露 OK; value=0 因 edge wrappers 无 local worker_pool, workers 注册到 newvps orchestrator). 2 new lessons L20+L21 (M-bug class cycle #11): L20 terminal counter 监控 RATE 而非绝对值 (reaped_rows 永不删除 per §3.5 audit-scope forensic preservation, counter 单调递增触发误报; 修法 rate(reaped_rows_count[5m]) > 0) / L21 file_sd_configs 关闭 brittle-IP drift (静态 IP 列表无法适应 docker 网络 renumber, 加 host 是 O(1) JSON file 操作). 1 NEW M-class gap discovered: wrapper container auto-restart missing — v1.2.0f commit abdbd08 push + tag 后, edge-webhook service auto-restart OK (v1.2.0e.4 闭环), 但 wrapper container (harness-edge1-wrapper Up 3h+) 仍是 OLD 代码, 因为 bind-mount + node build/server.js 不 reload in-memory JS (disk 有新 code 但 process 仍跑 OLD build/). 临时处理: 手动 docker restart harness-edge[1-2]-wrapper; P0 for v1.2.0g via Step 5 docker restart wrapper (parallels v1.2.0e.4 self-restart pattern).",
+    "files_modified_count": 13,
+    "F1_files_sd_configs_verified": {
+      "prometheus_yml_change": "8 inline static_configs (硬编码 IP 172.25.0.{5,6,7,9}) → 1 file_sd_configs job watching /etc/prometheus/targets/*.json (15s refresh_interval, 移除所有硬编码 IP)",
+      "docker_compose_mount": "deploy/monitoring/docker-compose.yml +9 行: mount ./targets:ro → /etc/prometheus/targets/ (host-mounted, not named volume)",
+      "targets_directory_NEW_7_files": [
+        "edge1.json (edge1.tail1b9878.ts.net:4001, host=edge1, role=wrapper)",
+        "edge2.json (edge2.tail1b9878.ts.net:4001, host=edge2, role=wrapper)",
+        "edge3.json (edge3.tail1b9878.ts.net:4001, host=edge3, role=wrapper)",
+        "newvps-orch.json (harness-wrapper-orch:4000 via docker DNS, host=newvps, role=orchestrator)",
+        "newvps-commander-1.json (harness-wrapper-commander:4001, host=newvps, role=commander, replica=1)",
+        "newvps-commander-2.json (harness-wrapper-commander-2:4003, host=newvps, role=commander, replica=2)",
+        "newvps-frontend.json (harness-wrapper-frontend:4002, host=newvps, role=frontend)"
+      ],
+      "long_standing_todo_closed": "prometheus.yml v1.2.0e.1 旧 TODO 'if compose restarts renumber the bridge, run `docker inspect` to find the new IPs and update this list, or convert to a service-discovery config block (TODO: v1.2.0f+)' CLOSED",
+      "deploy_status": "⏸️ DEFERRED user OOB (newvps sshd dead 24h+ per F4; user must ssh newvps + docker compose -f deploy/monitoring/docker-compose.yml up -d to pick up new prometheus.yml + targets/ mount)"
+    },
+    "F2_reap_stale_scheduler_verified": {
+      "worker_pool_changes": "+26 行: NEW countReaped prepared statement + countReaped(): number method (mirrors countActive() 但查 terminal 'reaped' status)",
+      "metrics_changes": "+67 行: NEW reapedRowsCount Gauge (name=reaped_rows_count, type=gauge, registers REGISTRY) + REAP_INTERVAL_MS=60_000 + startReapLoop() (60s interval, fires immediately on first call to clear 982 backlog) + stopReapLoop() + try/catch on tick (non-fatal + loop survives)",
+      "server_changes": "+5 行: startReapLoop import + call after startMetricsSampling() in /metrics handler (lazy-start + idempotent)",
+      "unit_tests_new_5": [
+        "reapedRowsCount gauge is exposed in /metrics output (HELP + TYPE + value lines verified)",
+        "startReapLoop is idempotent (multiple calls no-op via _reapTimer guard)",
+        "stopReapLoop is idempotent (multiple calls no-op)",
+        "startReapLoop fires reap_stale immediately + updates reapedRowsCount (forced stale via UPDATE last_heartbeat_at = Date.now() - 200_000)",
+        "tick failure is non-fatal (loop survives + stopReapLoop cleans up)"
+      ],
+      "real_edge_metrics_output": "# HELP reaped_rows_count Number of workers in 'reaped' terminal status (cumulative since process start) # TYPE reaped_rows_count gauge reaped_rows_count 0 (both edge1 + edge2, value=0 expected because edge wrappers 无 local worker_pool; workers 注册到 newvps orchestrator)",
+      "actual_reap_trigger_status": "⏸️ DEFERRED (blocked on newvps orchestrator restart to load v1.2.0f code; F4 sshd + user OOB)"
+    },
+    "real_edge_proof": {
+      "edge1_puer_hk": {
+        "wrapper_StartedAt_before": "2026-09-10T01:47:53Z (3h+ stale; running v1.2.0e.1 code despite disk having v1.2.0f)",
+        "wrapper_StartedAt_after": "2026-09-10T04:22:14Z (manual docker restart per §3.4 临时处理)",
+        "metrics_output_observed": "# HELP reaped_rows_count ... # TYPE reaped_rows_count gauge reaped_rows_count 0"
+      },
+      "edge2_hk": {
+        "wrapper_StartedAt_before": "13h+ stale",
+        "wrapper_StartedAt_after": "2026-09-10T04:23:05Z (manual docker restart per §3.4 临时处理)",
+        "metrics_output_observed": "# HELP reaped_rows_count ... # TYPE reaped_rows_count gauge reaped_rows_count 0"
+      }
+    },
+    "new_lessons": {
+      "L20": "terminal counter 监控 RATE 而非绝对值. reaped_rows_count 单调递增 per process lifetime (§3.5 audit-scope 永不删除 for forensics), 看起来一直增长会触发误报. 修法: rate(reaped_rows_count[5m]) > 0 (持续 reaping 中) 或 increase(reaped_rows_count[1h]) 增量阈值. 应用: 任何 terminal status counter 都按 RATE 监控.",
+      "L21": "file_sd_configs 关闭 brittle-IP drift problem. 静态 IP 列表 (172.25.0.x) 无法适应 docker compose 桥接 renumber, 每次 restart 需手动 inspect + 更新. 修法: file_sd_configs + JSON targets 目录 + container_name (via shared network DNS) + MagicDNS (for edge hosts). 加 host = 1 JSON file + commit. 应用: 任何需 scrape targets 配置的 monitoring 都用 file_sd_configs 模式, 避免硬编码 IP."
+    },
+    "m_class_gap_NEW": {
+      "title": "wrapper container auto-restart missing (chicken-and-egg v2)",
+      "symptom": "v1.2.0f commit abdbd08 push + tag, CI matrix 触发 webhook → edge-webhook service auto-restart OK (per v1.2.0e.4 self-restart mechanism), BUT wrapper container (harness-edge1-wrapper Up 3h+) 仍是 OLD 代码 (disk 有新 code, in-memory node process 不 reload). 实证: docker inspect harness-edge1-wrapper StartedAt = 2026-09-10T01:47:53Z (3h 前, v1.2.0e.1 cycle 时间).",
+      "root_cause": "edge-pull.ts Step 3 'docker compose up -d --remove-orphans' 只在 image 变化或 service config 变化时 recreate 容器. wrapper service 用 image: node:24-slim (无 pinned GHCR tag) + bind-mount ..:/app:ro → GHCR push 不影响容器 + source code 改动只更新 disk (in-memory node process 仍跑 OLD build/).",
+      "fix_options": {
+        "A_webhook_handler_Step_5_docker_restart_P0_RECOMMENDED": "LOW (5 行) + LOW risk + 自包含. Parallels v1.2.0e.4 self-restart pattern (Step 4 systemctl restart edge-webhook).",
+        "B_compose_up_force_recreate": "LOW + MEDIUM (downtime 风险, 破坏 bind-mount 优势)",
+        "C_ci_deploy_yml_ssh_docker_restart": "LOW + LOW (显式但需 SSH jump host)",
+        "D_systemd_unit_tsx_watch": "MEDIUM + HIGH (prod 不适合)"
+      },
+      "temporary_fix_applied": "v1.2.0f session 临时处理: 手动 docker restart harness-edge1-wrapper + harness-edge2-wrapper (2 commands on edge hosts). 之后每次 wrapper code change 都要手动 restart 直到 v1.2.0g 闭环.",
+      "next_cycle": "v1.2.0g P0 scope: G1 only — Step 5 docker restart wrapper handler addition (~5 行, parallels v1.2.0e.4 self-restart pattern). 关闭 M-class gap 类 chicken-and-egg v2."
+    },
+    "ci_matrix_run_34436595441": {
+      "build_smoke": "✅ success",
+      "push_to_ghcr": "✅ success",
+      "notify_edge1_puer_hk": "✅ success (8s) — webhook reload triggered, edge-webhook auto-restarted via v1.2.0e.4 self-restart (PID change verified)",
+      "notify_edge2_hk": "✅ success (8s) — same as edge1",
+      "notify_edge3": "❌ failure — GH secret EDGE_WEBHOOK_SECRET_edge3 not set (path A skipped)",
+      "notify_edge4": "❌ failure — GH secret EDGE_WEBHOOK_SECRET_edge4 not set (path A skipped)",
+      "notify_edge5": "❌ failure — GH secret EDGE_WEBHOOK_SECRET_edge5 not set (path A skipped)"
+    },
+    "tag_pushed": {
+      "v1.2.0f": "→ abdbd08 (annotated, message clean no secrets per L8 hygiene, via Clash proxy per Codex 提交铁律 authorization)"
+    },
+    "forward_scope_v1_2_0g": {
+      "G1_wrapper_container_auto_restart_P0": "Step 5 docker restart wrapper handler addition (~5 行, parallels v1.2.0e.4 self-restart pattern, closes M-class gap 类 chicken-and-egg v2)",
+      "G2_aliyun_edge3_install_MEDIUM": "⏸️ DEFERRED (user OOB auth for git init on unconfirmed host pending)",
+      "G3_newvps_sshd_recovery_MEDIUM": "⏸️ DEFERRED (user OOB cloud console restart; sshd dead >48h)",
+      "G4_3_edge_gh_secrets_copy_LOW": "⏸️ DEFERRED (blocked on G2 aliyun install)",
+      "G5_tailscale_split_dns_LOW": "⏸️ DEFERRED (admin toggle required)"
+    }
   }
 }
