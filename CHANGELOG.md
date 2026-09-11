@@ -655,6 +655,38 @@ M1c/v1.2.0c 时代测已删 spawn path + http_status 旧 schema,无法迁移 —
 
 ---
 
+v1.2.0g 2026-09-11 (added v1.2.0h H3a backfill)
+
+### Decisions
+
+- **G1 + G6 quick-win closure**: 2 internal code items closable without user OOB. G2/G4/G5/G7/G8 deferred to v1.2.0i+ (per v1.2.0h plan §6).
+- **No Codex review** for v1.2.0g (per user 2026-09-10 "codex review不用了"); Codex 提交铁律 push via Clash proxy still honored.
+
+### Added
+
+- **G1** `wrapper/deploy/edge-webhook/edge-pull.ts` Step 5: `docker restart <wrapper container>` with `detached:true` + `unref()` + non-fatal try/catch. Parallels v1.2.0e.4 Step 4 self-restart pattern. Container name from `process.env["EDGE_WRAPPER_CONTAINER"]` (default `harness-edge1-wrapper`).
+- **G1** `wrapper/deploy/edge-webhook/install.sh`: append `EDGE_WRAPPER_CONTAINER=harness-edge${EDGE_NUM}-wrapper` to `/etc/edge-webhook.env` heredoc. Comment block warns **DO NOT re-run install.sh on existing edges** (regenerates `EDGE_WEBHOOK_SECRET`, breaks GitHub webhook HMAC).
+- **G1** `wrapper/test/unit/edge-webhook.test.ts`: 5 existing 5-mock-chain tests got 6th `makeDetachedSpawn()` mock + NEW describe block "v1.2.0g G1 wrapper container auto-restart (Step 5)" with **3 tests**:
+  1. `invokes docker restart wrapper with detached option after Step 4`
+  2. `uses EDGE_WRAPPER_CONTAINER env var when set (per-host override)`
+  3. `survives docker restart spawn error (returns 200 even if Step 5 fails)`
+
+### Changed
+
+- **G6** `deploy/6host-compose.newvps.yml`: `harness-kernel` `restart: unless-stopped` → `restart: on-failure:3`. Closes v1.2.0f E3 (17h ~1610 cycles @ ~38s/cycle, exitCode=0 clean exit + unless-stopped = runaway loop). `on-failure:3` caps at 3 restart attempts before `stopped` state. Other 7 services retain `unless-stopped` (stable 17h, no loop symptom).
+
+### Notes
+
+- 2 commits: `ccd8577` feat(edge-pull) G1 + `16fca28` fix(kernel) G6.
+- Tag `v1.2.0g` → `16fca28` pushed via Clash proxy per Codex 提交铁律 (修订 2026-09-05).
+- 201/201 unit tests passed (was 198, +3 G1). tsc 0 errors. docker compose config valid.
+- New lessons: **L22** (bind-mount + static-image = `docker compose up -d` no-op reload, needs explicit container restart) + **L23** (`unless-stopped` + exitCode=0 daemon = infinite restart loop, use `on-failure:N` for clean-exit-by-design services).
+- User EXEC (U1-U4) per `fish-harness-v1.2.0g-cycle-closure.md` §5; U1 tsc + vitest 已在 PR 自验, U2-U4 待 user 在 newvps 真机跑.
+- Cycle closure cross-ref: `docs/poll/cc-ready.json` `v1.2.0g_wrapper_auto_restart_and_kernel_cap_closure`.
+- **Backward-compat for existing edges**: 已装 edge 需 `echo "EDGE_WRAPPER_CONTAINER=harness-edge{N}-wrapper" >> /etc/edge-webhook.env && systemctl restart edge-webhook.service` (per-host override). 见 `docs/deploy/6host-deploy.md` §5 v1.2.0g changes.
+
+---
+
 ## [1.1.0-M1c] - 2026-09-02
 
 M1c 阶段 — TypeScript wrapper 三档 profile 收口 + vitest 稳定化 + Codex formal PASS + iPhone Safari Funnel E2E 实测.

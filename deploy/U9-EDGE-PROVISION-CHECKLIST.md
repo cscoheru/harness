@@ -6,6 +6,8 @@
 > **参考**: `deploy/tailscale-acl-6host.yaml` (已含 tag:edge + tag:macbook 段)
 > **Codex 提交铁律覆盖**: 用户已授权 "请继续 u7-u9" — 5 edge provision + ACL push 由用户执行 (session 内 agent 无 Tailscale auth + 无 VPS 采购能力)
 
+> **Note on aliyun/edge3** (added v1.2.0h H2a): edge3 is provisioned on aliyun (Asia-Pacific asia-1 region), not the standard 5-VPS batch. SSH access requires the aliyun cloud console key pair or password-based auth — distinct from the other 4 edges which share the same SSH key distribution path. DEEPSEEK_API_KEY env file path: `/etc/fish-harness/edge-host.env` (same as other edges). MagicDNS hostname: `edge3.fish-harness.ts.net` (same naming convention). See `deploy/runbook-edge-provision.md` §1 prereq table for the aliyun VPS row.
+
 ---
 
 ## Step 1: 5 edge host 各登入 + 安装 Tailscale
@@ -62,6 +64,22 @@ cd /opt/fish-harness
 sudo tailscale acl push --file deploy/tailscale-acl-6host.yaml
 # expected: ACL pushed successfully
 ```
+
+### Step 3.5: 5 edge webhook HMAC secret 上 GitHub (added v1.2.0h H2a)
+
+> **重要**: GitHub webhook HMAC secret 在 `wrapper/deploy/edge-webhook/install.sh` 生成 (per-host),需在 GitHub repo → Settings → Webhooks → 每 edge endpoint 配对. **不写 actual secret value** (L8 secret materialization hygiene); 仅确认每个 edge 的 secret NAME 已在 GitHub Actions secrets 中存在.
+
+| Edge | Container | GitHub Secret Name | Status |
+|------|-----------|--------------------|--------|
+| edge1 | harness-edge1-wrapper | `EDGE_WEBHOOK_SECRET_edge1` | [ ] 已填入 GitHub Webhook secret |
+| edge2 | harness-edge2-wrapper | `EDGE_WEBHOOK_SECRET_edge2` | [ ] 已填入 GitHub Webhook secret |
+| edge3 | harness-edge3-wrapper | `EDGE_WEBHOOK_SECRET_edge3` | [ ] 已填入 GitHub Webhook secret |
+| edge4 | harness-edge4-wrapper | `EDGE_WEBHOOK_SECRET_edge4` | [ ] 已填入 GitHub Webhook secret |
+| edge5 | harness-edge5-wrapper | `EDGE_WEBHOOK_SECRET_edge5` | [ ] 已填入 GitHub Webhook secret |
+
+**取值方式**: admin 在对应 edge host 跑 `ssh edge{N} 'sudo cat /etc/edge-webhook.env | grep EDGE_WEBHOOK_SECRET'`,复制 value 到 GitHub Webhook 配置页面 (不要 echo 到 transcript/log).
+
+**已知 chain 依赖** (per v1.2.0g cycle closure §7): edge3/edge4/edge5 的 GH secret 仍 missing (G4 推迟至 aliyun/edge3 install G2 完成后补).
 
 ---
 

@@ -27,6 +27,7 @@
 | Tailscale account | https://login.tailscale.com | account | Admin role on the fish-harness tailnet |
 | Tailscale auth key | https://login.tailscale.com/admin/settings/keys | `tskey-auth-…` | **Reusable=true** to batch-provision 5 hosts |
 | 5× VPS instances | Provider of choice (Hetzner / DO / Vultr / aliyun) | Ubuntu 22.04 LTS, ≥1 GB RAM, ≥10 GB disk | One per region (east-1 / west-1 / asia-1 / eu-1 / sa-1) |
+| edge3 VPS source (added v1.2.0h H2b) | aliyun ECS console (Asia-Pacific asia-1 region) | Ubuntu 22.04 LTS, ≥1 GB RAM, ≥10 GB disk | SSH access via aliyun console key pair (distinct from shared key distribution path of edge1/2/4/5); instance metadata visible at https://ecs.console.aliyun.com/ |
 | DEEPSEEK_API_KEY | DeepSeek dashboard | sk-… | **Same** key as newvps; env-inject only |
 | VAPID_PUBLIC_KEY | `deploy/vapid_public.key` (committed) | base64url | Edge hosts don't need the private key |
 | MagicDNS suffix | Tailscale admin console | `fish-harness.ts.net` | Verify under DNS tab |
@@ -45,6 +46,35 @@
 - Provision 1× Ubuntu 22.04 LTS VPS per region
 - Minimum spec: 1 vCPU / 1 GB RAM / 10 GB disk (wrapper only)
 - Note the public IP — needed for Tailscale node bring-up
+
+### Step 1a — aliyun/edge3 specific (added v1.2.0h H2b)
+
+> edge3 is provisioned on aliyun ECS, distinct from the other 4 edges which use the standard shared-SSH-key distribution path. The aliyun workflow uses the aliyun cloud console for key pair binding and SSH access.
+
+```bash
+# 1. 登录 aliyun console → ECS → Instances → 选择 asia-1 region
+#    https://ecs.console.aliyun.com/
+
+# 2. 创建实例: Ubuntu 22.04 LTS, 1 vCPU / 1 GB RAM / 10 GB disk
+#    - 网络: 默认 VPC (asia-1 region)
+#    - 公网 IP: 分配 (用于初次 SSH)
+#    - 密钥对: 选用 aliyun 已有 key pair (或新建)
+#    - 安全组: 开放 22 (SSH) + 80/443 (Tailscale Funnel 后续)
+
+# 3. 记录以下信息 (后续 install.sh 需要):
+#    - Public IP: <edge3.public.ip>
+#    - Instance ID: i-<aliyun-instance-id>
+#    - Region: cn-hongkong (or asia-1 specific)
+
+# 4. SSH 登录 (用 aliyun key pair, 与其他 4 edge 的 shared key 不同)
+ssh -i ~/.ssh/aliyun_key_pair.pem root@<edge3.public.ip>
+
+# 5. 验证 hostname (后续 Tailscale 用)
+hostname
+# Expected: i-<aliyun-instance-id> (or 自定义 hostname)
+```
+
+> **Note**: aliyun/edge3 的 SSH access 走 aliyun console key pair, 不走 deploy 文档中其他 4 edge 用的 shared distribution path. install.sh 步骤与其他 edge 相同 (都从 `wrapper/deploy/edge-webhook/install.sh` 装 edge-webhook service), 但 SSH entrypoint 不同.
 
 ### Step 2 — Tailscale 节点加入
 On each fresh VPS, as root:
@@ -145,13 +175,13 @@ If any step fails, see §5 故障排除.
 
 ## §3 每个 edge host 独立小节
 
-| Host | EDGE_REGION | container_name | WRAPPER_PORT | Funnel URL |
-|------|-------------|----------------|--------------|------------|
-| edge1 | east-1 | harness-edge1-wrapper | 4001 | https://$1.fish-harness.ts.net |
-| edge2 | west-1 | harness-edge2-wrapper | 4001 | https://$1.fish-harness.ts.net |
-| edge3 | asia-1 | harness-edge3-wrapper | 4001 | https://$1.fish-harness.ts.net |
-| edge4 | eu-1 | harness-edge4-wrapper | 4001 | https://$1.fish-harness.ts.net |
-| edge5 | sa-1 | harness-edge5-wrapper | 4001 | https://$1.fish-harness.ts.net |
+| Host | EDGE_REGION | VPS Source | container_name | WRAPPER_PORT | Funnel URL |
+|------|-------------|------------|----------------|--------------|------------|
+| edge1 | east-1 | Hetzner / DO / Vultr | harness-edge1-wrapper | 4001 | https://$1.fish-harness.ts.net |
+| edge2 | west-1 | Hetzner / DO / Vultr | harness-edge2-wrapper | 4001 | https://$1.fish-harness.ts.net |
+| edge3 | asia-1 | **aliyun ECS** (added v1.2.0h H2b) | harness-edge3-wrapper | 4001 | https://$1.fish-harness.ts.net |
+| edge4 | eu-1 | Hetzner / DO / Vultr | harness-edge4-wrapper | 4001 | https://$1.fish-harness.ts.net |
+| edge5 | sa-1 | Hetzner / DO / Vultr | harness-edge5-wrapper | 4001 | https://$1.fish-harness.ts.net |
 
 All 5 hosts share the same `wrapper/build/server.js` binary (built once, deployed 5×).
 

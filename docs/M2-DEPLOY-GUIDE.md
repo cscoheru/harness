@@ -136,10 +136,10 @@ tailscale serve --yaml=deploy/tailscale-funnel-6host.yaml
 
 # 验证 Funnel 状态
 tailscale funnel status
-# 期望: harness-newvps.tail1b9878.ts.net → 127.0.0.1:4000
+# 期望: newvps.fish-harness.ts.net → 127.0.0.1:4000
 
 # 验证 HTTPS 可达（从 admin 设备）
-curl -I https://harness-newvps.tail1b9878.ts.net/
+curl -I https://newvps.fish-harness.ts.net/
 # 期望: HTTP 200 or 401 (auth), not 502/503
 ```
 
@@ -169,7 +169,7 @@ tailscale up --authkey=${TAILSCALE_AUTHKEY} --advertise-tags=tag:edge --hostname
 
 # 5. 验证 MagicDNS
 tailscale status | grep harness-edge{N}
-# 期望: hostname = harness-edge{N}.tail1b9878.ts.net
+# 期望: hostname = edge{N}.fish-harness.ts.net
 ```
 
 ### 3.2 创建 edge env 文件
@@ -182,7 +182,7 @@ TAILSCALE_AUTHKEY=${TAILSCALE_AUTHKEY}
 WORKER_ID=edge{N}-wrapper
 LOG_LEVEL=INFO
 EDGE_REGION={region-name}
-HARNESS_API_URL=http://harness-newvps.tail1b9878.ts.net:8000
+HARNESS_API_URL=http://newvps.fish-harness.ts.net:8000
 EOF'
 ```
 
@@ -217,7 +217,7 @@ tailscale serve --yaml=deploy/tailscale-funnel-6host.yaml
 
 # 验证
 tailscale funnel status | grep harness-edge1
-# 期望: harness-edge1.tail1b9878.ts.net → 127.0.0.1:4001
+# 期望: edge1.fish-harness.ts.net → 127.0.0.1:4001
 ```
 
 ---
@@ -250,7 +250,7 @@ tailscale status | grep -E "harness-(newvps|edge[1-5])"
 
 ```bash
 # Funnel HTTPS 健康检查
-curl -s --max-time 10 https://harness-newvps.tail1b9878.ts.net/health || \
+curl -s --max-time 10 https://newvps.fish-harness.ts.net/health || \
 curl -s --max-time 10 http://127.0.0.1:4000/health
 
 # 验证 6 容器均 healthy
@@ -265,7 +265,7 @@ ssh newvps 'docker ps --format "table {{.Names}}\t{{.Status}}" | grep harness'
 # Note: H5 hygiene gate uses https://[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*\.ts\.net/
 # (corrected: previous pattern [a-z-]+ failed on digit-containing tailnet IDs like tail1b9878)
 for host in newvps edge1 edge2 edge3 edge4 edge5; do
-  url="https://harness-${host}.tail1b9878.ts.net/health"
+  url="https://${host}.fish-harness.ts.net/health"
   status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$url" 2>/dev/null || echo "FAIL")
   echo "$host: HTTP $status"
 done
@@ -293,16 +293,16 @@ tailscale status | grep harness
 - [ ] whisper.cpp 模型下载完成（/opt/whisper-models/ggml-base.bin ~150MB）
 - [ ] 6 容器全部 running: harness-kernel / stt-worker / web-push / orchestrator / commander / frontend
 - [ ] 6 容器 health check 全 PASS
-- [ ] Funnel 443 启用（harness-newvps.tail1b9878.ts.net → 127.0.0.1:4000）
+- [ ] Funnel 443 启用（newvps.fish-harness.ts.net → 127.0.0.1:4000）
 - [ ] HTTPS 可达（curl HTTP 200 or 401）
 - [ ] VAPID 私钥仅 env-inject（不在 git / compose file 中）
 - [ ] WHISPER_MODEL_PATH 使用绝对路径
 
 ### 6.2 edge1 east-1
-- [ ] Tailscale 登录成功（harness-edge1.tail1b9878.ts.net）
+- [ ] Tailscale 登录成功（edge1.fish-harness.ts.net）
 - [ ] tag:edge 已分配
 - [ ] harness-edge1-wrapper 容器 running
-- [ ] Funnel 443 启用（harness-edge1.tail1b9878.ts.net → 127.0.0.1:4001）
+- [ ] Funnel 443 启用（edge1.fish-harness.ts.net → 127.0.0.1:4001）
 - [ ] HTTPS 可达
 - [ ] 无 STT worker（compose 中无 whisper 相关配置）
 
@@ -320,7 +320,7 @@ tailscale status | grep harness
 
 ### 6.7 跨 host 验证
 - [ ] ACL 更新已生效（6 host + admin 可达）
-- [ ] 边缘 host 可通过 MagicDNS 访问 newvps kernel（http://harness-newvps.tail1b9878.ts.net:8000）
+- [ ] 边缘 host 可通过 MagicDNS 访问 newvps kernel（http://newvps.fish-harness.ts.net:8000）
 - [ ] 边缘 host 无硬编码 IP（compose file 使用 MagicDNS）
 - [ ] 无 API key 明文写入 git
 
@@ -362,7 +362,7 @@ tailscale acl revert ~/tailscale-acl-backup-YYYYMMDD.json
 |------|------|
 | SSH newvps | `ssh newvps` |
 | SSH edge host | `ssh edge{N}` |
-| 6 host health | `curl -s https://harness-{newvps,edge1-5}.tail1b9878.ts.net/health` |
+| 6 host health | `curl -s https://{newvps,edge1-5}.fish-harness.ts.net/health` |
 | Tailscale status | `tailscale status \| grep harness` |
 | Funnel status | `tailscale funnel status` |
 | Container logs | `ssh <host> 'docker logs -f <container-name>'` |

@@ -242,3 +242,61 @@ other public domains.
 - Tailscale ACL: `deploy/tailscale-acl-6host.yaml`
 - Compose templates: `deploy/6host-compose.{newvps,edge[1-5]}.yml`
 - Monitoring stack: `deploy/monitoring/docker-compose.yml`
+
+---
+
+## §5 v1.2.0g Changes (added v1.2.0h H3b cross-ref)
+
+### §5.1 G1 wrapper container auto-restart — backward-compat migration
+
+v1.2.0g added Step 5 to `edge-pull.ts` webhook handler: `docker restart <wrapper container>` after pull/build/compose. Container name resolved from new env var `EDGE_WRAPPER_CONTAINER` (default `harness-edge1-wrapper`).
+
+**已装 edge 必须手动补 env var** (Step 5 否则用 default name 但 install.sh 未设 env var = Step 5 用错 container name = 容器 restarts the wrong one):
+
+```bash
+# 对每个已装 edge (edge1..edge5):
+ssh edge{N}
+echo "EDGE_WRAPPER_CONTAINER=harness-edge{N}-wrapper" | sudo tee -a /etc/edge-webhook.env
+sudo systemctl restart edge-webhook.service
+# 验证
+ssh edge{N} 'sudo grep EDGE_WRAPPER_CONTAINER /etc/edge-webhook.env'
+# Expected: EDGE_WRAPPER_CONTAINER=harness-edge{N}-wrapper
+```
+
+> **⚠️ DO NOT re-run `deploy/edge-webhook/install.sh` on existing edges** — `install.sh` 会 regenerate `EDGE_WEBHOOK_SECRET` → breaks GitHub webhook HMAC. **Use `tee -a` to append, never re-run install.sh.**
+
+**新装 edge** 自动从 install.sh heredoc 写入 env var (无需手动补).
+
+### §5.2 G6 harness-kernel restart policy — host-reboot note
+
+v1.2.0g changed `deploy/6host-compose.newvps.yml` `harness-kernel` restart policy:
+
+| Policy | Before v1.2.0g | After v1.2.0g (G6) |
+|--------|----------------|---------------------|
+| `harness-kernel` restart | `unless-stopped` | `on-failure:3` |
+
+**Tradeoff — host reboot no longer auto-restarts kernel**:
+
+Before v1.2.0g: host reboot → systemd starts Docker → `unless-stopped` policy auto-restarts all containers including `harness-kernel`.
+
+After v1.2.0g: host reboot → systemd starts Docker → `on-failure:3` only restarts on actual crash (exitCode != 0). host reboot puts kernel in `stopped` state. **Manual `docker start harness-kernel` required post host-reboot.**
+
+**Recovery procedure after host reboot**:
+
+```bash
+ssh newvps
+sudo docker start harness-kernel
+# 验证
+sudo docker inspect harness-kernel --format "{{.State.Status}} RestartCount={{.RestartCount}}"
+# Expected: Status=running RestartCount=0 (clean start post reboot)
+```
+
+**Ongoing monitoring** (post G6 deploy, expect stable):
+
+```bash
+# 每 30 min 跑一次, 验证 RestartCount 稳定 (不是 ~38s 递增)
+ssh newvps 'sudo docker inspect harness-kernel --format "{{.State.Status}} RestartCount={{.RestartCount}}"'
+# Expected: Status=running RestartCount stable (was incrementing every ~38s pre-G6)
+```
+
+If `RestartCount` increments without ExitCode != 0, escalate (collect `docker logs harness-kernel --since 1h` + `journalctl -u docker --since 1h` for forensic).
