@@ -11,12 +11,13 @@
  */
 
 import express, { type Request, type Response, type NextFunction } from "express";
-import path from "path";
+import path, { resolve } from "path";
 import { fileURLToPath } from "url";
 import { createTask, dispatch, getTaskStatus } from "./orchestrator.js";
 import type { DispatchRequest, DispatchResponse, StatusResponse } from "./types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
 const STATIC_DIR = path.join(__dirname, "static");
 const PORT = parseInt(process.env["PWA_PORT"] ?? "3000", 10);
 
@@ -122,10 +123,55 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 
-app.listen(PORT, () => {
-  console.log(`[pwa_server] listening on http://localhost:${PORT}`);
-  console.log(`[pwa_server] static files: ${STATIC_DIR}`);
-  console.log(`[pwa_server] kernel URL: ${process.env["HARNESS_RUNTIME_URL"] ?? "http://localhost:8000"}`);
-});
+/** True when this file is the entry invoked by `node build/orchestrator/pwa_server.js`. */
+const isMain = process.argv[1] !== undefined
+  && resolve(process.argv[1]) === resolve(__filename);
+
+if (isMain) {
+  const server = app.listen(PORT, () => {
+    console.log(`[pwa_server] listening on http://localhost:${PORT}`);
+    console.log(`[pwa_server] static files: ${STATIC_DIR}`);
+    console.log(`[pwa_server] kernel URL: ${process.env["HARNESS_RUNTIME_URL"] ?? "http://localhost:8000"}`);
+  });
+  // v1.2.0j+.1 NEW per D2: port G8.1 SIGTERM handler from wrapper/server.ts:388-447.
+  // Minimal scope: server.close() only (no metrics/reap/heartbeat/DB subsystems in pwa_server).
+  registerShutdown(server);
+}
+
+/**
+ * Register SIGTERM/SIGINT handlers that gracefully drain the pwa_server.
+ *
+ * v1.2.0j+.1 NEW: ports the G8.1 pattern from wrapper/server.ts:388-447 to
+ * pwa_server.ts. Minimal port — only `server.close()` applies here; the
+ * metrics/reap/heartbeat/DB-close steps in server.ts are N/A because
+ * pwa_server.ts owns no timers, no DB handles, no heartbeat sender.
+ *
+ * Idempotent via `shuttingDown` guard — second signal returns early.
+ *
+ * @param server - http.Server instance returned from app.listen()
+ */
+export function registerShutdown(server: import("http").Server): void {
+  let shuttingDown = false;
+  const shutdown = async (signal: string): Promise<void> => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[pwa_server] received ${signal}, draining...`);
+
+    // Stop accepting new connections; wait for in-flight requests to finish.
+    // This is the only relevant drain step for pwa_server.ts (no metrics/
+    // reap/heartbeat/DB subsystems to tear down — orchestrator.ts owns
+    // those, and is a separate process via compose multi-container deploy).
+    try {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    } catch (err) {
+      console.warn(`[pwa_server] server.close failed: ${String(err)}`);
+    }
+
+    console.log(`[pwa_server] shutdown complete, exiting`);
+    process.exit(0);
+  };
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
+}
 
 export { app };
