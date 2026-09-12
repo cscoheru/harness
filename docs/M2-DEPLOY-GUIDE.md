@@ -54,6 +54,17 @@ ssh edge5 'cd /opt/fish-harness && git pull origin main'
 > stale 11h+ 时, 新 code 完全不生效但 healthcheck probe 仍 2xx, 掩盖问题直到 U5
 > SIGKILL 暴露.
 
+> **🎯 推荐路径 (v1.2.0j+.3 NEW)**: 使用 `scripts/newvps-deploy.sh` 自动跑这 5 步
+> (含 idempotent guards + 错误处理 + 时间戳日志). 手动 fallback 仅在 SSH 异常时使用:
+> ```bash
+> # 一行命令: full deploy + all 6 wrapper services
+> scripts/newvps-deploy.sh
+>
+> # 或 pin commit + 单 service
+> scripts/newvps-deploy.sh --commit=ff9d830 --service=wrapper-frontend
+> ```
+> 详见 `scripts/README.md`. 下面的 5 步手动 sequence 仅作 fallback.
+
 ```bash
 # newvps wrapper deploy 5 步 (顺序不可换)
 ssh newvps
