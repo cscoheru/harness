@@ -406,5 +406,63 @@
       "G7_on_failure_N_tune_LOW": "If real kernel crash appears 3 cap 不够, bump to on-failure:5; collect 48h `docker inspect harness-kernel --format '{{.State.ExitCode}} {{.State.FinishedAt}}'` evidence first",
       "G8_wrapper_orchestrator_restart_policy_LOW": "False positive (orchestrator 非 clean-exit-by-design per v1.2.0h plan §6; `unless-stopped` is correct for long-running server)"
     }
+  },
+  "v1.2.0i_wrapper_graceful_shutdown_and_healthcheck_closure": {
+    "task_id": "T-V1.2.0I-WRAPPER-GRACEFUL-HEALTHCHECK-CLOSURE-PASS",
+    "commit": "v1.2.0i wrapper graceful shutdown + healthcheck sub-cycle (2026-09-12). 1 commit 1dfd1f4 fix(wrapper): v1.2.0i G8.1 graceful shutdown + G8.2 healthcheck (4 files +259/-5). Trigger: v1.2.0h cycle closure §8 forward scope §6.2 wrapper-orchestrator graceful shutdown gap + Explore agent v1.2.0i hygiene survey 2026-09-12 G8.2 wrapper-orchestrator healthcheck M3 gap. Tag: v1.2.0i → 1dfd1f4 (annotated, message clean no secrets per L8 hygiene); pushed via Clash proxy per Codex 提交铁律 authorization.",
+    "created_at": "2026-09-12T10:05:00Z",
+    "branch": "main",
+    "status": "✅ v1.2.0i wrapper graceful shutdown + healthcheck cycle CLOSED @ HEAD `1dfd1f4` main (2026-09-12). G8.1 (P1, hygiene) registerShutdown() in wrapper/server.ts drains SIGTERM/SIGINT in order — server.close() → stopMetricsSampling + stopReapLoop → stopWorkerHeartbeatSender → worker_pool.close + queue_store.close (D2 ordering). Each step try/catch'd (D4 fail-safe). Idempotent via shuttingDown guard (re-entrant signals no-op). heartbeat_sender.ts promotes local setInterval handle to module-scope _senderTimer so new stopWorkerHeartbeatSender() export can clearInterval; timer still ref'd per L7 (puer-hk restart loop emergency v1.2.0e.1) — proper exit path now SIGTERM handler. G8.2 (P2, M3) wrapper-orchestrator service gets wget /health probe healthcheck (30s interval, 10s timeout, 3 retries, start_period 15s) + stop_grace_period: 30s paralleling harness-kernel (line 70). /health internally calls orchestrator.health() → kernel probe (server.ts:112-119) so kernel-down returns 500 → wget exit 1 → unhealthy (avoids wrapper-port-up-but-kernel-hung false positive R4). D8 scope: orchestrator first; other 3 wrapper services (commander/commander-2/frontend) deferred to v1.2.0i+.1. Stats: 1 commit 1dfd1f4 + 4 MOD files (3 production + 1 test) + +259/-5 net +254 lines. Verification: 7 checks PASS (tsc 0 errors + 208 vitest + python yaml parse + 4 grep content/hygiene). Remote verified: main=1dfd1f4 + tag=1cfdd64b via git ls-remote.",
+    "files_modified_count": 4,
+    "G8.1_graceful_shutdown_verified": {
+      "registerShutdown_export_in_server_ts": "line 388 exported function; SIGTERM+SIGINT handlers registered",
+      "shutdown_pipeline_D2_ordering": "1.server.close() 2.stopMetricsSampling+stopReapLoop 3.stopWorkerHeartbeatSender 4.worker_pool.close+queue_store.close 5.process.exit(0)",
+      "heartbeat_sender_module_scope_refactor": "_senderTimer promoted from local const to module-scope NodeJS.Timeout | null; stopWorkerHeartbeatSender export added",
+      "L7_timer_refd_preserved": "timer still intentionally ref'd per v1.2.0e.1 puer-hk restart loop emergency memory; proper exit path now SIGTERM handler (not unref)",
+      "D4_fail_safe_per_step": "every step wrapped in try/catch with console.warn fallback; tested via test 7 (stopMetricsSampling throws → subsequent steps still run)",
+      "D4_idempotent_re_entrant_signals": "shuttingDown guard; tested via test 6 (SIGTERM+SIGINT both fire → server.close called exactly once)"
+    },
+    "G8.2_wrapper_orchestrator_healthcheck_verified": {
+      "healthcheck_block_in_compose": "wrapper-orchestrator service line 192-198: wget /health probe 30s interval / 10s timeout / 3 retries / start_period 15s",
+      "stop_grace_period_30s": "line 198 parallels harness-kernel line 70; gives G8.1 SIGTERM handler 30s drain window before SIGKILL",
+      "probe_command_verified": "['CMD-SHELL', 'wget -q -O - http://localhost:4000/health > /dev/null || exit 1'] (wget available in node:24-slim base; curl NOT included)",
+      "yaml_parse_scope_check": "harness-kernel pre-existing + wrapper-orchestrator NEW; other 3 wrapper services (commander/commander-2/frontend) intentionally not modified (D8 deferred to v1.2.0i+.1)",
+      "false_positive_avoidance_R4": "/health internally calls orchestrator.health() → kernel probe; kernel down → 500 → wget exit 1 → unhealthy (avoids wrapper-port-up-but-kernel-hung)"
+    },
+    "G8.1c_tests_verified": {
+      "tests_added": 7,
+      "test_files": "wrapper/test/unit/server.test.ts describe block 'v1.2.0i G8.1 graceful shutdown'",
+      "vitest_total": "208 passed (was 201 baseline + 7 G8.1c)",
+      "test_infra_fixes": "added afterEach to vitest imports (was missing); beforeAll QUEUE_STORE_DB env + _resetQueueStoreForTests paralleling worker_pool pattern; afterEach removeAllListeners SIGTERM/SIGINT to prevent handler accumulation across tests",
+      "L15_mock_pattern_lesson": "vi.spyOn(process, 'exit').mockImplementation(() => {}) silent call-recording pattern beats throw-and-catch (vitest internal process.exit hook intercepts sync throws as uncaught errors)",
+      "L16_handler_return_promise_lesson": "() => shutdown(signal) returns the promise (not void-wrapped) — process.on ignores return, but tests can await handler() to get complete shutdown pipeline",
+      "L17_module_import_cache_lesson": "server.js already imported at line 41; subsequent await import returns cached module; isMain=false at import time; tests must explicitly call registerShutdown(mockServer)"
+    },
+    "hygiene_checks": {
+      "L7_timer_refd_preserved": true,
+      "L8_no_secrets_in_diff": true,
+      "D3_lock_no_frozen_files_modified": true,
+      "D10_two_commit_closure_hygiene": "commit 1 = code 1dfd1f4; commit 2 = this cc-ready.json flip + MEMORY.md pointer",
+      "tsc_zero_errors": true,
+      "vitest_208_passed": true
+    },
+    "tag_pushed": {
+      "tag_name": "v1.2.0i",
+      "tag_sha": "1cfdd64b83738ce69bc9c518e1c565c8603feda8",
+      "points_to_commit": "1dfd1f40bf8f68b3685338e7b01e9d02c43db043",
+      "remote_main_verified": "1dfd1f40bf8f68b3685338e7b01e9d02c43db043",
+      "remote_tag_verified": "1cfdd64b83738ce69bc9c518e1c565c8603feda8",
+      "push_method": "git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin main --follow-tags (per Codex 提交铁律 2026-09-05)"
+    },
+    "forward_scope_v1_2_0j_plus": {
+      "F1_wrapper_commander_commander2_frontend_healthcheck_P2": "⏸️ DEFERRED to v1.2.0j; D8 scope was orchestrator first; may need different probe paths (PWA frontend / commander 路径可能不同)",
+      "F2_M1_in_memory_taskStore_persistence_P2": "⏸️ DEFERRED to v1.2.0j+; active tasks 进程重启丢失; queue_store.ts SQLite 缓解但 running task 不溢出; orchestrator.ts:487 TODO 已 capture",
+      "F3_M2_commander_stepTracker_persistence_P2": "⏸️ DEFERRED to v1.2.0j+; step-DAG 状态仅 in-memory; restart 丢失 DAG progress",
+      "F4_M5_NoActiveWorkerError_circuit_breaker_P2": "⏸️ DEFERRED to v1.2.0j+; dispatch() retry loop tight, 无 backoff",
+      "G2_aliyun_edge3_install_MEDIUM": "⏸️ DEFERRED (user OOB VPS purchase + console + key pair + install.sh + DEEPSEEK env + compose + Funnel + GH secret + tag accept)",
+      "G4_3_edge_gh_secrets_copy_LOW": "⏸️ DEFERRED (blocked on G2 aliyun install webhook setup)",
+      "G5_tailscale_split_dns_LOW": "⏸️ DEFERRED (admin toggle required, no code change)",
+      "G7_on_failure_N_tune_LOW": "collect 48h evidence post-v1.2.0g deploy first, then bump on-failure:3 → :5 if real crash appears"
+    }
   }
 }
