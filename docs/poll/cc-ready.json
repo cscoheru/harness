@@ -464,5 +464,54 @@
       "G5_tailscale_split_dns_LOW": "⏸️ DEFERRED (admin toggle required, no code change)",
       "G7_on_failure_N_tune_LOW": "collect 48h evidence post-v1.2.0g deploy first, then bump on-failure:3 → :5 if real crash appears"
     }
+  },
+  "v1.2.0i.1_wrapper_healthcheck_probe_fix_closure": {
+    "task_id": "T-V1.2.0I.1-WRAPPER-HEALTHCHECK-PROBE-FIX-CLOSURE-PASS",
+    "commit": "v1.2.0i.1 wrapper healthcheck probe wget→node -e hotfix (2026-09-12). 1 commit 441de75 fix(compose): v1.2.0i.1 G8.2 healthcheck probe wget → node -e (M3) (1 file +12/-11). Trigger: post-v1.2.0i U1 deploy smoke on newvps discovered node:24-slim base image does NOT include wget (original plan §2 G8.2 was wrong — never docker-exec'd base image to verify tools). Probe failed with '/bin/sh: 1: wget: not found' → FailingStreak=2 → wrapper-orch never reached healthy. Fix: replaced wget with Node 24 global fetch (undici, available since Node 18) inline 'node -e' one-liner returning exit 0 on 2xx, exit 1 otherwise. No Dockerfile change, no extra apt packages. Tag: v1.2.0i.1 → 441de75 (annotated, message clean no secrets per L8 hygiene); pushed via Clash proxy per Codex 提交铁律.",
+    "created_at": "2026-09-12T11:00:00Z",
+    "branch": "main",
+    "status": "✅ v1.2.0i.1 wrapper healthcheck probe fix CLOSED @ HEAD `441de75` main (2026-09-12). U1-U3 all PASS post-fix on newvps: U1 deploy → Health=healthy FailingStreak=0. U2 SIGTERM graceful drain → docker stop 0.342s (no SIGKILL), exit code 0, both expected logs ('[wrapper/server] received SIGTERM, draining...' + '[wrapper/server] shutdown complete, exiting') confirming G8.1 all 4 steps success. U3 post-restart → Status=running Health=healthy RestartCount=0 stable no loop. Bonus: v1.2.0g G6 kernel cap also verified PASS (kernel exit 1 time then stays exited, RestartCount=0; 17h ~1610 cycles 失控 loop closed). Remote verified: main=441de75, v1.2.0i.1=00731649 → 441de75 via git ls-remote. v1.2.0i tag preserved stable (= G8.1+G8.2-as-designed) per L19 sub-cycle hygiene.",
+    "files_modified_count": 1,
+    "probe_fix_verified": {
+      "old_probe": "wget -q -O - http://localhost:4000/health > /dev/null || exit 1",
+      "new_probe": "node -e \"fetch('http://localhost:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"",
+      "yaml_parse": "Python yaml.safe_load confirms test=['CMD-SHELL', 'node -e \"fetch('http://localhost:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"'] parses correctly",
+      "smoke_test": "docker exec harness-wrapper-orch node -e \"fetch('http://localhost:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\" → status=200 exit 0",
+      "no_dockerfile_change": true,
+      "no_extra_apt_packages": true
+    },
+    "u1_u3_smoke_results_newvps": {
+      "U1_deploy_health": "Status=running Health=healthy FailingStreak=0 (after start_period 15s + first probe at +30s)",
+      "U2_sigterm_graceful": "docker stop 0.342s wall time; Status=exited ExitCode=0 (no SIGKILL); logs show 'received SIGTERM, draining...' + 'shutdown complete, exiting' (G8.1 all 4 steps success)",
+      "U3_post_restart_stable": "Status=running Health=healthy FailingStreak=0 RestartCount=0 (no spurious restart loop)",
+      "bonus_G6_kernel_cap": "harness-kernel RestartCount 3671 → 0; Status=exited ExitCode=0 after one clean exit; 17h ~1610 cycles 失控 loop closed"
+    },
+    "hygiene_checks": {
+      "L18_verify_base_image_tools": "FAIL → LEARNED: v1.2.0i plan §2 G8.2 never docker-exec'd node:24-slim to verify wget; smoke exposed; future healthcheck/CMD/ENTRYPOINT work MUST verify with `docker exec <container> which <tool>` first",
+      "L19_sub_cycle_hygiene_for_post_deploy_m_fixes": "M3-class post-deploy discovery → new sub-version v1.2.0i.1, separate commit, separate tag; v1.2.0i tag preserved stable as G8.1+G8.2-as-designed (NOT rolled into same cycle)",
+      "L20_ssh_cd_persistence": "ssh newvps sessions are fresh per Bash tool call; cd doesn't persist between commands; docker compose needs `cd /opt/fish-harness &&` prefix on same line",
+      "L7_timer_refd_preserved": true,
+      "L8_no_secrets_in_diff": true,
+      "D3_lock_no_frozen_files_modified": true
+    },
+    "tag_pushed": {
+      "tag_name": "v1.2.0i.1",
+      "tag_sha": "00731649adc5edcbfd94c10c468fe40f60f177a1",
+      "points_to_commit": "441de759697a741883cb4580dfce30a2bb1a068d",
+      "remote_main_verified": "441de759697a741883cb4580dfce30a2bb1a068d",
+      "remote_tag_v1.2.0i_unchanged": "1cfdd64b83738ce69bc9c518e1c565c8603feda8 → 1dfd1f40bf8f68b3685338e7b01e9d02c43db043",
+      "remote_tag_v1.2.0i.1_verified": "00731649adc5edcbfd94c10c468fe40f60f177a1",
+      "push_method": "git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin main --follow-tags (per Codex 提交铁律 2026-09-05)"
+    },
+    "forward_scope_unchanged_from_v1.2.0i": {
+      "F1_3_wrapper_service_healthcheck_P2": "⏸️ DEFERRED to v1.2.0j; D8 scope was orchestrator first; design with L18 hygiene (verify base image tools before relying)",
+      "F2_M1_in_memory_taskStore_persistence_P2": "⏸️ DEFERRED to v1.2.0j+; active tasks 进程重启丢失; queue_store.ts SQLite 缓解但 running task 不溢出; orchestrator.ts:487 TODO 已 capture",
+      "F3_M2_commander_stepTracker_persistence_P2": "⏸️ DEFERRED to v1.2.0j+; step-DAG 状态仅 in-memory; restart 丢失 DAG progress",
+      "F4_M5_NoActiveWorkerError_circuit_breaker_P2": "⏸️ DEFERRED to v1.2.0j+; dispatch() retry loop tight, 无 backoff",
+      "G2_aliyun_edge3_install_MEDIUM": "⏸️ DEFERRED (user OOB)",
+      "G4_3_edge_gh_secrets_copy_LOW": "⏸️ DEFERRED (blocked on G2)",
+      "G5_tailscale_split_dns_LOW": "⏸️ DEFERRED (admin toggle)",
+      "G7_on_failure_N_tune_LOW": "collect 48h evidence post-v1.2.0g deploy (now active per U3 smoke) before bumping on-failure:3 → :5"
+    }
   }
 }
