@@ -513,5 +513,74 @@
       "G5_tailscale_split_dns_LOW": "⏸️ DEFERRED (admin toggle)",
       "G7_on_failure_N_tune_LOW": "collect 48h evidence post-v1.2.0g deploy (now active per U3 smoke) before bumping on-failure:3 → :5"
     }
+  },
+  "v1.2.0j_wrapper_commander_frontend_healthcheck_closure": {
+    "task_id": "T-V1.2.0J-WRAPPER-COMMANDER-FRONTEND-HEALTHCHECK-CLOSURE-PASS",
+    "commit": "v1.2.0j F1 wrapper healthcheck + stop_grace_period for commander/commander-2/frontend (2026-09-12). 1 commit c522c11 fix(compose): v1.2.0j F1 healthcheck + stop_grace_period for commander/commander-2/frontend (2 files +117 lines: compose +33, test file +84). Trigger: v1.2.0i forward scope §8.1 F1 deferred (3 wrapper services after orchestrator) + v1.2.0i.1 L18 hygiene 验证 base image tools → probe pattern strict-reuse. User 2026-09-12 '你来帮我验证u1-u3，然后规划v1.2.0j' → U1-U3 PASS (v1.2.0i.1 closure verified 2026-09-12) → ExitPlanMode approved → D1-D8 locked. D1 严 scope = only deploy/6host-compose.newvps.yml (edge compose user-OOB) + only 3 services (wrapper-commander :4001, wrapper-commander-2 :4003, wrapper-frontend :4002).",
+    "created_at": "2026-09-12T11:20:00Z",
+    "branch": "main",
+    "status": "✅ v1.2.0j F1 wrapper healthcheck CLOSED @ HEAD `c522c11` main (2026-09-12). 6 verification checks PASS: tsc 0 errors + RUN_SERVER_E2E=1 3 gated tests pass (25ms) + 208 regression tests pass + grep A server.ts:113 + pwa_server.ts:32 /health endpoints + grep B 4 probe ports (:4000/:4001/:4003/:4002) + grep C 5 stop_grace_period (kernel pre-existing line 70 + 4 wrappers, better than plan-expected 4). Tag v1.2.0j → c522c11 annotated pending push via Clash proxy per Codex 提交铁律. v1.2.0i forward scope §8.1 F1 → CLOSED. New forward scope §6.b (pwa_server.ts G8.1 移植, L21 finding), §6.a (edge 主机 stale build + 缺 healthcheck), §6.d (本地 build stale rebuild); F2/F3/F4 持久化 unchanged.",
+    "files_modified_count": 2,
+    "compose_changes": {
+      "file": "deploy/6host-compose.newvps.yml",
+      "lines_added": 33,
+      "services_added_healthcheck": [
+        "wrapper-commander (:4001) — build/server.js — server.ts:113 /health",
+        "wrapper-commander-2 (:4003) — build/server.js (same binary) — server.ts:113 /health",
+        "wrapper-frontend (:4002) — build/orchestrator/pwa_server.js — pwa_server.ts:32 /health"
+      ],
+      "probe_pattern_strict_reuse_v1.2.0i.1": "node -e \"fetch('http://localhost:<port>/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"",
+      "stop_grace_period": "30s on all 3 NEW + 1 pre-existing harness-kernel line 70 (5 total matches)",
+      "yaml_parse": "Python yaml.safe_load confirms test=['CMD-SHELL', 'node -e \"fetch(...)\"'] parses correctly per service"
+    },
+    "new_test_file": {
+      "file": "wrapper/test/integration/health_probe_integration.test.ts",
+      "lines_added": 84,
+      "test_count": 3,
+      "gate": "RUN_SERVER_E2E=1 (parallels server_integration.test.ts:15)",
+      "tests": [
+        "wrapper-commander GET /health returns 2xx + JSON (covers wrapper-commander-2 by proxy)",
+        "wrapper-frontend GET /health returns 2xx + {status:'ok',service:'pwa-server'}",
+        "server.ts /health body has status:ok (proves stub fallback when kernel unreachable)"
+      ],
+      "beforeAll": "spin 2 ephemeral servers (commanderApp + pwaApp) on port 0",
+      "afterAll": "close both servers"
+    },
+    "verification_6_checks_pass": {
+      "tsc_noEmit": "exit 0, 0 errors",
+      "vitest_gated_3_tests": "RUN_SERVER_E2E=1 vitest run health_probe_integration.test.ts → 3 passed in 25ms; output shows '[orchestrator] health() — kernel unreachable, returning stub' confirming stub fallback contract",
+      "vitest_regression_208": "208 passed, 168 skipped (16 gated E2E files all skipped per baseline), 0 failed; 13 test files passed",
+      "grep_A_health_endpoints": "server.ts:113 + pwa_server.ts:32 ✓ (matches plan §7 read-only refs)",
+      "grep_B_probe_ports_4": ":4000 (orchestrator) + :4001 (commander) + :4003 (commander-2) + :4002 (frontend) — exact match per plan §3",
+      "grep_C_stop_grace_period_5": "harness-kernel pre-existing line 70 + wrapper-orchestrator line 199 + 3 NEW — actual 5, plan-expected 4 (oversight on harness-kernel pre-existing); actual is better coverage"
+    },
+    "hygiene_checks": {
+      "D1_strict_scope_preserved": "Only deploy/6host-compose.newvps.yml modified; edge compose / newvps-compose.yml / macbook-compose.yml / 3host-compose.worker.yml 全不动",
+      "D2_probe_strict_reuse": "node -e fetch(...) pattern identical to v1.2.0i.1 wrapper-orchestrator line 194, no fallback, no alternative path",
+      "L8_no_secrets_in_diff": "0 API keys / secrets in commit diff (git diff --stat shows only compose + test file content)",
+      "D3_lock_no_frozen_files_modified": "harness/, spec/, spikes/, Dockerfile (root), pyproject.toml, 10 ADR body all untouched",
+      "D10_cycle_closure_hygiene": "1 fix commit + 1 cc-ready flip commit + tag v1.2.0j → commit 1 SHA (parallel v1.2.0i.1 pattern)"
+    },
+    "new_lessons": {
+      "L21_pwa_server_no_G8.1": "pwa_server.ts lacks registerShutdown G8.1 handler (verified via grep — only server.ts:388-447 has it). When adding healthcheck to a wrapper service, MUST audit graceful shutdown handler presence. Missing → either add stop_grace_period buffer (cheap, v1.2.0j approach = 30s) OR port registerShutdown pattern (~+60 lines, forward scope §6.b deferred).",
+      "L22_same_binary_multi_port": "wrapper-commander + wrapper-commander-2 share build/server.js binary; only WRAPPER_PORT env var differs. Healthcheck probes port-only-differentiated. Single integration test (ephemeral port) covers both by proxy — saves boilerplate. Pattern reuses for future wrapper service additions with shared binary."
+    },
+    "tag_pushed": {
+      "tag_name": "v1.2.0j",
+      "tag_sha": "pending — not yet created",
+      "points_to_commit": "c522c11",
+      "push_method": "git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin main --follow-tags (per Codex 提交铁律 2026-09-05)",
+      "remote_tag_pending_authorization": true
+    },
+    "forward_scope_v1.2.0j_plus": {
+      "6_a_edge_hosts_stale_build_P2": "⏸️ DEFERRED — 6host-compose.edge[1-5].yml 同样缺 healthcheck; edge 主机需 rebuild 拾起 G8.1 code; user-OOB",
+      "6_b_pwa_server_G8.1_port_P2": "⏸️ DEFERRED — pwa_server.ts G8.1 SIGTERM handler 移植 (L21); port wrapper/server.ts:388-444 registerShutdown pattern + import + isMain block 调用; ~+60 lines",
+      "6_c_F2_F3_F4_unchanged_P2": "⏸️ DEFERRED — _taskStore 持久化 + _stepTracker 持久化 + NoActiveWorkerError circuit breaker; P2 batch",
+      "6_d_local_build_stale_rebuild_P2": "⏸️ DEFERRED — 本地 wrapper/build/server.js stale (compiled 2026-09-09 but source 2026-09-12); fresh npm run build 即可",
+      "G2_aliyun_edge3_install_MEDIUM": "⏸️ DEFERRED (user OOB)",
+      "G4_3_edge_gh_secrets_copy_LOW": "⏸️ DEFERRED (blocked on G2)",
+      "G5_tailscale_split_dns_LOW": "⏸️ DEFERRED (admin toggle)",
+      "G7_on_failure_N_tune_LOW": "collect 48h evidence post-v1.2.0g deploy before bumping on-failure:3 → :5"
+    }
   }
 }
