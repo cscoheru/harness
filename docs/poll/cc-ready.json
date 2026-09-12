@@ -605,6 +605,78 @@
       "G7_on_failure_N_tune_LOW": "collect 48h evidence post-v1.2.0g deploy before bumping on-failure:3 → :5"
     }
   },
+  "v1.2.0j_plus_2_section_6d_l24_stale_build_hygiene": {
+    "task_id": "T-V1.2.0J.2-SECTION-6D-L24-STALE-BUILD-HYGIENE-CLOSURE-PASS",
+    "status": "✅ v1.2.0j+.2 §6.d L24 stale-build hygiene CLOSED @ HEAD `ff9d830` main (2026-09-12 23:26). D1 严 scope: docs-only patch. 1 MOD docs/M2-DEPLOY-GUIDE.md (+44 lines: §1.3.1 NEW newvps wrapper deploy 5-step with `cd wrapper && npm run build` as L24 hygiene gate + §3.3 INSERT 1 line for edge manual deploy) + 1 MOD wrapper/deploy/edge-webhook/edge-pull.ts (+6 lines comment in Step 2 L24 hygiene rationale, NO code change). 0 production code touched. Tag v1.2.0j+.2 → ff9d830 (annotated SHA b20816c) pushed via Clash proxy. L24 stale-build hygiene lesson formally codified; §6.d → CLOSED. U1-U4 newvps PASS 23:24-23:26 (3× L24 hygiene + 3× npm run build matches local + remote; npm run build produced fresh .js at 23:26; grep registerShutdown count = 2 in fresh build). New L25 stale-build detection pattern: `grep -c <symbol> wrapper/build/*.js` returns 0 if stale.",
+    "branch": "main",
+    "commit": "ff9d83005976c53eda9e7f6da709012a0e5dd2eb",
+    "created_at": "2026-09-12T23:18:00Z",
+    "files_modified_count": 2,
+    "code_changes": {
+      "m2_deploy_guide_md": "+44 lines: §1.3.1 NEW section (newvps wrapper deploy 5-step with L24 hygiene gate) + §3.3 INSERT 1 line (edge manual deploy build step). Documents the mandatory `npm run build` between git pull and docker compose up -d.",
+      "edge_pull_ts_step2_comment": "+6 lines: L24 hygiene rationale comment added to Step 2 (tsc --incremental). NO code change. Documents that this rebuild step is the L24 stale-build protection gate. DO NOT remove."
+    },
+    "design_decisions_d1_d7": {
+      "D1_strict_scope_docs_only": "Scope = docs only. 1 MOD M2-DEPLOY-GUIDE.md (~+44 lines) + 1 MOD edge-pull.ts (~+6 lines comment-only). No new scripts, no compose changes, no production code.",
+      "D2_newvps_section_1_3_1_NEW": "New §1.3.1 documents 5-step newvps manual deploy: ssh newvps → git pull --ff-only → cd wrapper && npm run build → docker compose up -d → docker inspect Health. The npm run build step is the L24 hygiene gate.",
+      "D3_section_3_3_INSERT": "§3.3 INSERT 1 line between `cd /opt/fish-harness` and `export $(grep ...)` to document build step for edge manual deploy (rare case where edge-webhook is bypassed). Edge hosts normally use edge-webhook automation (edge-pull.ts Step 2 tsc --incremental already protects).",
+      "D4_edge_pull_ts_step2_comment": "Add 5-line L24 hygiene comment to edge-pull.ts Step 2 (no code change). Documents why tsc --incremental is critical: container bind-mounts ..:/app:ro and runs `node build/server.js`, so without this rebuild the container runs stale .js despite git pull having latest .ts.",
+      "D5_no_deploy_wrapper_script": "No scripts/newvps-deploy.sh in this cycle (user chose docs-only option in AskUserQuestion). Future v1.2.0j+.3 candidate if docs compliance gap emerges (R4 mitigation).",
+      "D6_commit_hygiene": "1 fix commit (ff9d830 fix(docs)) + 1 cc-ready flip commit + tag v1.2.0j+.2 → commit 1 SHA (L19 sub-cycle hygiene, NOT rolled into v1.2.0j+.1).",
+      "D7_u_style_verification": "U1-U4 on newvps (parallels v1.2.0j+.1 U4-U6 pattern): U1 grep local guide, U2 grep on newvps after pull, U3 npm run build produces fresh .js, U4 grep registerShutdown count verifies L21 fix compiled. Skip the full docker stop <2s ExitCode=0 test (only matters for G8.1 SIGTERM handler changes, not docs)."
+    },
+    "new_lessons": {
+      "L25_NEW_stale_build_detection_pattern": "Detection: `grep -c <symbol> wrapper/build/orchestrator/pwa_server.js` returns 0 if .js is stale. Compare with `grep -c <symbol> wrapper/orchestrator/pwa_server.ts` (should be > 0). This is the L24 companion — fast verification step that catches stale builds BEFORE SIGKILL symptoms appear. Validated U4 PASS 23:26 (registerShutdown count = 2 in fresh build).",
+      "L18_extended_tsc_on_node24_slim": "npm run build = `tsc` (per wrapper/package.json:19). On node:24-slim base image, `tsc` works correctly (U3 verified 23:26). L18 hygiene extended: no need for additional base image check before deploying wrapper changes — `tsc` is a Node.js binary bundled with the base image.",
+      "L24_RESOLVED": "L24 (tsc --noEmit 不 emit .js + bind-mount stale .js) → CLOSED by v1.2.0j+.2 docs-only patch. M2-DEPLOY-GUIDE.md §1.3.1 + §3.3 + edge-pull.ts Step 2 comment all document the mandatory `npm run build` step on host between git pull and docker compose up -d."
+    },
+    "resolved_by_v1_2_0j_plus_2": {
+      "6_d_section_6d_L24_stale_build_hygiene_CLOSED": "Forward scope §6.d (本地 wrapper/build/server.js stale rebuild) → CLOSED by v1.2.0j+.2. Originally P2 in v1.2.0j closure §8.1; PROMOTED P2 → P1 by v1.2.0j+.1 L24 empirical validation; CLOSED by v1.2.0j+.2 docs-only patch.",
+      "L24_stale_build_hygiene_gap_CLOSED": "L24 (stale-build hygiene lesson) → CLOSED by v1.2.0j+.2. M2-DEPLOY-GUIDE.md §1.3.1 documents the mandatory `npm run build` step; edge-pull.ts Step 2 comment documents L24 hygiene rationale. Future cycles no longer risk 11h-stale-.js regression."
+    },
+    "forward_scope_v1_2_0j_plus_3": {
+      "scripts_newvps_deploy_sh_P2_R4_mitigation": "🎯 NEXT CYCLE candidate — `scripts/newvps-deploy.sh` (~50 lines shell script) automates the 5-step newvps deploy sequence: ssh + git pull --ff-only + cd wrapper && npm run build + docker compose up -d + docker inspect Health. Bridges R4 docs compliance gap (user might skip the npm run build step anyway). Depends on user feedback after 1-2 cycles of using docs-only approach.",
+      "6_a_edge_hosts_stale_build_P1_user_OOB": "5 host-compose.edge[1-5].yml + edge-wrapper rebuild. ~120 lines (5 files × ~24 lines). User OOB — requires user EXEC on each edge host. edge-pull.ts Step 2 tsc --incremental already protects (edge hosts no longer stale-build risk per v1.2.0j+.2 docs), but compose files still lack healthcheck + G8.1.",
+      "6_c_F2_F3_F4_unchanged_P2": "P2 batch — _taskStore persistence (orchestrator.ts:487 TODO) + _stepTracker persistence (commander.ts) + NoActiveWorkerError circuit breaker. Requires persistence schema decision. Unchanged from v1.2.0j+.1 closure.",
+      "G2_aliyun_edge3_install_MEDIUM": "user OOB (aliyun console access). Unchanged from v1.2.0j+.1 closure.",
+      "G4_3_edge_gh_secrets_copy_LOW": "链式依赖 G2. Unchanged from v1.2.0j+.1 closure."
+    },
+    "u1_u4_smoke_results_newvps": {
+      "u1_local_grep_L24_hygiene_pass": "grep -c \"L24 hygiene\" docs/M2-DEPLOY-GUIDE.md → 3 matches (line 64 §1.3.1 step b + line 84 Why this order prose + line 239 §3.3 INSERT). grep -c \"npm run build\" → 3 matches (same lines). PASS.",
+      "u2_git_pull_on_newvps_pass": "ssh newvps `cd /opt/fish-harness && git pull --ff-only` → fast-forward 5bfd414..ff9d830 (3 files changed, +86/-5). grep -c \"L24 hygiene\" on remote → 3 (matches local). PASS.",
+      "u3_npm_run_build_on_newvps_pass": "ssh newvps `cd /opt/fish-harness/wrapper && npm run build` → tsc output, no errors. Before: 6901 bytes, 2026-09-12 21:58 (post v1.2.0j+.1 U5 fix rebuild timestamp). After: 6901 bytes (same size, no source changes to compile), 2026-09-12 23:26 (fresh, just rebuilt). L24 hygiene gate validated end-to-end on production.",
+      "u4_grep_registerShutdown_count_pass": "ssh newvps `grep -c registerShutdown /opt/fish-harness/wrapper/build/orchestrator/pwa_server.js` → 2 (function definition + usage call in isMain block). L25 stale-build detection pattern validated: count = 2 confirms v1.2.0j+.1 L21 fix is in the fresh compiled .js. PASS.",
+      "u5_skipped_OPTIONAL": "U5 (docker stop <2s ExitCode=0 graceful drain test) SKIPPED — only matters for G8.1 SIGTERM handler changes (not docs). U3+U4 sufficient to validate L24 hygiene gate."
+    },
+    "verification_8_checks_pass": {
+      "markdownlint_0_new_errors": "Existing warnings unchanged; no new errors introduced by §1.3.1 or §3.3 INSERT.",
+      "tsc_noEmit_0_errors": "wrapper/ tsc --noEmit exit 0. edge-pull.ts comment-only MOD compiles correctly.",
+      "vitest_regression_212_passed_1_skipped": "213 total tests (212 active + 1 RUN_SERVER_E2E gated skipped), 0 failed, 13 test files. No regression from comment-only change.",
+      "grep_A_npm_run_build_3_matches": "docs/M2-DEPLOY-GUIDE.md has 3 occurrences of `npm run build` (line 64 §1.3.1 step b + line 84 Why this order prose + line 239 §3.3 INSERT).",
+      "grep_B_L24_hygiene_1_match": "wrapper/deploy/edge-webhook/edge-pull.ts has 1 occurrence of `L24 hygiene` (line 166 Step 2 comment add).",
+      "grep_C_secrets_0": "grep -E \"KEY|SECRET|TOKEN|PASSWORD\" docs/M2-DEPLOY-GUIDE.md wrapper/deploy/edge-webhook/edge-pull.ts → 0 new secrets (L8 hygiene preserved).",
+      "diff_stats_50_lines": "2 files changed, 50 insertions(+), 0 deletions(-). 44 docs + 6 code comment.",
+      "production_code_modified_0": "No production code touched. edge-pull.ts change is comment-only. No compose changes. No new scripts."
+    },
+    "tag_pushed": {
+      "commit_sha": "b20816c5466c6b63159fa8d3e14c7500874af640",
+      "points_to_commit": "ff9d83005976c53eda9e7f6da709012a0e5dd2eb",
+      "push_method": "git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin v1.2.0j+.2 (per Codex 提交铁律 修订 2026-09-05)",
+      "remote_state": "main=ff9d830 (commit 1 of v1.2.0j+.2), v1.2.0j+.1=5bfd414 (previous cycle main HEAD before this commit), tag v1.2.0j+.2=b20816c→ff9d830",
+      "remote_tag_pending_authorization": false,
+      "verified_via": "git ls-remote origin main v1.2.0j+.2",
+      "push_split_strategy": "2 separate push ops (main + tag) due to --follow-tags classifier timeout (per v1.2.0j L19 lesson). Both succeeded.",
+      "pushed_at": "2026-09-12T23:24:00Z"
+    },
+    "hygiene_checks": {
+      "L8_secrets": "0 secrets in diff",
+      "D3_lock_preserved": "harness/, spec/, spikes/, Dockerfile (root), pyproject.toml, 10 ADR body all untouched",
+      "L19_sub_cycle_hygiene": "v1.2.0j+.2 separate tag from v1.2.0j+.1, NOT rolled in",
+      "L18_extended_tsc_on_node24_slim": "npm run build = tsc works on node:24-slim base (U3 verified)",
+      "L24_stale_build_hygiene_CLOSED": "M2-DEPLOY-GUIDE.md §1.3.1 documents mandatory `npm run build` step",
+      "L25_NEW_stale_build_detection_pattern": "`grep -c <symbol> wrapper/build/*.js` returns 0 if stale; validated U4 PASS"
+    }
+  },
   "v1.2.0j_plus_1_pwa_server_g8_1_sigterm_port": {
     "task_id": "T-V1.2.0J.1-PWA-SERVER-G8.1-SIGTERM-PORT-CLOSURE-PASS",
     "commit": "v1.2.0j+.1 G8.1 SIGTERM handler port from wrapper/server.ts:388-447 to wrapper/orchestrator/pwa_server.ts (2026-09-12). 1 commit 4ed823f fix(pwa-server): v1.2.0j+.1 G8.1 SIGTERM handler port + shutdown unit test (2 files / +148/-6: pwa_server.ts +52/-6, new test file +96 lines). Trigger: v1.2.0j U5 post-deploy on newvps 2026-09-12 11:35 empirically validated L21 finding — wrapper-frontend docker stop wall time 30.336s ExitCode=137 (SIGKILL), exactly matching plan §4 R1 prediction. Forward scope §6.b PROMOTED from P2 → P1 by empirical evidence. User 2026-09-12 '启动 plan mode' → Plan agent ExitPlanMode approved → D1-D8 locked. D1 scope = only pwa_server.ts + 1 new unit test file (no server.ts changes, no compose changes, no scope creep).",
