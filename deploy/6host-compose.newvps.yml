@@ -179,6 +179,23 @@ services:
     ports:
       - "4000:4000"
     command: ["node", "build/server.js"]
+    # v1.2.0i NEW per G8.2 (P2, M3): wrapper-orchestrator healthcheck.
+    # Parallels harness-kernel healthcheck (line 59-64). Use wget
+    # (available in node:24-slim base image) since curl is NOT included.
+    # Probe http://localhost:4000/health every 30s with 10s timeout.
+    # 3 retries fail → unhealthy → `restart: unless-stopped` restart.
+    # start_period 15s gives boot time before first probe (avoids false
+    # unhealthy during startup). stop_grace_period 30s parallels
+    # harness-kernel line 70; gives G8.1 SIGTERM handler time to drain
+    # in-flight requests + close DB handles + flush metrics (per
+    # fish-harness-v1.2.0i-cycle-closure.md).
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:4000/health > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    stop_grace_period: 30s
     mem_limit: 512m
     memswap_limit: 512m
     cpus: "0.5"

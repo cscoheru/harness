@@ -56,7 +56,8 @@ if (!process.env['DNS_SERVERS']) {
 }
 
 import * as orchestrator from './orchestrator/orchestrator.js';
-import { startWorkerHeartbeatSender } from './orchestrator/heartbeat_sender.js';
+import { startWorkerHeartbeatSender, stopWorkerHeartbeatSender } from './orchestrator/heartbeat_sender.js';
+import { stopMetricsSampling, stopReapLoop } from './orchestrator/metrics.js';
 import * as webpush from './orchestrator/webpush_gateway.js';
 // stt_worker.ts is dynamically imported in the /api/stt/transcribe handler
 // because its module-level WHISPER_MODEL_PATH check would otherwise crash the
@@ -369,6 +370,84 @@ app.post('/api/stt/transcribe', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// v1.2.0i NEW per G8.1 (P1, hygiene): graceful shutdown handler.
+// On SIGTERM/SIGINT: stop accepting new connections, drain metrics timers,
+// close DB handles. Bound by stop_grace_period: 30s in compose. Try/catch
+// per step so single failure doesn't block others (fail-safe). Idempotent
+// via `shuttingDown` guard so re-entrant signals (e.g., Ctrl-C twice) don't
+// double-close resources.
+// ---------------------------------------------------------------------------
+
+/**
+ * Register SIGTERM/SIGINT handlers that gracefully drain the wrapper.
+ * Should only be called once, when this module is the entry point (isMain).
+ *
+ * v1.2.0i NEW per G8.1: Exported for unit testability (see
+ * test/unit/server.test.ts v1.2.0i G8.1 describe block).
+ */
+export function registerShutdown(server: import('http').Server): void {
+  let shuttingDown = false;
+  const shutdown = async (signal: string): Promise<void> => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    // eslint-disable-next-line no-console
+    console.log(`[wrapper/server] received ${signal}, draining...`);
+
+    // 1. Stop accepting new connections (waits for in-flight requests to finish)
+    try {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(`[wrapper/server] server.close failed: ${String(err)}`);
+    }
+
+    // 2. Stop metrics sampling + reap loop timers
+    try {
+      stopMetricsSampling();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(`[wrapper/server] stopMetricsSampling failed: ${String(err)}`);
+    }
+    try {
+      stopReapLoop();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(`[wrapper/server] stopReapLoop failed: ${String(err)}`);
+    }
+
+    // 3. Stop heartbeat sender timer (ref'd per L7 — must clear or process won't exit)
+    try {
+      stopWorkerHeartbeatSender();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(`[wrapper/server] stopWorkerHeartbeatSender failed: ${String(err)}`);
+    }
+
+    // 4. Close DB handles (release SQLite WAL locks)
+    try {
+      const wpMod = await import('./orchestrator/worker_pool.js');
+      wpMod.getDefaultWorkerPool().close();
+      const qsMod = await import('./orchestrator/queue_store.js');
+      qsMod.getDefaultQueueStore().close();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(`[wrapper/server] DB close failed: ${String(err)}`);
+    }
+
+    // eslint-disable-next-line no-console
+    console.log(`[wrapper/server] shutdown complete, exiting`);
+    process.exit(0);
+  };
+
+  // Returning the promise (not `void` wrapping it) lets callers (notably
+  // G8.1c unit tests in test/unit/server.test.ts) await the shutdown
+  // pipeline by invoking the registered handler directly. process.on itself
+  // ignores the return value — Node never awaits listener returns.
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+}
+
+// ---------------------------------------------------------------------------
 // Listener (started only when run as main entry, not when imported by tests)
 // ---------------------------------------------------------------------------
 
@@ -378,10 +457,13 @@ const isMain = process.argv[1] !== undefined
 
 if (isMain) {
   const port = parseInt(WRAPPER_PORT, 10);
-  app.listen(port, () => {
+  const server = app.listen(port, () => {
     // eslint-disable-next-line no-console
     console.log(`[wrapper/server] listening on :${port}`);
   });
+  // v1.2.0i NEW per G8.1: register SIGTERM/SIGINT graceful shutdown handler
+  // (registers on the http.Server instance so server.close() drains in-flight).
+  registerShutdown(server);
   // Worker self-registration loop (3-host deploy NEW): only active when
   // WORKER_HEARTBEAT_URL is set (edge/worker compose), inert on newvps profiles.
   startWorkerHeartbeatSender();

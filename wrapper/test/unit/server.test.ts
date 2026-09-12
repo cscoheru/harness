@@ -17,7 +17,7 @@
  * @file wrapper/test/unit/server.test.ts
  */
 
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { createServer, type Server } from 'http';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -52,8 +52,11 @@ beforeAll(async () => {
   // /data/worker_pool.db is not writable in test env).
   serverTestDir = mkdtempSync(join(tmpdir(), 'server-unit-test-'));
   process.env['WORKER_POOL_DB'] = join(serverTestDir, 'server-unit.db');
+  process.env['QUEUE_STORE_DB'] = join(serverTestDir, 'queue_store.db');
   const { _resetWorkerPoolForTests } = await import('../../orchestrator/worker_pool.js');
   _resetWorkerPoolForTests();
+  const { _resetQueueStoreForTests } = await import('../../orchestrator/queue_store.js');
+  _resetQueueStoreForTests();
 
   server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -66,7 +69,10 @@ afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   const { _resetWorkerPoolForTests } = await import('../../orchestrator/worker_pool.js');
   _resetWorkerPoolForTests();
+  const { _resetQueueStoreForTests } = await import('../../orchestrator/queue_store.js');
+  _resetQueueStoreForTests();
   delete process.env['WORKER_POOL_DB'];
+  delete process.env['QUEUE_STORE_DB'];
   if (serverTestDir) rmSync(serverTestDir, { recursive: true, force: true });
 });
 
@@ -230,6 +236,136 @@ describe('server.ts — endpoint integration', () => {
       expect(ct).toMatch(/html/);
       const text = await res.text();
       expect(text).toMatch(/<div id="root">/);
+    });
+  });
+
+  // ── v1.2.0i G8.1 graceful shutdown (P1, hygiene) ───────────────────────
+  // Verifies registerShutdown() registers SIGTERM/SIGINT handlers and the
+  // captured handler drains server.close + stop* functions + DB closes in
+  // the documented order (D2 in v1.2.0i plan).
+  describe('v1.2.0i G8.1 graceful shutdown', () => {
+    let listeners: Record<string, Array<(...args: unknown[]) => void | Promise<void>>>;
+    let processOnSpy: ReturnType<typeof vi.spyOn>;
+    let processExitSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      listeners = {};
+      processOnSpy = vi.spyOn(process, 'on').mockImplementation(((event: string, fn: (...args: unknown[]) => unknown) => {
+        (listeners[event] ??= []).push(fn as (...args: unknown[]) => void | Promise<void>);
+        return process;
+      }) as unknown as typeof process.on);
+      // Silent call-recording spy (no throw). The shutdown handler explicitly
+      // calls process.exit(0) as its terminal step; we record the call so
+      // tests can assert it was reached, without throwing — vitest's internal
+      // process.exit hook intercepts synchronous throws and reports them as
+      // uncaught errors even when the test's try/catch would catch them.
+      processExitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+        // intentional no-op — process.exit call is observed via the spy
+      }) as never);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      // Remove handlers that registerShutdown added (spied) so subsequent
+      // tests don't accumulate listeners on the real process object.
+      process.removeAllListeners('SIGTERM');
+      process.removeAllListeners('SIGINT');
+    });
+
+    function getHandler(signal: 'SIGTERM' | 'SIGINT'): () => void | Promise<void> {
+      const list = listeners[signal];
+      if (!list || list.length === 0) throw new Error(`no ${signal} handler registered`);
+      return list[0];
+    }
+
+    async function triggerShutdown(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
+      const handler = getHandler(signal);
+      await handler();
+    }
+
+    it('registers SIGTERM and SIGINT handlers on isMain startup', async () => {
+      const { registerShutdown } = await import('../../server.js');
+      const mockServer = { close: vi.fn((cb: () => void) => cb()) };
+      registerShutdown(mockServer as unknown as import('http').Server);
+      expect(processOnSpy).toHaveBeenCalledWith('SIGTERM', expect.any(Function));
+      expect(processOnSpy).toHaveBeenCalledWith('SIGINT', expect.any(Function));
+    });
+
+    it('shutdown calls server.close FIRST (stops new connections, waits in-flight)', async () => {
+      const { registerShutdown } = await import('../../server.js');
+      const closeFn = vi.fn((cb: () => void) => cb());
+      const mockServer = { close: closeFn };
+      registerShutdown(mockServer as unknown as import('http').Server);
+      await triggerShutdown('SIGTERM');
+      // server.close called BEFORE process.exit (D2 ordering)
+      expect(closeFn).toHaveBeenCalledTimes(1);
+      expect(processExitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('shutdown calls stopMetricsSampling + stopReapLoop (metrics timers)', async () => {
+      const metrics = await import('../../orchestrator/metrics.js');
+      const stopSamplingSpy = vi.spyOn(metrics, 'stopMetricsSampling');
+      const stopReapSpy = vi.spyOn(metrics, 'stopReapLoop');
+      const { registerShutdown } = await import('../../server.js');
+      registerShutdown({ close: vi.fn((cb: () => void) => cb()) } as unknown as import('http').Server);
+      await triggerShutdown('SIGTERM');
+      expect(stopSamplingSpy).toHaveBeenCalledTimes(1);
+      expect(stopReapSpy).toHaveBeenCalledTimes(1);
+      expect(processExitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('shutdown calls stopWorkerHeartbeatSender (clears ref\'d timer per L7)', async () => {
+      const hb = await import('../../orchestrator/heartbeat_sender.js');
+      const stopHbSpy = vi.spyOn(hb, 'stopWorkerHeartbeatSender');
+      const { registerShutdown } = await import('../../server.js');
+      registerShutdown({ close: vi.fn((cb: () => void) => cb()) } as unknown as import('http').Server);
+      await triggerShutdown('SIGTERM');
+      expect(stopHbSpy).toHaveBeenCalledTimes(1);
+      expect(processExitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('shutdown closes worker_pool + queue_store DB handles (releases WAL locks)', async () => {
+      const wp = await import('../../orchestrator/worker_pool.js');
+      const qs = await import('../../orchestrator/queue_store.js');
+      const wpPool = wp.getDefaultWorkerPool();
+      const qsStore = qs.getDefaultQueueStore();
+      const wpCloseSpy = vi.spyOn(wpPool, 'close');
+      const qsCloseSpy = vi.spyOn(qsStore, 'close');
+      const { registerShutdown } = await import('../../server.js');
+      registerShutdown({ close: vi.fn((cb: () => void) => cb()) } as unknown as import('http').Server);
+      await triggerShutdown('SIGTERM');
+      expect(wpCloseSpy).toHaveBeenCalledTimes(1);
+      expect(qsCloseSpy).toHaveBeenCalledTimes(1);
+      expect(processExitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('shutdown is idempotent (re-entrant signals are no-op)', async () => {
+      const { registerShutdown } = await import('../../server.js');
+      const closeFn = vi.fn((cb: () => void) => cb());
+      registerShutdown({ close: closeFn } as unknown as import('http').Server);
+      await triggerShutdown('SIGTERM');
+      await triggerShutdown('SIGINT');
+      // close called only once despite two signals (shuttingDown guard)
+      expect(closeFn).toHaveBeenCalledTimes(1);
+      expect(processExitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('shutdown survives individual step failures (fail-safe per step)', async () => {
+      const metrics = await import('../../orchestrator/metrics.js');
+      const hb = await import('../../orchestrator/heartbeat_sender.js');
+      // Make stopMetricsSampling throw — subsequent steps must still run
+      const stopSamplingSpy = vi.spyOn(metrics, 'stopMetricsSampling').mockImplementationOnce(() => {
+        throw new Error('boom-metrics');
+      });
+      const stopReapSpy = vi.spyOn(metrics, 'stopReapLoop');
+      const stopHbSpy = vi.spyOn(hb, 'stopWorkerHeartbeatSender');
+      const { registerShutdown } = await import('../../server.js');
+      registerShutdown({ close: vi.fn((cb: () => void) => cb()) } as unknown as import('http').Server);
+      await triggerShutdown('SIGTERM');
+      expect(stopSamplingSpy).toHaveBeenCalledTimes(1);
+      expect(stopReapSpy).toHaveBeenCalledTimes(1);
+      expect(stopHbSpy).toHaveBeenCalledTimes(1);
+      expect(processExitSpy).toHaveBeenCalledWith(0);
     });
   });
 });

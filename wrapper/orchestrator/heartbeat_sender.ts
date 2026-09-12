@@ -62,6 +62,21 @@ export function sendOneBeat(
  * Start the sender loop when WORKER_HEARTBEAT_URL is set. No-op otherwise,
  * so importing this from server.ts is safe for every wrapper profile.
  */
+// v1.2.0i NEW per G8.1 (P1, hygiene): module-scope _senderTimer so SIGTERM
+// handler can clearInterval. Previously `const timer = setInterval(...)` was
+// a local variable inaccessible from outside the function — no clean exit
+// path existed. Now stopWorkerHeartbeatSender() is the proper exit path
+// (called from server.ts G8.1 SIGTERM handler).
+let _senderTimer: NodeJS.Timeout | null = null;
+
+/** Stop the heartbeat sender timer (called from SIGTERM graceful shutdown). */
+export function stopWorkerHeartbeatSender(): void {
+  if (_senderTimer !== null) {
+    clearInterval(_senderTimer);
+    _senderTimer = null;
+  }
+}
+
 export function startWorkerHeartbeatSender(): void {
   const target = process.env['WORKER_HEARTBEAT_URL'];
   if (!target) return;
@@ -77,7 +92,9 @@ export function startWorkerHeartbeatSender(): void {
     .then((id) => { workerId = id; })
     .catch((e) => console.error(`[heartbeat_sender] initial beat failed: ${String(e)}`));
 
-  const timer = setInterval(() => {
+  // v1.2.0i CHANGE per G8.1: assign to module-scope `_senderTimer` so
+  // stopWorkerHeartbeatSender() can clearInterval during graceful shutdown.
+  _senderTimer = setInterval(() => {
     void sendOneBeat(opts, workerId)
       .then((id) => { workerId = id; })
       .catch(() => {/* retried on next tick */});
@@ -91,5 +108,7 @@ export function startWorkerHeartbeatSender(): void {
   //   `restart: unless-stopped` immediately restarts (~60s cycle, infinite
   //   restart loop, daemon pressure). KEEP TIMER REF'D so the heartbeat
   //   interval holds the loop open alongside app.listen. Confirmed fix on
-  //   puer-hk 2026-09-09: daemon events 30+/5min → 0 after patch.
+  //   puer-hk 2026-09-09: daemon events 30+/5min → 0 after patch. The
+  //   proper exit path is now stopWorkerHeartbeatSender() called from the
+  //   G8.1 SIGTERM handler in server.ts.
 }
