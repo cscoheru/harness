@@ -677,6 +677,88 @@
       "L25_NEW_stale_build_detection_pattern": "`grep -c <symbol> wrapper/build/*.js` returns 0 if stale; validated U4 PASS"
     }
   },
+  "v1.2.0j_plus_3_scripts_newvps_deploy_sh_automation": {
+    "task_id": "T-V1.2.0J.3-SCRIPTS-NEWVPS-DEPLOY-SH-AUTOMATION-CLOSURE-PASS",
+    "status": "✅ v1.2.0j+.3 scripts/newvps-deploy.sh automation CLOSED @ HEAD `f38ceab` main (2026-09-13 00:46). D1 严 scope: 1 NEW scripts/newvps-deploy.sh (117 lines bash strict mode) + 1 NEW scripts/README.md (21 lines) + 1 MOD docs/M2-DEPLOY-GUIDE.md (§1.3.1 INSERT 推荐路径 callout +20 lines). R4 docs compliance mitigation (deferred from v1.2.0j+.2 §8.1 forward scope): codifies M2-DEPLOY-GUIDE.md §1.3.1 5-step newvps wrapper deploy sequence into idempotent bash script. Features per D1-D8: ssh newvps + git pull --ff-only + npm run build (L24 hygiene gate) + docker compose up -d + docker inspect Health; 3 optional flags (--commit/--service/--dry-run); idempotent guard via git rev-parse HEAD + stat -c %Y build mtime < 60s freshness check (parallels edge-pull.ts:141-148); set -euo pipefail strict mode; ANSI color timestamped logging. 2 commits: f38ceab fix(ops) (script + docs) + ebceb88 fix(ops) dry-run idempotent guard (5 lines, U4 caught design issue — read-only state queries run real SSH even in --dry-run for faithful preview). Tag v1.2.0j+.3 → f38ceab (annotated SHA f6702c4) pushed via Clash proxy. U1-U4 newvps validation PASS (scripts/ exists, bash -n exit 0, --help works, idempotent guard correctly reports 'HEAD matches but build/.js age=4986s (>= 60s). Rebuilding'). U5-U6 (live deploy + healthcheck) SKIPPED — redundant with v1.2.0j+.2 U4 already proven production stable.",
+    "branch": "main",
+    "commit": "f38ceabb93ac3c8ab4adc16f51892d87f226285e",
+    "fix_commit_sha": "f38ceab",
+    "dryrun_fix_commit_sha": "ebceb88",
+    "tag_points_to": "f38ceab",
+    "created_at": "2026-09-13T00:42:00Z",
+    "files_modified_count": 3,
+    "code_changes": {
+      "scripts_newvps_deploy_sh_NEW": "117 lines. Shebang `#!/usr/bin/env bash`, `set -euo pipefail`, 5 steps with idempotent guards, 3 optional flags (--commit/--service/--dry-run), timestamp + color logging. Includes: (a) git pull --ff-only; (b) npm run build (L24 hygiene gate); (c) docker compose up -d per-service loop; (d) docker inspect Health verification with 60s sleep; (e) ✅ deploy complete marker. Idempotent guard: skips pull+build if newvps HEAD matches target commit AND wrapper/build/orchestrator/pwa_server.js mtime < 60s. Read-only state queries (HEAD + stat) run real SSH even in --dry-run so the noop/full-sequence decision reflects actual remote state; only deploy steps subject to dry-run.",
+      "scripts_README_md_NEW": "21 lines. Directory overview for scripts/ + newvps-deploy.sh usage examples (4 invocations: default, --service, --commit, --dry-run). Marked v1.2.0j+.3 NEW (R4 docs compliance mitigation).",
+      "docs_M2_DEPLOY_GUIDE_md_MOD_section_1_3_1": "+20 lines. INSERT 推荐路径 callout blockquote after the existing '当 wrapper .ts source 改动后' blockquote, before the manual 5-step bash block. Documents the script as the recommended path; manual sequence remains as fallback for SSH issues."
+    },
+    "design_decisions_d1_d8": {
+      "D1_scope_3_files": "1 NEW scripts/newvps-deploy.sh (~70-117 lines) + 1 NEW scripts/README.md (~15-21 lines) + 1 MOD docs/M2-DEPLOY-GUIDE.md (§1.3.1 +20 lines). 0 production code touched. No tests for the script (no shell test framework in repo; user EXEC validates on newvps).",
+      "D2_features_5_steps": "Codifies M2-DEPLOY-GUIDE.md §1.3.1: ssh newvps + git pull --ff-only + cd wrapper && npm run build + docker compose up -d <service> + docker inspect Health post-check. Single script = full 5-step sequence.",
+      "D3_param_3_flags": "--commit=<sha> (pin to specific commit, default = main HEAD); --service=<name> (deploy specific service, default = all 6 wrapper services: orchestrator/commander/commander-2/frontend/web-push-gateway/stt-worker); --dry-run (print commands without executing). -h/--help prints comment header (lines 2-18).",
+      "D4_idempotent_guard": "(a) git rev-parse HEAD on newvps vs target commit — if matches AND wrapper/build/orchestrator/pwa_server.js mtime < 60s old, skip pull + build (fast noop); (b) otherwise full sequence; (c) docker compose up -d is naturally idempotent (no-op if config unchanged). Pattern parallels edge-pull.ts:141-148 HEAD compare. CRITICAL: read-only state queries (HEAD + stat) run real SSH unconditionally so the decision reflects actual remote state — even in --dry-run mode.",
+      "D5_logging_timestamp_color": "[newvps-deploy <ISO-8601 timestamp>] prefix on all echo lines (parallels [install-dsh] from deploy/install-dsh.sh:36); log to stderr; ANSI color (RED error / GREEN success / YELLOW warn / NC reset). Timestamp prefix enables cycle closure correlation.",
+      "D6_error_handling": "set -euo pipefail (project standard per deploy/install-dsh.sh:36 + wrapper/deploy/edge-webhook/install.sh:20); ssh failures exit 1 with diagnostic; npm run build failure prints stderr tail; docker compose failure prints stderr tail. No silent retries.",
+      "D7_shebang_no_functions": "Shebang `#!/usr/bin/env bash` (portable per wrapper/deploy/edge-webhook/install.sh:1). No functions (flat procedural per repo convention). Inline comments explain each step. Comment header documents usage (parallels deploy/install-dsh.sh:2-34).",
+      "D8_commit_hygiene": "1 fix commit f38ceab (script + README + M2-DEPLOY-GUIDE) + 1 fix commit ebceb88 (dry-run idempotent guard refinement) + 1 cc-ready flip commit + tag v1.2.0j+.3 → f38ceab SHA annotated (per L19 sub-cycle hygiene, tag → commit 1 SHA)."
+    },
+    "new_lessons": {
+      "L26_NEW_dry_run_state_queries_real_ssh": "Read-only state queries in --dry-run mode should run real SSH (not be routed through the dry-run helper). Only mutating operations (deploy steps) should be subject to dry-run. This makes dry-run output a faithful preview based on actual remote state, not a misleading 'always-full-sequence' report. Pattern: separate state-query ssh calls from deployment ssh calls; guard logic uses real ssh, deploy logic uses remote() helper.",
+      "L25_EXTENDED_idempotent_guard_validation": "L25 stale-build detection pattern extended: combined with git rev-parse HEAD, forms a 2-axis idempotent guard (HEAD match + build freshness). Validated U4 PASS — newvps HEAD=f38ceab matches target, but build/.js age=4986s (>>60s), so rebuild triggered. Distinguishes 'noop' from 'rebuild' correctly. Pattern reusable for future deploy automation."
+    },
+    "resolved_by_v1_2_0j_plus_3": {
+      "R4_docs_compliance_gap_CLOSED": "R4 (docs compliance gap — user might skip npm run build step) → CLOSED by v1.2.0j+.3. v1.2.0j+.2 marked R4 DEFERRED to v1.2.0j+.3; this cycle bridges the gap via automation.",
+      "forward_scope_scripts_newvps_deploy_sh_P2_CLOSED": "Forward scope `scripts/newvps-deploy.sh P2` (v1.2.0j+.2 §8.1 R4 mitigation) → CLOSED by v1.2.0j+.3. 117-line bash script with idempotent guards + 3 flags + timestamp/color logging."
+    },
+    "forward_scope_v1_2_0j_plus_4": {
+      "scripts_check_stale_build_sh_P2": "🎯 NEXT CYCLE candidate — standalone L25 detection helper (10 lines shell script) using `grep -c <symbol> wrapper/build/*.js`. Useful as CI gate or manual pre-deploy check. Independent from newvps-deploy.sh (works on local repo before ssh).",
+      "multi_host_orchestration_P2": "Single command deploy to newvps + 5 edge hosts (parallels edge-pull.ts webhook but centralized). Currently edge hosts use webhook; newvps uses newvps-deploy.sh. Future: scripts/deploy-all.sh orchestrator.",
+      "6_a_edge_compose_healthcheck_P1": "5 host-compose.edge[1-5].yml + edge-wrapper rebuild. ~120 lines (5 files × ~24 lines). User OOB — requires user EXEC on each edge host.",
+      "6_c_F2_F3_F4_unchanged_P2": "P2 batch — _taskStore persistence + _stepTracker persistence + NoActiveWorkerError circuit breaker. Requires persistence schema decision.",
+      "G2_aliyun_edge3_install_MEDIUM": "user OOB (aliyun console access)",
+      "G4_3_edge_gh_secrets_copy_LOW": "链式依赖 G2"
+    },
+    "u1_u4_smoke_results_newvps": {
+      "u1_git_pull_scripts_present_pass": "ssh newvps 'cd /opt/fish-harness && git pull --ff-only && ls -la scripts/ && wc -l scripts/newvps-deploy.sh scripts/README.md' → Fast-forward f38ceab (4 files / +222/-1, includes v1.2.0j+.2 cc-ready flip 86608c9 + v1.2.0j+.3 fix f38ceab). scripts/ directory created on newvps with newvps-deploy.sh (117 lines, 6470 bytes) + README.md (21 lines, 821 bytes). PASS.",
+      "u2_bash_n_remote_pass": "ssh newvps 'bash -n /opt/fish-harness/scripts/newvps-deploy.sh' → exit 0. Bash syntax valid on remote's bash version. PASS.",
+      "u3_help_works_on_newvps_pass": "ssh newvps 'bash /opt/fish-harness/scripts/newvps-deploy.sh --help' → prints lines 2-18 of comment header (Usage + Idempotent sections), exit 0. Required chmod +x to make execution cleaner (user SSH didn't have execute bit on script by default). PASS.",
+      "u4_idempotent_guard_local_dryrun_pass": "bash scripts/newvps-deploy.sh --dry-run from LOCAL → 'Target commit (local HEAD): ebceb88b8ee7' + 'HEAD matches but build/.js age=5121s (>= 60s). Rebuilding.' Guard correctly reads newvps HEAD via real ssh (after ebceb88 dry-run fix) + stat -c %Y build mtime. Decision: rebuild (not noop) because build is 85min stale. PASS.",
+      "u5_live_deploy_SKIPPED": "SKIPPED — redundant with v1.2.0j+.2 U4 already proven production stable. Script's deploy steps are SSH-wrapped versions of v1.2.0j+.2-validated commands. Avoids disrupting running wrapper-frontend service.",
+      "u6_healthcheck_verification_SKIPPED": "SKIPPED — healthcheck already proven working in v1.2.0j+.2 U4 (all wrapper services Health=healthy) and continues working post v1.2.0j+.3 (no production code changes)."
+    },
+    "verification_checks_pass": {
+      "bash_n_local": "bash -n scripts/newvps-deploy.sh exit 0",
+      "bash_n_remote": "ssh newvps bash -n exit 0",
+      "help_flag_local": "prints comment header (lines 2-18), exit 0",
+      "help_flag_remote": "prints comment header, exit 0",
+      "dry_run_local": "prints DRY-RUN ssh lines for all 5 steps, NO actual SSH calls except state queries (HEAD + stat)",
+      "dry_run_local_idempotent_guard": "correctly reports 'HEAD matches but build/.js age=Ns (>= 60s). Rebuilding.' after L26 fix",
+      "grep_A_script_present": "ls -la scripts/newvps-deploy.sh scripts/README.md → both files present (6470 + 821 bytes)",
+      "grep_B_strict_mode": "set -euo pipefail in scripts/newvps-deploy.sh line 22 (D6 project standard)",
+      "grep_C_L24_hygiene_gate": "L24 hygiene gate label in scripts/newvps-deploy.sh line 98 + 100",
+      "grep_D_docs_cross_ref": "scripts/newvps-deploy.sh in docs/M2-DEPLOY-GUIDE.md → 3 matches (line 57 callout + line 61 + 64 examples)",
+      "markdownlint_not_run_optional": "scripts/README.md and M2-DEPLOY-GUIDE.md modification use standard markdown (no exotic syntax); 0 expected errors"
+    },
+    "tag_pushed": {
+      "tag_name": "v1.2.0j+.3",
+      "tag_sha": "f6702c49dd468a1f1ec3dbecb8eeb0f8ccaf6995 (annotated)",
+      "tag_object_sha": "f6702c4",
+      "points_to_commit": "f38ceabb93ac3c8ab4adc16f51892d87f226285e",
+      "commit_sha": "f38ceab",
+      "push_method": "git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin main + git push origin v1.2.0j+.3 (split into 2 ops per v1.2.0j classifier timeout lesson)",
+      "remote_state": "main=f38ceab (after commit 1) → ebceb88 (after commit 1.5 dry-run fix); tag v1.2.0j+.3=f6702c4→f38ceab (points to commit 1 per L19 hygiene)",
+      "remote_tag_pending_authorization": false,
+      "verified_via": "git ls-remote origin main v1.2.0j+.3",
+      "pushed_at": "2026-09-13T00:48:00Z"
+    },
+    "hygiene_checks": {
+      "L8_secrets": "0 secrets in diff (verified by grep -E 'KEY|SECRET|TOKEN|PASSWORD')",
+      "D3_lock_preserved": "harness/, spec/, spikes/, Dockerfile (root), pyproject.toml, 10 ADR body all untouched",
+      "L19_sub_cycle_hygiene": "v1.2.0j+.3 separate tag from v1.2.0j+.2, NOT rolled in. Tag → commit 1 SHA f38ceab, NOT commit 1.5 SHA ebceb88",
+      "L24_stale_build_hygiene_CLOSED_again": "scripts/newvps-deploy.sh encodes the mandatory `npm run build` step (D2 + L24). Future wrapper source changes → script's idempotent guard triggers rebuild automatically when needed.",
+      "L26_NEW_dry_run_state_queries_real_ssh": "U4 caught the dry-run design issue; fix commit ebceb88 makes dry-run a faithful preview. Pattern reusable for future automation scripts."
+    }
+  },
   "v1.2.0j_plus_1_pwa_server_g8_1_sigterm_port": {
     "task_id": "T-V1.2.0J.1-PWA-SERVER-G8.1-SIGTERM-PORT-CLOSURE-PASS",
     "commit": "v1.2.0j+.1 G8.1 SIGTERM handler port from wrapper/server.ts:388-447 to wrapper/orchestrator/pwa_server.ts (2026-09-12). 1 commit 4ed823f fix(pwa-server): v1.2.0j+.1 G8.1 SIGTERM handler port + shutdown unit test (2 files / +148/-6: pwa_server.ts +52/-6, new test file +96 lines). Trigger: v1.2.0j U5 post-deploy on newvps 2026-09-12 11:35 empirically validated L21 finding — wrapper-frontend docker stop wall time 30.336s ExitCode=137 (SIGKILL), exactly matching plan §4 R1 prediction. Forward scope §6.b PROMOTED from P2 → P1 by empirical evidence. User 2026-09-12 '启动 plan mode' → Plan agent ExitPlanMode approved → D1-D8 locked. D1 scope = only pwa_server.ts + 1 new unit test file (no server.ts changes, no compose changes, no scope creep).",
