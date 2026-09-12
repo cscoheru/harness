@@ -163,6 +163,12 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
   // Use --incremental to keep a .tsbuildinfo cache; first run ~30s (full), subsequent ~1-3s
   // (only changed files recompiled). Cache file lives at /opt/fish-harness/wrapper/.tsbuildinfo
   // and is excluded from git via .gitignore.
+  // v1.2.0j+.2 NEW (per L24 hygiene): this tsc --incremental is the stale-build
+  // protection gate. Container bind-mounts `..:/app:ro` and runs `node build/server.js`,
+  // so without this rebuild step the container would run stale compiled .js from the
+  // host filesystem despite git pull Step 1 having the latest .ts. L24 empirically
+  // validated: 11h-old .js (Sep 12 10:53) caused U5 SIGKILL identical to pre-fix
+  // baseline even though git HEAD was correct. DO NOT remove this step.
   const buildStart = Date.now();
   const build = await run("./node_modules/.bin/tsc", ["--incremental"], `${REPO_DIR}/wrapper`, 120_000);
   const buildMs = Date.now() - buildStart;

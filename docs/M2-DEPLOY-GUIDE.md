@@ -47,6 +47,47 @@ ssh edge4 'cd /opt/fish-harness && git pull origin main'
 ssh edge5 'cd /opt/fish-harness && git pull origin main'
 ```
 
+#### §1.3.1 newvps wrapper manual deploy（v1.2.0j+.2 NEW — L24 hygiene）
+
+> 当 wrapper `.ts` source 改动后 (e.g. v1.2.0j+.1 G8.1 SIGTERM 移植), 必须在 newvps
+> 重新编译 `.js` 再启容器. 跳过此步会导致 container 跑 stale `.js` (L24 lesson):
+> stale 11h+ 时, 新 code 完全不生效但 healthcheck probe 仍 2xx, 掩盖问题直到 U5
+> SIGKILL 暴露.
+
+```bash
+# newvps wrapper deploy 5 步 (顺序不可换)
+ssh newvps
+
+cd /opt/fish-harness
+git pull --ff-only                                  # (a) 拉新 code
+
+cd wrapper && npm run build                         # (b) **L24 hygiene gate** — 必跑
+# 预期: tsc recompile .ts -> .js 到 wrapper/build/
+# 预期: 耗时 1-3s (incremental, .tsbuildinfo cache) 或 30s (full, 首次)
+# 验证: grep -c "<new_symbol>" wrapper/build/orchestrator/pwa_server.js
+#       应 > 0 (证明 new code 已 compile 到 .js)
+
+cd /opt/fish-harness
+docker compose --env-file .env.deploy \
+  -f deploy/6host-compose.newvps.yml up -d <service>   # (c) 重启 wrapper 容器
+
+# (d) 验证 health
+docker inspect --format "{{.Name}} Health={{.State.Health.Status}}" harness-<container>
+
+# (e) 验证 graceful shutdown (parallels U5 test, 当改动 G8.1 SIGTERM handler 时)
+time docker stop -t 30 harness-<container>
+# 预期: <2s ExitCode=0 (vs L24 baseline 30s ExitCode=137)
+```
+
+**Why this order**:
+- `git pull` 必须先 (否则 build 跑的是 old code)
+- `npm run build` 必须先于 `docker compose up -d` (容器 bind-mount `..:/app:ro` 读 host's `build/`)
+- `docker stop -t 30` 是 graceful drain 验证 — 任何 G8.1 SIGTERM handler 改动必须 pass 此步
+
+> **Note**: 边缘 host 走 edge-webhook 自动化 deploy (`edge-pull.ts` Step 1+2+3+5),
+> 已自动包含 `tsc --incremental`, 无需手动 build step. 仅 newvps 手动 deploy 需要
+> 此 §1.3.1 流程.
+
 ### 1.4 Docker login（如使用 GHCR 私有镜像）
 
 ```bash
@@ -193,6 +234,9 @@ EOF'
 ssh edge1
 
 cd /opt/fish-harness
+# L24 hygiene (v1.2.0j+.2 NEW): rebuild .js before compose up. 通常 edge-webhook
+# 已自动跑 (edge-pull.ts Step 2 tsc --incremental), 此 step 仅供手动 deploy 用.
+cd wrapper && npm run build && cd ..
 export $(grep -v '^#' .env.edge | xargs) && \
 docker compose -f deploy/6host-compose.edge1.yml up -d
 
