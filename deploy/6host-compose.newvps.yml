@@ -230,6 +230,18 @@ services:
     memswap_limit: 1g
     cpus: "1.0"
     # v1.2.0d NEW per D7 + F27: wrapper-commander 1G (3 commanders × 1G) + 30s graceful drain
+    # v1.2.0j F1 NEW per D1-D4: parallels wrapper-orchestrator lines 192-198.
+    # /health on :4001 via orchestrator.health() — kernel 不可达返 stub {status:"ok"},
+    # Express alive 即 2xx (kernel-independent). L18 hygiene: node -e fetch 必现
+    # (node:24-slim 无 wget). Probe port :4001 every 30s; 3 retries fail → unhealthy
+    # → `restart: unless-stopped` 重启. stop_grace_period 30s 留 in-flight 请求 drain.
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:4001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    stop_grace_period: 30s
 
   # ── wrapper commander-2 (port 4003) — 3host deploy: orch + 2 commanders ──────
   # User directive 2026-09-07: mobilize workers via orchestrator + 2 commanders.
@@ -262,6 +274,16 @@ services:
     mem_limit: 1g
     memswap_limit: 1g
     cpus: "1.0"
+    # v1.2.0j F1 NEW per D1-D4: same probe semantics as wrapper-commander.
+    # /health on :4003 (shares build/server.js binary with :4001 — WRAPPER_PORT
+    # differs only; /health endpoint identical). kernel-independent contract.
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:4003/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    stop_grace_period: 30s
 
   # ── wrapper frontend/PWA (port 4002) — D-9 Option B: real PWA ──────────────
   # Repurposed from server.ts placeholder to pwa_server.ts (D-9 Option B):
@@ -300,6 +322,17 @@ services:
     memswap_limit: 1g
     cpus: "0.5"
     # v1.2.0d NEW per D7 + F27: wrapper-frontend 1G + 30s graceful drain
+    # v1.2.0j F1 NEW per D1-D4: /health on :4002 来自 pwa_server.ts line 32 →
+    # 永远 {status:"ok",service:"pwa-server"} 当 Express alive (kernel-independent)。
+    # pwa_server.ts 暂无 G8.1 SIGTERM handler (forward scope §6.b) — 但 30s
+    # grace_period 仍比 docker 默认 10s 好, 给 in-flight 请求 drain 时间。
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:4002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    stop_grace_period: 30s
 
 networks:
   harness_net:
