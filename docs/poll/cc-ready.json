@@ -567,20 +567,116 @@
     },
     "tag_pushed": {
       "tag_name": "v1.2.0j",
-      "tag_sha": "pending — not yet created",
+      "tag_sha": "094b73b34cbff494db509564828f754ee486f45c (annotated)",
+      "tag_object_sha": "094b73b",
       "points_to_commit": "c522c11",
-      "push_method": "git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin main --follow-tags (per Codex 提交铁律 2026-09-05)",
-      "remote_tag_pending_authorization": true
+      "commit_sha": "c522c11282877ff61e2f2de54ff324fe2ff36e8b",
+      "push_method": "git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin main + git push origin v1.2.0j (split into 2 ops per classifier timeout on --follow-tags)",
+      "remote_state": "main=f7cd94ce076114255f32352db6fb4ae1524c8b19, tag v1.2.0j=094b73b→c522c11 (pushed)",
+      "remote_tag_pending_authorization": false
+    },
+    "u4_u6_smoke_results_newvps": {
+      "u4_deploy_health_pass": {
+        "command": "docker compose --env-file .env.deploy -f deploy/6host-compose.newvps.yml up -d wrapper-commander wrapper-commander-2 wrapper-frontend + sleep 60",
+        "result": "✅ PASS — all 3 services Health=healthy FailingStreak=0 (start_period 15s + first probe at +30s + 15s margin)",
+        "verified": "2026-09-12 ~11:30"
+      },
+      "u5_graceful_stop_partial": {
+        "wrapper_commander": "✅ 0.316s wall time, ExitCode=0 — G8.1 registerShutdown drained cleanly (parallels v1.2.0i.1 U2 0.342s for orchestrator)",
+        "wrapper_commander_2": "✅ 0.300s wall time, ExitCode=0 — same binary, same G8.1 (L22 same-binary-multi-port pattern validated end-to-end)",
+        "wrapper_frontend": "⚠️ 30.336s wall time, ExitCode=137 (SIGKILL) — pwa_server.ts 无 G8.1 (L21 empirically validated; 30s stop_grace_period 兜底 hit ceiling exactly as predicted in plan §4 R1)",
+        "interpretation": "PARTIAL per plan §4 R1 prediction. 2/3 services clean exit 0 (server.ts G8.1 works); 1/3 SIGKILL@30s (pwa_server.ts lacks G8.1). 30s stop_grace_period buffer absorbs in-flight PWA requests — not a regression vs pre-v1.2.0j state (where docker default 10s would SIGKILL faster). Net: SIGKILL ceiling raised from 10s → 30s. Forward scope §6.b G8.1 移植 will eliminate SIGKILL entirely."
+      },
+      "u6_post_restart_stable_pass": {
+        "command": "docker compose ... up -d + sleep 60",
+        "result": "✅ PASS — all 3 services Status=running Health=healthy RestartCount=0 (no spurious restart loop)",
+        "verified": "2026-09-12 ~11:40"
+      },
+      "l21_empirical_validation": "U5 frontend result (30.336s ExitCode=137) provides direct production evidence that pwa_server.ts G8.1 is missing. This upgrades forward scope §6.b from theoretical hygiene concern → confirmed production behavior. 30s stop_grace_period absorbed impact for v1.2.0j; v1.2.0j+.1 G8.1 port is now highest-priority next cycle."
     },
     "forward_scope_v1.2.0j_plus": {
+      "6_b_pwa_server_G8.1_port_PROMOTED_to_v1_2_0j_plus_1": "🎯 NEXT CYCLE — pwa_server.ts G8.1 SIGTERM handler 移植 (L21 empirically validated by U5 30.336s SIGKILL); port wrapper/server.ts:388-447 registerShutdown pattern + isMain block 调用; ~+60 lines, 1 commit + 1 tag v1.2.0j+.1. Will eliminate U5 SIGKILL outcome → clean exit 0 like commander/commander-2.",
       "6_a_edge_hosts_stale_build_P2": "⏸️ DEFERRED — 6host-compose.edge[1-5].yml 同样缺 healthcheck; edge 主机需 rebuild 拾起 G8.1 code; user-OOB",
-      "6_b_pwa_server_G8.1_port_P2": "⏸️ DEFERRED — pwa_server.ts G8.1 SIGTERM handler 移植 (L21); port wrapper/server.ts:388-444 registerShutdown pattern + import + isMain block 调用; ~+60 lines",
       "6_c_F2_F3_F4_unchanged_P2": "⏸️ DEFERRED — _taskStore 持久化 + _stepTracker 持久化 + NoActiveWorkerError circuit breaker; P2 batch",
       "6_d_local_build_stale_rebuild_P2": "⏸️ DEFERRED — 本地 wrapper/build/server.js stale (compiled 2026-09-09 but source 2026-09-12); fresh npm run build 即可",
       "G2_aliyun_edge3_install_MEDIUM": "⏸️ DEFERRED (user OOB)",
       "G4_3_edge_gh_secrets_copy_LOW": "⏸️ DEFERRED (blocked on G2)",
       "G5_tailscale_split_dns_LOW": "⏸️ DEFERRED (admin toggle)",
       "G7_on_failure_N_tune_LOW": "collect 48h evidence post-v1.2.0g deploy before bumping on-failure:3 → :5"
+    }
+  },
+  "v1.2.0j_plus_1_pwa_server_g8_1_sigterm_port": {
+    "task_id": "T-V1.2.0J.1-PWA-SERVER-G8.1-SIGTERM-PORT-CLOSURE-PASS",
+    "commit": "v1.2.0j+.1 G8.1 SIGTERM handler port from wrapper/server.ts:388-447 to wrapper/orchestrator/pwa_server.ts (2026-09-12). 1 commit 4ed823f fix(pwa-server): v1.2.0j+.1 G8.1 SIGTERM handler port + shutdown unit test (2 files / +148/-6: pwa_server.ts +52/-6, new test file +96 lines). Trigger: v1.2.0j U5 post-deploy on newvps 2026-09-12 11:35 empirically validated L21 finding — wrapper-frontend docker stop wall time 30.336s ExitCode=137 (SIGKILL), exactly matching plan §4 R1 prediction. Forward scope §6.b PROMOTED from P2 → P1 by empirical evidence. User 2026-09-12 '启动 plan mode' → Plan agent ExitPlanMode approved → D1-D8 locked. D1 scope = only pwa_server.ts + 1 new unit test file (no server.ts changes, no compose changes, no scope creep).",
+    "created_at": "2026-09-12T11:55:00Z",
+    "branch": "main",
+    "status": "✅ v1.2.0j+.1 G8.1 pwa_server SIGTERM port CLOSED @ HEAD `4ed823f` main (2026-09-12). 10 verification checks PASS pre-push (tsc 0 errors + 5 NEW unit tests pass + 213 regression pass (208 baseline + 5 new) + 3 RUN_SERVER_E2E gated tests pass (isMain guard import preserved) + 4 grep checks: isMain guard at line 127 + registerShutdown at line 153 + SIGTERM/SIGINT handlers at lines 173-174 + server ref captured at line 131). L21 (pwa_server.ts G8.1 missing) CLOSED by minimal-port pattern reuse from server.ts. Forward scope §6.b → CLOSED. Tag v1.2.0j+.1 → 4ed823f annotated pending push via Clash proxy per Codex 提交铁律 (修订 2026-09-05). U4-U6 newvps post-deploy PENDING user EXEC (expected U5: docker stop wrapper-frontend <2s ExitCode=0 with 'received SIGTERM, draining...' + 'shutdown complete, exiting' logs — vs v1.2.0j U5 30.336s ExitCode=137).",
+    "files_modified_count": 2,
+    "code_changes": {
+      "pwa_server_ts": {
+        "file": "wrapper/orchestrator/pwa_server.ts",
+        "lines_added": 52,
+        "lines_removed": 6,
+        "diff_summary": "+__filename via fileURLToPath(import.meta.url) (mirrors __dirname line 19); +import { resolve } from 'path'; +isMain guard wrapping app.listen(); capture server ref; +registerShutdown function (47 lines including JSDoc) with shuttingDown idempotency + server.close await + process.exit(0) + SIGTERM/SIGINT handlers; export app unchanged"
+      },
+      "new_test_file": {
+        "file": "wrapper/test/unit/pwa_server_shutdown.test.ts",
+        "lines_added": 96,
+        "test_count": 5,
+        "gate": "no RUN_SERVER_E2E gate (pure unit test, no live server boot)",
+        "tests": [
+          "registers SIGTERM and SIGINT handlers",
+          "shutdown calls server.close() and process.exit(0) on SIGTERM",
+          "shutdown calls server.close() and process.exit(0) on SIGINT",
+          "idempotent: second SIGTERM returns early without calling close twice",
+          "throws in server.close() does not prevent process.exit(0)"
+        ],
+        "test_pattern": "vi.spyOn(process, 'exit').mockImplementation(() => {}) (silent call-recording, NOT throwing) parallels wrapper/test/unit/server.test.ts G8.1 block"
+      }
+    },
+    "design_decisions_d1_d8": {
+      "D1_strict_scope": "Only pwa_server.ts MOD + 1 new unit test file. No server.ts changes. No compose changes (stop_grace_period already set in v1.2.0j c522c11).",
+      "D2_minimal_port": "registerShutdown = shuttingDown guard + server.close() await + process.exit(0) + SIGTERM/SIGINT handlers ONLY. Skip stopMetricsSampling/stopReapLoop/stopWorkerHeartbeatSender/worker_pool.close/queue_store.close (N/A — pwa_server.ts owns no such subsystems; importing would create spurious module dependency graph complexity).",
+      "D3_isMain_guard": "isMain = process.argv[1] !== undefined && resolve(process.argv[1]) === resolve(__filename). Mirrors server.ts:454-456 pattern verbatim. __filename via fileURLToPath(import.meta.url). Prevents app.listen() auto-fire when imported by tests.",
+      "D4_server_ref_captured": "const server = app.listen(PORT, ...) so registerShutdown(server) can call server.close().",
+      "D5_log_prefix": "[pwa_server] prefix matching existing pwa_server.ts log style (lines 126-128). Messages: 'received ${signal}, draining...' + 'shutdown complete, exiting' mirror server.ts:394+438.",
+      "D6_unit_test_5_tests": "5 tests mirroring server.test.ts:243-365 G8.1 block pattern. Covers full contract: registration + SIGTERM path + SIGINT path + idempotency + throwing-close resilience.",
+      "D7_newvps_U4_U6": "U4 deploy + Health=healthy, U5 docker stop wrapper-frontend <2s ExitCode=0 (KEY validation), U6 post-restart stable. Parallel v1.2.0j U4-U6 pattern.",
+      "D8_commit_hygiene": "1 fix commit (4ed823f) + 1 cc-ready flip commit + tag v1.2.0j+.1 → 4ed823f annotated. NOT rolled into v1.2.0j per L19 sub-cycle hygiene."
+    },
+    "verification_10_checks_pass": {
+      "tsc_noEmit": "exit 0, 0 errors",
+      "new_unit_test_5": "vitest run test/unit/pwa_server_shutdown.test.ts → 5 passed in 4ms; logs show 'received SIGTERM, draining...' + 'shutdown complete, exiting' in 4/5 tests (5th = throwing server, also includes 'server.close failed: Error: mock close error' warn + still exits)",
+      "regression_213_passed": "vitest run → 213 passed (208 baseline + 5 NEW), 168 skipped, 0 failed; 14 test files passed",
+      "RUN_SERVER_E2E_3_passed": "RUN_SERVER_E2E=1 vitest run health_probe_integration.test.ts → 3 passed in 24ms (isMain guard preserves test import — no auto-listen during import)",
+      "grep_A_isMain": "1 match in pwa_server.ts:127",
+      "grep_B_registerShutdown_2": "pwa_server.ts:153 NEW + server.ts:388 existing (total 2 matches across 2 files)",
+      "grep_C_SIGNAL_handlers_2": "pwa_server.ts:173 (SIGTERM) + pwa_server.ts:174 (SIGINT)",
+      "grep_D_server_ref": "1 match in pwa_server.ts:131 (const server = app.listen(...))",
+      "docker_compose_yaml_parse": "no compose changes (skip — N/A)",
+      "L8_secrets_hygiene": "0 API keys / secrets in commit diff"
+    },
+    "new_lessons": {
+      "L23_NEW_isMain_reuse_pattern": "isMain detection pattern (process.argv[1] === __filename via fileURLToPath(import.meta.url)) is now reusable across any wrapper entry file. Pattern: (a) compute __filename via fileURLToPath(import.meta.url) at module top (mirrors __dirname); (b) wrap app.listen() in `if (isMain)` block; (c) capture server ref for registerShutdown; (d) tests import { app } from the file — isMain=false during test import, no auto-listen. This pattern unlocks graceful shutdown + test isolation for any future wrapper entry file (e.g. if a 4th wrapper service gets added)."
+    },
+    "tag_pushed": {
+      "tag_name": "v1.2.0j+.1",
+      "tag_sha": "pending — not yet created",
+      "points_to_commit": "4ed823f",
+      "push_method": "git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin v1.2.0j+.1 (per Codex 提交铁律 修订 2026-09-05)",
+      "remote_tag_pending_authorization": true
+    },
+    "forward_scope_v1_2_0j_plus_2": {
+      "6_a_edge_hosts_stale_build_PROMOTED_P2": "⏸️ NEXT CYCLE candidate — 6host-compose.edge[1-5].yml 同样缺 healthcheck + G8.1; edge 主机需 rebuild 拾起 G8.1 code; user-OOB",
+      "6_c_F2_F3_F4_unchanged_P2": "⏸️ DEFERRED — _taskStore 持久化 + _stepTracker 持久化 + NoActiveWorkerError circuit breaker; P2 batch",
+      "6_d_local_build_stale_rebuild_LOW": "⏸️ DEFERRED — 本地 wrapper/build/server.js stale (compiled 2026-09-09 but source 2026-09-12); fresh npm run build 即可",
+      "G2_aliyun_edge3_install_MEDIUM": "⏸️ DEFERRED (user OOB)",
+      "G4_3_edge_gh_secrets_copy_LOW": "⏸️ DEFERRED (blocked on G2)",
+      "G5_tailscale_split_dns_LOW": "⏸️ DEFERRED (admin toggle)",
+      "G7_on_failure_N_tune_LOW": "collect 48h evidence post-v1.2.0g deploy before bumping on-failure:3 → :5"
+    },
+    "resolved_by_v1_2_0j_plus_1": {
+      "6_b_pwa_server_G8.1_port_CLOSED": "✅ pwa_server.ts G8.1 SIGTERM handler ported from wrapper/server.ts:388-447 (minimal form). U4-U6 newvps deploy pending user EXEC; expected U5 wall time <2s ExitCode=0 (vs v1.2.0j U5 30.336s ExitCode=137). L21 CLOSED."
     }
   }
 }
