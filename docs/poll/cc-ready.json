@@ -610,7 +610,7 @@
     "commit": "v1.2.0j+.1 G8.1 SIGTERM handler port from wrapper/server.ts:388-447 to wrapper/orchestrator/pwa_server.ts (2026-09-12). 1 commit 4ed823f fix(pwa-server): v1.2.0j+.1 G8.1 SIGTERM handler port + shutdown unit test (2 files / +148/-6: pwa_server.ts +52/-6, new test file +96 lines). Trigger: v1.2.0j U5 post-deploy on newvps 2026-09-12 11:35 empirically validated L21 finding — wrapper-frontend docker stop wall time 30.336s ExitCode=137 (SIGKILL), exactly matching plan §4 R1 prediction. Forward scope §6.b PROMOTED from P2 → P1 by empirical evidence. User 2026-09-12 '启动 plan mode' → Plan agent ExitPlanMode approved → D1-D8 locked. D1 scope = only pwa_server.ts + 1 new unit test file (no server.ts changes, no compose changes, no scope creep).",
     "created_at": "2026-09-12T11:55:00Z",
     "branch": "main",
-    "status": "✅ v1.2.0j+.1 G8.1 pwa_server SIGTERM port CLOSED @ HEAD `4ed823f` main (2026-09-12). 10 verification checks PASS pre-push (tsc 0 errors + 5 NEW unit tests pass + 213 regression pass (208 baseline + 5 new) + 3 RUN_SERVER_E2E gated tests pass (isMain guard import preserved) + 4 grep checks: isMain guard at line 127 + registerShutdown at line 153 + SIGTERM/SIGINT handlers at lines 173-174 + server ref captured at line 131). L21 (pwa_server.ts G8.1 missing) CLOSED by minimal-port pattern reuse from server.ts. Forward scope §6.b → CLOSED. Tag v1.2.0j+.1 → 4ed823f annotated pending push via Clash proxy per Codex 提交铁律 (修订 2026-09-05). U4-U6 newvps post-deploy PENDING user EXEC (expected U5: docker stop wrapper-frontend <2s ExitCode=0 with 'received SIGTERM, draining...' + 'shutdown complete, exiting' logs — vs v1.2.0j U5 30.336s ExitCode=137).",
+    "status": "✅ v1.2.0j+.1 G8.1 pwa_server SIGTERM port FULLY CLOSED @ remote main 5bfd414 (2026-09-12 21:58). 10 verification checks PASS pre-push + U4-U6 PASS post-deploy on newvps. U5 KEY validation: docker stop wrapper-frontend 0.295s ExitCode=0 (vs v1.2.0j baseline 30.336s ExitCode=137) — L21 FULLY RESOLVED (103x faster drain). Required npm run build on newvps to recompile stale .js (L24 stale-build hygiene lesson). Tag v1.2.0j+.1 → 4ed823f (annotated, SHA a5cd3f0) pushed via Clash proxy. Forward scope §6.b → CLOSED. §6.d PROMOTED P2 → P1 by L24 empirical validation. New L24: stale-build hygiene — type-check only doesn't generate .js; must npm run build on newvps after any .ts change.",
     "files_modified_count": 2,
     "code_changes": {
       "pwa_server_ts": {
@@ -657,14 +657,45 @@
       "L8_secrets_hygiene": "0 API keys / secrets in commit diff"
     },
     "new_lessons": {
-      "L23_NEW_isMain_reuse_pattern": "isMain detection pattern (process.argv[1] === __filename via fileURLToPath(import.meta.url)) is now reusable across any wrapper entry file. Pattern: (a) compute __filename via fileURLToPath(import.meta.url) at module top (mirrors __dirname); (b) wrap app.listen() in `if (isMain)` block; (c) capture server ref for registerShutdown; (d) tests import { app } from the file — isMain=false during test import, no auto-listen. This pattern unlocks graceful shutdown + test isolation for any future wrapper entry file (e.g. if a 4th wrapper service gets added)."
+      "L23_NEW_isMain_reuse_pattern": "isMain detection pattern (process.argv[1] === __filename via fileURLToPath(import.meta.url)) is now reusable across any wrapper entry file. Pattern: (a) compute __filename via fileURLToPath(import.meta.url) at module top (mirrors __dirname); (b) wrap app.listen() in `if (isMain)` block; (c) capture server ref for registerShutdown; (d) tests import { app } from the file — isMain=false during test import, no auto-listen. This pattern unlocks graceful shutdown + test isolation for any future wrapper entry file (e.g. if a 4th wrapper service gets added).",
+      "L24_NEW_stale_build_hygiene": "EMPIRICALLY VALIDATED by v1.2.0j+.1 U5 first-attempt FAIL — type-check only (tsc --noEmit) does NOT generate .js. After ANY .ts change that affects container runtime (e.g. registerShutdown port), MUST run `npm run build` on newvps BEFORE `docker compose up -d`. Otherwise container runs stale .js (11h+ old in this case) without the new code. Symptoms: edit deployed + pulled + container restarted, but expected behavior absent + logs empty for the new feature. Diagnosis: `grep -c \"new_feature_name\" wrapper/build/orchestrator/pwa_server.js` returns 0 if stale. Fix: `cd wrapper && npm run build && docker compose up -d wrapper-frontend`. §6.d PROMOTED P2 → P1 by this finding."
+    },
+    "u4_u6_smoke_results_newvps": {
+      "u4_deploy_health_pass": {
+        "command": "git pull --ff-only (5bfd414) + docker compose --env-file .env.deploy -f deploy/6host-compose.newvps.yml up -d wrapper-frontend + sleep 60",
+        "first_attempt_result": "✅ PASS (Status=running Health=healthy FailingStreak=0) — healthcheck unchanged from v1.2.0j, still works post-rebuild",
+        "note": "Even with stale .js build, healthcheck probe still 2xx because pwa_server.ts /health doesn't depend on registerShutdown. This masked the stale build issue — U5 was needed to expose it."
+      },
+      "u5_graceful_stop_RESOLVED": {
+        "first_attempt_FAIL": {
+          "command": "time docker stop -t 30 harness-wrapper-frontend",
+          "result": "⚠️ FAIL — wall time 30.323s ExitCode=137 (SIGKILL), same as v1.2.0j U5 baseline",
+          "root_cause": "STALE BUILD — newvps wrapper/build/orchestrator/pwa_server.js was 11h old (Sep 12 10:53, 4864 bytes), pre-dating the v1.2.0j+.1 commit (Sep 12 21:55). Container bind-mounts `..:/app:ro` so runs host's .js. `grep -c registerShutdown build/.js` = 0 confirmed. Logs empty for 'draining'/'shutdown' because registerShutdown was never in compiled output.",
+          "fix": "cd /opt/fish-harness/wrapper && npm run build → recompiled .ts to .js (size 4864 → 6901 bytes, registerShutdown grep count 0 → 2)"
+        },
+        "retry_after_rebuild_PASS": {
+          "command": "time docker stop -t 30 harness-wrapper-frontend (after npm run build + re-deploy)",
+          "result": "✅ PASS — wall time 0.295s ExitCode=0 (103x faster than v1.2.0j baseline 30.336s)",
+          "log_lines_observed": "[pwa_server] received SIGTERM, draining...",
+          "log_lines_observed_2": "[pwa_server] shutdown complete, exiting",
+          "interpretation": "L21 FULLY RESOLVED. registerShutdown handler fires on SIGTERM → server.close() drains in 295ms (no in-flight requests) → process.exit(0). Behavior matches commander (0.316s) + commander-2 (0.300s) from v1.2.0j U5."
+        }
+      },
+      "u6_post_restart_stable_pass": {
+        "command": "docker compose up -d wrapper-frontend + sleep 60",
+        "result": "✅ PASS — Status=running Health=healthy FailingStreak=0 RestartCount=0 (no spurious restart loop)"
+      },
+      "l24_empirical_validation": "U5 first-attempt FAIL (stale .js) directly validates §6.d hygiene ticket. §6.d PROMOTED P2 → P1 for next cycle. After ANY .ts change to wrapper source, MUST `npm run build` on newvps before re-deploy."
     },
     "tag_pushed": {
       "tag_name": "v1.2.0j+.1",
-      "tag_sha": "pending — not yet created",
+      "tag_sha": "a5cd3f010bab2f9da660bb50b7dd817295399e1c (annotated)",
+      "tag_object_sha": "a5cd3f0",
       "points_to_commit": "4ed823f",
-      "push_method": "git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin v1.2.0j+.1 (per Codex 提交铁律 修订 2026-09-05)",
-      "remote_tag_pending_authorization": true
+      "commit_sha": "4ed823fb172043842b9ae79e3393243def6371d1",
+      "push_method": "git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin main + git push origin v1.2.0j+.1 (split into 2 ops per v1.2.0j classifier timeout lesson)",
+      "remote_state": "main=5bfd41474dd151e1a52c14798a0af9ea2ad4e7c9, tag v1.2.0j+.1=a5cd3f0→4ed823f (pushed)",
+      "remote_tag_pending_authorization": false
     },
     "forward_scope_v1_2_0j_plus_2": {
       "6_a_edge_hosts_stale_build_PROMOTED_P2": "⏸️ NEXT CYCLE candidate — 6host-compose.edge[1-5].yml 同样缺 healthcheck + G8.1; edge 主机需 rebuild 拾起 G8.1 code; user-OOB",
