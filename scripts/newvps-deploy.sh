@@ -72,9 +72,12 @@ else
 fi
 
 # ─── Idempotent guard: skip if HEAD matches + build fresh ──────────────────────
-REMOTE_HEAD=$(remote "cd $REPO_DIR && git rev-parse HEAD" 2>/dev/null || echo "")
+# Read-only state queries (HEAD + build mtime) run real SSH even in --dry-run mode
+# so the noop/full-sequence decision reflects actual remote state. Only the deploy
+# steps (pull/build/compose) below are subject to dry-run via the remote() helper.
+REMOTE_HEAD=$(ssh "$REMOTE_HOST" "cd $REPO_DIR && git rev-parse HEAD" 2>/dev/null || echo "")
+BUILD_MTIME=$(ssh "$REMOTE_HOST" "stat -c %Y $REPO_DIR/wrapper/build/orchestrator/pwa_server.js 2>/dev/null || echo 0")
 if [[ "$REMOTE_HEAD" == "$TARGET_COMMIT" ]]; then
-  BUILD_MTIME=$(remote "stat -c %Y $REPO_DIR/wrapper/build/orchestrator/pwa_server.js 2>/dev/null || echo 0")
   NOW=$(date +%s)
   BUILD_AGE=$(( NOW - BUILD_MTIME ))
   if [[ "$BUILD_AGE" -lt "$BUILD_MTIME_FRESH_SEC" ]]; then
