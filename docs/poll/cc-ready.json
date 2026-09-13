@@ -1057,6 +1057,60 @@
       "set_euo_pipefail_preserved": "set -euo pipefail at line 26 (was line 23). Inside the SSH here-doc, also uses set -euo pipefail for consistent error semantics."
     }
   },
+  "v1.2.0j_plus_8_plus_6_a_edge_compose_healthcheck": {
+    "task_id": "T-V1.2.0J.8-PLUS-6.A-EDGE-COMPOSE-HEALTHCHECK-CLOSURE-PASS",
+    "commit": "v1.2.0j+.8+ §6.a edge compose healthcheck patch (2026-09-13). 1 commit 1985d05 fix(ops) (5 files / +70 lines: deploy/6host-compose.edge[1-5].yml each +14 lines). 0 production code touched. D3 lock preserved (harness/, spec/, spikes/, Dockerfile root, pyproject.toml, 10 ADR bodies untouched). Trigger: v1.2.0j+.7+ closure §8 forward scope item 1 (PROMOTED P2 → P1 per §6.a empirical risk: wedged edge wrapper not auto-restarted by Docker since restart: unless-stopped only fires on container exit, not stuck-alive process; only Tailscale Funnel sees the outage).",
+    "created_at": "2026-09-13T12:30:00Z",
+    "branch": "main",
+    "status": "✅ v1.2.0j+.8+ §6.a edge compose healthcheck CLOSED @ main 1985d05 (2026-09-13). 4-layer local verification PASS pre-commit + L8 hygiene PASS. U1 user EXEC on each edge host PENDING (git pull + docker compose up -d rebuild to pick up healthcheck). Edge hosts are USER OOB — YAML diff IS the deliverable. Tag v1.2.0j+.8+ → 1985d05 PENDING user authorization per global CLAUDE.md + Codex 提交铁律 (修订 2026-09-05).",
+    "approach": "Mirror production healthcheck pattern from 6host-compose.newvps.yml wrapper-orchestrator:4000 (lines 193-198) into all 5 edge compose files, port-adjusted from 4000 to 4001 (edge wrapper port per all 5 files' WRAPPER_PORT env var). Probe uses node:24-slim node -e global fetch (no curl/wget — v1.2.0i.1 L18 fix precedent). Insertion point = BEFORE stop_grace_period: 30s (matches newvps-compose.yml structure; preserves existing F27 graceful drain at the end of service block).",
+    "scope_locked": "5 YAML files only (deploy/6host-compose.edge[1-5].yml). 0 production code modified. 0 test files modified. 0 compose files outside deploy/ modified. 0 env files modified.",
+    "key_design_decisions": {
+      "D1_5_file_uniform_patch": "All 5 edge files share identical insertion anchor (4 lines: command, mem_limit, memswap_limit, stop_grace_period) → single Edit template applies uniformly. L22 same-binary-multi-port pattern (v1.2.0j+.1 closure) extends naturally: same wrapper/server.ts binary, different WRAPPER_PORT per host, same /health endpoint.",
+      "D2_port_4001_match_WRAPPER_PORT": "All 5 files declare WRAPPER_PORT: '4001' (verified via grep). Probe URL http://localhost:4001/health matches wrapper/server.ts:113 app.get('/health', ...) handler which is bound to WRAPPER_PORT (line 459 app.listen(parseInt(WRAPPER_PORT, 10))). Probe would fail silently if port mismatched — verified port=4001 across all 5 files before commit.",
+      "D3_probe_uses_node_e_global_fetch": "Avoids node:24-slim wget-missing pitfall (L18 precedent v1.2.0i.1). `node -e \"fetch(...).then(...)\"` runs as shell-built-in Node 24 fetch — no extra binary needed. Same probe pattern as newvps-compose.yml wrapper-orchestrator.",
+      "D4_30s_interval_10s_timeout_3_retries": "Matches newvps-compose.yml wrapper-orchestrator exactly. No tuning per-edge-host needed — same binary, same boot profile, same request patterns. If a specific edge host needs different timings, future cycle can override per-host.",
+      "D5_start_period_15s": "Matches newvps. Allows 15s for boot before first probe. If edge hosts boot slower (cold Docker cache, slow DNS), future cycle can tune.",
+      "D6_insertion_anchor_preserves_F27": "stop_grace_period: 30s (F27 from v1.2.0d) sits at the END of service config in newvps-compose.yml. Edge files matched this layout already (v1.2.0d). Inserting healthcheck BEFORE stop_grace_period preserves the existing F27 graceful drain — G8.1 SIGTERM handler in wrapper/server.ts (v1.2.0i) gets 30s to drain in-flight requests after docker stop.",
+      "D7_user_OOB_documented": "Edge hosts are user OOB (aliyun edge3 not yet installed, edge4/5 SSH access). YAML diff IS the deliverable. User will: (1) git pull on each edge host; (2) docker compose -f deploy/6host-compose.edgeN.yml up -d; (3) docker inspect --format='{{json .State.Health}}' harness-edgeN-wrapper to verify 'Status: healthy'. Cycle closure memory documents U1 verification steps."
+    },
+    "new_lessons": {
+      "L40_edge_compose_mirror_pattern": "When production compose (newvps) defines a service pattern (healthcheck, restart policy, env) and edge compose files run the SAME binary on DIFFERENT ports, mirror the pattern with port-adjusted probes. Avoids divergence where production has healthcheck but edges don't — which would silently break Docker's auto-restart-on-unhealthy contract across the fleet. Applied here: newvps port=4000, edge port=4001, probe URL port adjusted, everything else identical.",
+      "L41_yaml_edit_anchor_uniformity": "Multi-file YAML patches are safe to automate when the insertion anchor (the surrounding context lines) is byte-identical across files. v1.2.0d F27 already enforced structural uniformity on edge files (same mem_limit, memswap_limit, stop_grace_period pattern) — this cycle exploits that uniformity. New pattern: when designing future multi-host deploy (e.g. v2.0 with 10+ edge hosts), enforce anchor uniformity up front so future ops patches can apply uniformly."
+    },
+    "resolved_by_v1_2_0j_plus_8_plus": {
+      "6_a_edge_compose_healthcheck_P1_CLOSED": "Forward scope §6.a (v1.2.0j+.4 §8.2 + v1.2.0j+.5+ §6 forward scope item 7, re-listed in v1.2.0j+.6+ + v1.2.0j+.7+ closures §6) → CLOSED by v1.2.0j+.8+. All 5 host-compose.edge[1-5].yml now have healthcheck block matching newvps-compose.yml wrapper-orchestrator pattern (port 4001 instead of 4000). Edge hosts need rebuild (USER OOB) to take effect — documented in U1 verification steps."
+    },
+    "u1_smoke_results": {
+      "u1_user_exec_on_each_edge_host_PENDING": "User EXEC on each of edge1/2/3/4/5: ssh edgeN 'cd /opt/fish-harness && git pull --ff-only && cd deploy && docker compose -f 6host-compose.edgeN.yml up -d' then 'docker inspect --format=\"{{json .State.Health}}\" harness-edgeN-wrapper'. Expected: '{\"Status\":\"healthy\",\"FailingStreak\":0,\"Log\":[...]}' within 15-30s of rebuild. PENDING user OOB.",
+      "local_verification_pre_commit": "Local verification 2026-09-13 12:25: (1) Layer 1 PASS — python3 yaml.safe_load across all 5 files → 5 OK; (2) Layer 2 PASS — grep -c healthcheck: 1 per file × 5, grep -oE localhost:[0-9]+/health → localhost:4001/health × 5; (3) Layer 3 PASS — stop_grace_period: 30s preserved 5/5; (4) Layer 4 PASS — service config unchanged: 15/15 matches across mem_limit: 1g + memswap_limit: 1g + command: [node, build/server.js] (3 per file × 5); (5) L8 hygiene PASS — grep -rE KEY|SECRET|TOKEN|PASSWORD|sk-|api_key → 0 matches (DEEPSEEK_API_KEY placeholder excluded as expected); (6) git diff stat: 5 files changed, 70 insertions(+), 0 deletions(-).",
+      "r5_probe_url_verification": "R5 risk verification PASSED pre-commit: wrapper/server.ts:81 reads WRAPPER_PORT from env (default 3000, edge overrides to 4001); wrapper/server.ts:113 defines app.get('/health', ...) handler; wrapper/server.ts:459 app.listen(parseInt(WRAPPER_PORT, 10)) binds to WRAPPER_PORT. Probe URL http://localhost:4001/health matches the bound handler."
+    },
+    "verification_checks_pass": {
+      "layer1_yaml_well_formed": "for f in deploy/6host-compose.edge{1,2,3,4,5}.yml; python3 -c 'import yaml; yaml.safe_load(open(f))' → 5 OK, exit 0",
+      "layer2_healthcheck_count_and_port": "for f in deploy/6host-compose.edge{1,2,3,4,5}.yml; do count=$(grep -c 'healthcheck:' $f); port=$(grep -oE 'localhost:[0-9]+/health' $f | head -1); [ $count = 1 ] && [ $port = 'localhost:4001/health' ]; done → 5/5 PASS",
+      "layer3_stop_grace_period_preserved": "grep -c 'stop_grace_period: 30s' deploy/6host-compose.edge{1,2,3,4,5}.yml → 1 per file (5/5 preserved)",
+      "layer4_service_config_unchanged": "for f in deploy/6host-compose.edge{1,2,3,4,5}.yml; grep -cE 'mem_limit: 1g|memswap_limit: 1g|command: [\"node\", \"build/server.js\"]' $f → 3 per file (15/15 matches preserved)",
+      "L8_secrets": "grep -rE 'KEY|SECRET|TOKEN|PASSWORD|sk-|api_key' deploy/6host-compose.edge{1,2,3,4,5}.yml | grep -vE '^[ \\t]*#|DEEPSEEK_API_KEY' → 0 matches",
+      "D3_lock_preserved": "Only deploy/6host-compose.edge[1-5].yml modified. harness/, spec/, spikes/, Dockerfile (root), pyproject.toml, 10 ADR bodies all untouched. scripts/, wrapper/, docs/poll/ untouched (cc-ready.json flip in commit 2 only).",
+      "git_diff_stat": "git diff --stat deploy/6host-compose.edge[1-5].yml → 5 files changed, 70 insertions(+), 0 deletions(-)"
+    },
+    "tag_pushed": {
+      "tag_name": "v1.2.0j+.8+",
+      "points_to_commit": "1985d05 (commit 1 fix(ops), per L19 hygiene — NOT the cc-ready flip)",
+      "tag_sha": "PENDING — tag creation + push requires user authorization per global CLAUDE.md (Codex 提交铁律 修订 2026-09-05).",
+      "push_method_pending": "git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin main + git push origin v1.2.0j+.8+ (split into 2 ops per v1.2.0j classifier timeout lesson)"
+    },
+    "hygiene_checks": {
+      "L8_secrets": "0 secrets in diff (verified by grep -rE KEY|SECRET|TOKEN|PASSWORD|sk-|api_key deploy/6host-compose.edge[1-5].yml | grep -vE DEEPSEEK_API_KEY → 0 matches; DEEPSEEK_API_KEY placeholder is pre-existing per-edge env wiring, NOT introduced by this patch)",
+      "D3_lock_preserved": "Only deploy/ modified. harness/, spec/, spikes/, Dockerfile (root), pyproject.toml, 10 ADR bodies all untouched. scripts/, wrapper/, docs/ all untouched.",
+      "L19_sub_cycle_hygiene": "v1.2.0j+.8+ separate tag from v1.2.0j+.7+, NOT rolled in. Tag will point to commit 1 SHA 1985d05 (fix(ops) commit) per L19 hygiene.",
+      "D10_cc_ready_flip_separate": "cc-ready.json flip in separate commit 2 (audit trailing state pattern preserved per D10 + v1.2.0j+.4 cycle closure precedent).",
+      "no_new_dependencies": "No new dependencies introduced. node:24-slim base image already has Node 24 global fetch. Probe pattern mirrors newvps-compose.yml wrapper-orchestrator — no new tool required.",
+      "no_production_code": "0 production code modified (harness/, wrapper/, scripts/ all untouched). Only deployment YAML files changed.",
+      "production_pattern_match": "Healthcheck block matches newvps-compose.yml wrapper-orchestrator:4000 exactly (port-adjusted). No tuning divergence. If edge hosts need different timings, future cycle can override per-host."
+    }
+  },
   "v1.2.0j_plus_1_pwa_server_g8_1_sigterm_port": {
     "task_id": "T-V1.2.0J.1-PWA-SERVER-G8.1-SIGTERM-PORT-CLOSURE-PASS",
     "commit": "v1.2.0j+.1 G8.1 SIGTERM handler port from wrapper/server.ts:388-447 to wrapper/orchestrator/pwa_server.ts (2026-09-12). 1 commit 4ed823f fix(pwa-server): v1.2.0j+.1 G8.1 SIGTERM handler port + shutdown unit test (2 files / +148/-6: pwa_server.ts +52/-6, new test file +96 lines). Trigger: v1.2.0j U5 post-deploy on newvps 2026-09-12 11:35 empirically validated L21 finding — wrapper-frontend docker stop wall time 30.336s ExitCode=137 (SIGKILL), exactly matching plan §4 R1 prediction. Forward scope §6.b PROMOTED from P2 → P1 by empirical evidence. User 2026-09-12 '启动 plan mode' → Plan agent ExitPlanMode approved → D1-D8 locked. D1 scope = only pwa_server.ts + 1 new unit test file (no server.ts changes, no compose changes, no scope creep).",
