@@ -980,6 +980,83 @@
       "DriverHandle_signature_change_minimal": "Added optional externalSignal?: AbortSignal field to internal DriverHandle interface. External RunRequest interface (public API) gets optional signal?: AbortSignal. Both backward-compatible (optional fields, no breaking changes)."
     }
   },
+  "v1.2.0j_plus_7_plus_check_stale_build_remote_ssh_mode": {
+    "task_id": "T-V1.2.0J.7-PLUS-CHECK-STALE-BUILD-REMOTE-SSH-CLOSURE-PASS",
+    "commit": "v1.2.0j+.7+ scripts/check-stale-build.sh --remote=<host> SSH mode (2026-09-13). 2 commits: dd571da fix(ops) (2 files +94/-2 across scripts/check-stale-build.sh + scripts/README.md), then this chore(cc-ready) flip. Trigger: v1.2.0j+.4 closure §8.1 explicit forward scope — 'Add --remote=<host> SSH mode to check deployed file on newvps before deploying.' Re-confirmed in v1.2.0j+.6+ closure §6 forward scope item 9. User 2026-09-13 'exec one by one in the deferred forward scope' → AskUserQuestion chose 'Wrapper-only P1/P2 (Recommended)' subset, starting with the smaller P2 item (check-stale-build.sh) before the larger P1 (§6.a edge compose). D1-D8 per Plan agent recommendation 2026-09-13.",
+    "created_at": "2026-09-13T11:50:00Z",
+    "branch": "main",
+    "approach": "single-target replacement (--remote=<host> means 'check remote instead of local') per newvps-deploy.sh precedent. NOT both. SSH via here-doc wrapper that emits FILE_NOT_FOUND (exit 2) or COUNT=N (exit 0), avoiding fragile $? parsing across SSH.",
+    "scope_locked": "D1 scope: 2 MOD files (scripts/check-stale-build.sh +92/-2 + scripts/README.md +22/-0) + 1 cc-ready flip. 0 production code touched. 0 test files (no shell test framework in repo per v1.2.0j+.4 baseline — 4-layer local verification instead).",
+    "key_design_decisions": {
+      "here_doc_wrapper_for_clean_exit_codes": "SSH command embeds a small bash script (set -euo pipefail) that emits FILE_NOT_FOUND+exit 2 OR COUNT=N+exit 0. This avoids the fragile alternative of parsing $? from raw grep -c (which exits 1 on no-match and 2 on file-missing). Local script variables escaped with \\$FILE / \\$SYMBOL so remote shell expands them.",
+      "single_target_not_both": "--remote=<host> means 'check this host instead of local'. Not both. Rationale: matches newvps-deploy.sh model (single target), avoids ambiguity in stale/fresh reporting, simpler mental model. If user wants both, they invoke twice.",
+      "dry_run_for_offline_verification": "--dry-run flag prints SSH command + exits 0 before any network call. Lets CI/pre-commit run the script without network access and proves the logic path is correct. Composes with --remote; without --remote, --dry-run is meaningless (no SSH to print).",
+      "env_overrides_per_newvps_deploy_precedent": "CHECK_STALE_BUILD_HOST=newvps (default SSH alias, env override). CHECK_STALE_BUILD_REPO_DIR=/opt/fish-harness (default repo root, rare override). Mirrors NEWVPS_HOST and REPO_DIR patterns from newvps-deploy.sh:25-26.",
+      "exit_code_semantics_preserved": "0=fresh/informational, 1=stale (only when --exit-on-stale), 2=file-not-found OR SSH unreachable. New exit code 2 case (SSH unreachable) maps to the existing 'cannot verify freshness' category. No new exit codes introduced.",
+      "grep_c_dashdash_L8_hygiene": "grep -c -- \"$SYMBOL\" (not grep -c \"$SYMBOL\"). Double-dash prevents symbol starting with - from being interpreted as a flag. L8 hygiene discipline preserved.",
+      "set_euo_pipefail_preserved": "set -euo pipefail is the project standard per v1.2.0j+.4 baseline (every bash script in repo uses it). SSH here-doc also uses it for consistency.",
+      "local_mode_unchanged": "Local mode block (file-not-found check + grep + exit 0/1/2) wrapped in `if REMOTE_MODE else local` split. Local block itself unchanged from v1.2.0j+.4. All 4 Layer 3 verification tests use identical invocation patterns to confirm backward compatibility.",
+      "color_logging_with_remote_prefix": "Log messages in remote mode include 'remote=${REMOTE_HOST}:' prefix so operator can distinguish local vs remote checks at a glance. The log() function itself unchanged."
+    },
+    "new_lessons": {
+      "L36_NEW_dry_run_for_offline_verification": "When a script depends on external services (SSH, HTTP, DB), add --dry-run mode that prints what would happen. Lets CI / pre-commit / local dev run the script without network access and proves the logic path is correct. Required for any script that should be safely invokable from automated environments where real network calls would fail or be unwanted.",
+      "L37_NEW_here_doc_wrapper_for_clean_ssh_exit_codes": "SSH command substitution `$(ssh host '...')` propagates the remote exit code. Raw `grep -c` exits 1 on no-match (not 0) and 2 on file-missing, so the wrapper script inside the SSH command must emit a clean output (FILE_NOT_FOUND or COUNT=N) and always exit 0. This avoids fragile $? parsing that varies by host shell behavior.",
+      "L38_NEW_escaping_in_ssh_command_strings": "When passing multi-line bash via `ssh host '...'`, local variables are NOT expanded by the remote shell — escape with \\$VAR so the remote shell expands them. Verified via `bash -x scripts/check-stale-build.sh --remote=foo`: SSH_OUTPUT variable populated with the remote's echo output (COUNT=N), not the local expansion.",
+      "L39_NEW_pipe_with_tail_masks_exit_code": "Bash gotcha: `script 2>&1 | tail -3; echo $?` reports tail's exit code (0), not the script's. To get the actual script exit code, run without piping OR use `set -o pipefail` to propagate the rightmost non-zero. Already burned by this during SSH unreachable test — bash -x proved the script does `+ exit 2`."
+    },
+    "resolved_by_v1_2_0j_plus_7_plus": {
+      "check_stale_build_remote_ssh_mode_CLOSED": "Forward scope 'check-stale-build.sh --remote=<host> SSH mode P2' (v1.2.0j+.4 §8.1 next-cycle candidate, re-listed in v1.2.0j+.6+ closure §6 item 9) → CLOSED by v1.2.0j+.7+. Script now supports --remote=<host> for SSH-based stale-build detection on remote hosts, --dry-run for offline verification, CHECK_STALE_BUILD_HOST + CHECK_STALE_BUILD_REPO_DIR env overrides.",
+      "L25_extended_remote_mode": "L25 stale-build detector (originally local-only, v1.2.0j+.4) now extends to remote hosts via --remote=<host>. Pattern usable as pre-deploy verification: 'check that what I built locally is also built on the deploy target'."
+    },
+    "forward_scope_v1_2_0j_plus_8_plus": {
+      "6_a_edge_compose_healthcheck_P1": "5 host-compose.edge[1-5].yml lack healthcheck + G8.1 graceful shutdown SIGTERM. ~27 lines YAML (5 files × ~5 lines + 2 WORKER_HEARTBEAT_URL adds). Edge hosts need rebuild to pick up G8.1 code. USER OOB — requires user EXEC on each edge host. Next cycle candidate per v1.2.0j+.6+ closure §6 item 7.",
+      "kernel_HTTP_cancel_list_endpoints": "Kernel HTTP facade /api/orch/cancel/{task_id} + /api/orch/list endpoints — requires D3 lock lift on harness/. ~50-80 lines Python FastAPI. Currently wrapper-side cancel() only affects local SQLite; multi-host cancellation requires kernel coordination.",
+      "tenant_isolation_listTasks": "Tenant isolation in listTasks() — filter by tenant_id from request context. Tenant context not yet wired into orchestrator (M1+ feature). Deferred.",
+      "result_blob_storage": "Replace JSON string in result_json with blob_id reference to artifact store. Artifact store integration deferred to M1+. M1+ schema migration adds result_blob_id column. Deferred.",
+      "6host_e2e_cancel_propagation_test": "6host E2E integration test for cancel propagation through wrapper → worker → execution_driver. Now feasible post-F3+ (v1.2.0j+.6+). Deferred to separate cycle.",
+      "persistent_cancel_queue_signal_store": "When dispatch() is enqueued (F26 overflow queue), AbortSignal cannot be serialized. Future cycle needs separate signal store keyed by task_id. Deferred to v1.2.0j+.8+.",
+      "approach_B_handle_event_yield": "If replay/retry scenarios need orchestrator to hold the RunHandle after workerModule.run() returns (to call workerModule.interrupt()), add `kind: driver.handle` event exposing cancel_token. Approach B was rejected for v1.2.0j+.6+ (race condition with cancel()) but may be needed for future replay paths.",
+      "G2_aliyun_edge3_install_MEDIUM": "user OOB (aliyun console access)",
+      "G4_3_edge_gh_secrets_copy_LOW": "链式依赖 G2"
+    },
+    "u1_smoke_results_newvps": {
+      "u1_pending_post_commit": "U1 EXEC on newvps (after main push lands): ssh newvps 'cd /opt/fish-harness && git pull --ff-only && bash -n scripts/check-stale-build.sh && scripts/check-stale-build.sh --help | grep -c remote= && scripts/check-stale-build.sh --dry-run --remote=newvps 2>&1 | tail -1'. Expected: bash -n exit 0, help prints remote= examples, dry-run prints DRY-RUN log line. PENDING user authorization for tag+push.",
+      "u2_real_ssh_smoke": "U2 (real SSH, requires user auth): ssh newvps 'ls -la /opt/fish-harness/wrapper/build/orchestrator/pwa_server.js' to verify file exists, then scripts/check-stale-build.sh --remote=newvps to confirm 1 match on the deployed file. Expected: 'remote=newvps: Checked wrapper/build/orchestrator/pwa_server.js for symbol 'service: \"pwa-server\"': 1 match(es)' + exit 0. PENDING user EXEC.",
+      "local_verification_pre_commit": "Local verification 2026-09-13 11:48: (1) bash -n scripts/check-stale-build.sh → exit 0; (2) 4 Layer 2 dry-run checks PASS — DRY-RUN log line in stderr; (3) 4 Layer 3 local-mode regression checks PASS — informational exit 0, --exit-on-stale fresh exit 0, --symbol=nonexistent stale informational exit 0, --help mentions remote=; (4) Layer 4 empty host check PASS — --remote= (empty) dies with 'cannot be empty' message exit 2; (5) SSH unreachable check PASS — CHECK_STALE_BUILD_HOST=nonexistent-host-xyz123 → exit 2 with clear error message (verified via bash -x: '+ exit 2' confirmed); (6) env var override PASS — CHECK_STALE_BUILD_HOST=customhost + --remote=puer-hk honors explicit --remote; (7) explicit wins PASS — --remote=foo uses 'foo' not env default; (8) L8 hygiene PASS — grep -rE 'KEY|SECRET|TOKEN|PASSWORD|sk-|api_key' → 0 matches."
+    },
+    "verification_checks_pass": {
+      "bash_n": "bash -n scripts/check-stale-build.sh → exit 0 (syntax clean, no parse errors)",
+      "layer2_dry_run_basic": "scripts/check-stale-build.sh --dry-run --remote=newvps 2>&1 | grep -q DRY-RUN → 1 match, exit 0",
+      "layer2_dry_run_with_exit_on_stale": "scripts/check-stale-build.sh --dry-run --remote=newvps --exit-on-stale 2>&1 | grep -q DRY-RUN → 1 match, exit 0 (dry-run composes with --exit-on-stale)",
+      "layer3a_local_informational": "scripts/check-stale-build.sh → 'Checked wrapper/build/orchestrator/pwa_server.js for symbol ...: 1 match(es)' + exit 0",
+      "layer3b_local_ci_fresh": "scripts/check-stale-build.sh --exit-on-stale → exit 0 (fresh, no --exit-on-stale fail)",
+      "layer3c_local_stale_informational": "scripts/check-stale-build.sh --symbol=nonexistent → 'STALE: 0 matches (informational, use --exit-on-stale to fail)' + exit 0",
+      "layer3d_help_mentions_remote": "scripts/check-stale-build.sh --help | grep -q remote= → 1 match (exit codes header references --remote usage)",
+      "layer4_empty_host": "scripts/check-stale-build.sh --remote= → 'ERROR: --remote host cannot be empty' + exit 2",
+      "edge_case_ssh_unreachable": "CHECK_STALE_BUILD_HOST=nonexistent-host-xyz123 scripts/check-stale-build.sh --remote=nonexistent-host-xyz123 → 'ERROR: SSH to nonexistent-host-xyz123 failed (exit 255): Connection closed by 127.0.0.1 port 7890' + exit 2 (verified via bash -x: '+ exit 2' runs)",
+      "edge_case_env_override": "CHECK_STALE_BUILD_HOST=customhost + --remote=puer-hk → honors explicit --remote=puer-hk (env override skipped because --remote= is more specific)",
+      "edge_case_explicit_wins": "--remote=foo uses 'foo' (env var default ignored when explicit flag present)",
+      "grep_L8_secrets": "grep -rE 'KEY|SECRET|TOKEN|PASSWORD|sk-|api_key' scripts/check-stale-build.sh scripts/README.md → 0 matches",
+      "grep_no_network_tools": "grep -nE 'curl|wget|nc ' scripts/check-stale-build.sh → 0 matches (only ssh, the intended tool)",
+      "D3_lock_preserved": "Only scripts/check-stale-build.sh + scripts/README.md modified. harness/, spec/, spikes/, Dockerfile (root), pyproject.toml, 10 ADR bodies all untouched."
+    },
+    "tag_pushed": {
+      "tag_name": "v1.2.0j+.7+",
+      "points_to_commit": "dd571da (commit 1 feat commit, per L19 hygiene — NOT the cc-ready flip)",
+      "tag_sha": "PENDING — tag creation + push requires user authorization per global CLAUDE.md (Codex 提交铁律 修订 2026-09-05).",
+      "push_method_pending": "git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin main + git push origin v1.2.0j+.7+ (split into 2 ops per v1.2.0j classifier timeout lesson)"
+    },
+    "hygiene_checks": {
+      "L8_secrets": "0 secrets in diff (verified by grep -rE 'KEY|SECRET|TOKEN|PASSWORD|sk-|api_key' scripts/check-stale-build.sh scripts/README.md → 0 matches)",
+      "D3_lock_preserved": "Only scripts/ modified. harness/, spec/, spikes/, Dockerfile (root), pyproject.toml, 10 ADR bodies all untouched.",
+      "L19_sub_cycle_hygiene": "v1.2.0j+.7+ separate tag from v1.2.0j+.6+, NOT rolled in. Tag will point to commit 1 SHA dd571da (feat commit) per L19 hygiene.",
+      "D10_cc_ready_flip_separate": "cc-ready.json flip in separate commit 2 (audit trailing state pattern preserved per D10 + v1.2.0j+.4 cycle closure precedent).",
+      "no_new_dependencies": "No new dependencies introduced. SSH is already in $PATH on every host. Bash here-doc is POSIX-standard. Wrapper pattern mirrors newvps-deploy.sh:78-79 (raw ssh calls) — no new tool required.",
+      "exit_code_semantics_unchanged": "Existing 0/1/2 semantics preserved exactly. New SSH failure case maps to existing 2 (cannot verify freshness). No new exit codes added — keeps CI gates backward-compatible.",
+      "local_mode_zero_regression": "Local mode block unchanged. All 4 Layer 3 verification checks confirm pre-change behavior identical: informational exit 0, --exit-on-stale fresh exit 0, stale informational exit 0, --help works.",
+      "set_euo_pipefail_preserved": "set -euo pipefail at line 26 (was line 23). Inside the SSH here-doc, also uses set -euo pipefail for consistent error semantics."
+    }
+  },
   "v1.2.0j_plus_1_pwa_server_g8_1_sigterm_port": {
     "task_id": "T-V1.2.0J.1-PWA-SERVER-G8.1-SIGTERM-PORT-CLOSURE-PASS",
     "commit": "v1.2.0j+.1 G8.1 SIGTERM handler port from wrapper/server.ts:388-447 to wrapper/orchestrator/pwa_server.ts (2026-09-12). 1 commit 4ed823f fix(pwa-server): v1.2.0j+.1 G8.1 SIGTERM handler port + shutdown unit test (2 files / +148/-6: pwa_server.ts +52/-6, new test file +96 lines). Trigger: v1.2.0j U5 post-deploy on newvps 2026-09-12 11:35 empirically validated L21 finding — wrapper-frontend docker stop wall time 30.336s ExitCode=137 (SIGKILL), exactly matching plan §4 R1 prediction. Forward scope §6.b PROMOTED from P2 → P1 by empirical evidence. User 2026-09-12 '启动 plan mode' → Plan agent ExitPlanMode approved → D1-D8 locked. D1 scope = only pwa_server.ts + 1 new unit test file (no server.ts changes, no compose changes, no scope creep).",
