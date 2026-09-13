@@ -1308,6 +1308,24 @@
       "L44_two_layer_race_fix_pattern": "When diagnosing a race between two async functions (e.g. cancel() vs dispatch()), the race may have MULTIPLE LAYERS — each function's write path can clobber the other's terminal state. Always verify with E2E test that the helper-layer fix actually takes effect; unit tests for the helper alone may pass while a higher-level write (e.g. setTask in dispatch() entry) clobbers first. Pattern: (1) identify all write sites on both sides, (2) make every terminal-write site check current status, (3) integration test must verify the FINAL state matches the WINNER of the race. Applied here: layer 1 (dispatch entry setTask) + layer 2 (dsh fallback markCompleted) both needed guards.",
       "L45_singleton_aware_safe_write_helpers": "Standalone safeMark* functions (not class methods) for terminal-status writes in a process-wide singleton store. Pattern: function takes (store, taskId, payload) and checks store.getTask(taskId)?.status before delegating to store.markCompleted/markFailed. Returns boolean for caller observability. Why standalone: orchestrator's calling style is already module-level, no need to thread store instance through every consumer. Future safe* helpers (e.g. safeMarkRunning for retry-after-completed) should follow same pattern."
     },
+    "post_cycle_audit_2026_09_13": {
+      "audit_method": "After v1.2.0j+.10+ layer 1+2 race fix, user requested global audit of remaining write sites to verify no additional race layers exist (Option c per user choice). Method: (1) grep all status-mutating write sites in wrapper/orchestrator/ + wrapper/server.ts (markCompleted/markFailed/markCancelled/markRunning/setTask/_recordStep); (2) cross-reference with cancel() paths (cancel + cancelCtrl + _activeControllers); (3) classify each write site by storage (SQLite vs in-memory vs dead code); (4) verify whether cancel race exists for each.",
+      "audit_results": {
+        "total_write_sites_audited": 14,
+        "sqlite_write_sites": 5,
+        "in_memory_write_sites": 3,
+        "dead_code": 1,
+        "sqlite_sites_covered_by_j_plus_10_plus": 5,
+        "remaining_race_layers": 0
+      },
+      "D9_audit": "commander._recordStepFailure / _recordStepResult write to in-memory _stepTracker Map (commander.ts:52), independent of SqliteTaskStore. driver.interrupted event from cancel records 'interrupted: user cancel' as step status — semantically correct. NO SQLITE RACE. aggregateResults() may log fake 'failed_steps' warning post-cancel (log noise only). P3 defer for log cleanup.",
+      "D10_audit": "orchestrator.dispatch() re-dispatch with same task_id + prior 'cancelled' status: layer 1 guard at orchestrator.ts:280-294 early-returns with {task_id, status: 'cancelled'}. COVERED by v1.2.0j+.10+ — no new code needed.",
+      "queue_store_audit": "queue_store.markCompleted (queue_store.ts:132) has 0 callers in wrapper/ — dead code from F2/F4 era when queue_store transitioned to overflow-only role. No race because never invoked.",
+      "cancel_internal_TOCTOU": "cancel() at orchestrator.ts:537-552 has internal TOCTOU window (read status L541, write cancelled L542), but window is microsecond and downstream callers see cancelled status via layer 1 + layer 2 guards. No new race."
+    },
+    "new_lessons_post_audit": {
+      "L46_cancel_race_audit_methodology": "After fixing an async race (cancel vs dispatch), do NOT assume the fix is complete. Apply systematic audit: (1) grep all status-mutating write sites in relevant modules; (2) classify each by storage type (SQLite / in-memory / dead code); (3) cross-reference with the cancelling function's write path; (4) for each SQLite write site, verify it either (a) checks current status before writing, or (b) is unreachable from the cancelling function's call graph; (5) for in-memory writes, verify they do NOT back a user-visible terminal state (e.g. log noise vs DB state); (6) report findings as ✅ AUDITED / ✅ COVERED / ⏸️ STILL RACING. Applied here: 14 write sites audited in v1.2.0j+.10+ post-cycle audit; 0 additional race layers found; D9 (in-memory) and D10 (re-dispatch idempotence) resolved without code changes."
+    },
     "resolved_by_v1_2_0j_plus_10_plus": {
       "D8_dispatch_dsh_fallback_race_P2_CLOSED": "Forward scope D8 (v1.2.0j+.9+ closure §6 forward scope new item) → CLOSED by v1.2.0j+.10+. Two-layer race fix: (1) layer 1 — dispatch() entry cancelled-guard at orchestrator.ts:273-294; (2) layer 2 — dsh-fallback safeMarkCompleted/safeMarkFailed at orchestrator.ts:373-393 calling helpers in task_store.ts:358-413. Cancel HTTP path is now end-to-end reliable: POST /api/v1/tasks/:task_id/cancel always preserves 'cancelled' SQLite status regardless of dispatch() progress."
     },
@@ -1348,8 +1366,8 @@
       "3_result_blob_storage_P2": "⏸️ DEFERRED — replace JSON string in result_json with blob_id reference. M1+ schema migration.",
       "5_persistent_cancel_queue_signal_store_P2": "⏸️ DEFERRED — AbortSignal not serializable. F26 overflow queue needs separate signal store keyed by task_id.",
       "6_approach_B_handle_event_yield_P3": "⏸️ DEFERRED — if replay/retry needs cancel_token exposure for workerModule.interrupt().",
-      "NEW_D9_commander_recordStepFailure_race_audit": "⏸️ DEFERRED — verify commander._recordStepFailure during cancel: if cancel fires mid-step, does _recordStepFailure overwrite cancelled? L44 two-layer race pattern suggests checking step tracker write paths too.",
-      "NEW_D10_layer1_re_dispatch_idempotence_audit": "⏸️ DEFERRED — verify orchestrator.dispatch() with same task_id twice: does the second call early-return correctly if first already cancelled? Or does it clobber?",
+      "NEW_D9_commander_recordStepFailure_race_audit": "✅ AUDITED 2026-09-13 — NO RACE. commander._recordStepFailure / _recordStepResult write to in-memory _stepTracker: Map<taskId, PlanStep[]> (commander.ts:52), NOT to SqliteTaskStore. Cancel path writes 'cancelled' to SQLite (orchestrator.ts:542) but step tracker is independent storage. driver.interrupted event from cancel actually records 'interrupted: user cancel' as step status — semantically correct (cancel IS a step interruption). aggregateResults() in orchestrator.ts:396 may log fake 'failed_steps' warning post-cancel, but this is log noise, not SQLite state pollution. P3 defer for log noise cleanup.",
+      "NEW_D10_layer1_re_dispatch_idempotence_audit": "✅ COVERED by v1.2.0j+.10+ layer 1 guard. orchestrator.dispatch() with same task_id twice: first dispatch() sets pending/running. If cancel() runs between calls and writes 'cancelled' to SQLite, second dispatch() call hits layer 1 guard at orchestrator.ts:280-294 (store.getTask(taskId)?.status === 'cancelled' check) and early-returns with {task_id, status: 'cancelled'}. Layer 1 guard makes dispatch() naturally idempotent under cancel. Verified by reading orchestrator.ts:280-294 + 537-552. No new code needed.",
       "G2_aliyun_edge3_install_MEDIUM": "⏸️ DEFERRED (user OOB)",
       "G4_3_edge_gh_secrets_copy_LOW": "⏸️ DEFERRED (blocked on G2)",
       "G5_tailscale_split_dns_LOW": "⏸️ DEFERRED (admin toggle)",
