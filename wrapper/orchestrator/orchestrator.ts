@@ -316,6 +316,11 @@ export async function dispatch(
           lease_token: `lease-${taskId}`,
           fence_version: 1,
           metadata: { prompt: prompt.slice(0, 1024) },
+          // v1.2.0j+.6+ (F3+): cascade cancel signal into driver run loop.
+          // When orchestrator.cancel() calls cancelCtrl.abort(), this signal
+          // fires, execution_driver.start() adopts it via addEventListener,
+          // and the in-flight deepseekInvoke fetch is interrupted.
+          signal: cancelCtrl.signal,
         };
         let lastEvent: DriverEvent | null = null;
         for await (const ev of workerModule.run(runRequest)) {

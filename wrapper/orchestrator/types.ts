@@ -304,6 +304,10 @@ export interface RunRequest {
   lease_token: string;
   fence_version: number;
   metadata: Record<string, unknown>;
+  // v1.2.0j+.6+ (F3+): optional AbortSignal for cancellation.
+  // When provided, the driver checks both handle.controller.signal.aborted
+  // AND request.signal?.aborted to decide driver.interrupted vs driver.failed.
+  signal?: AbortSignal;
 }
 
 export interface RunHandle {

@@ -56,6 +56,10 @@ const HEARTBEAT_INTERVAL_MS = 5000;
 interface DriverHandle {
   cancel_token: string;
   controller: AbortController;
+  // v1.2.0j+.6+ (F3+): external cancel signal from orchestrator.cancel().
+  // When set, abort propagates from orchestrator → driver → deepseekInvoke
+  // fetch. Listener attached in start() cascades abort into controller.
+  externalSignal?: AbortSignal;
   child: null; // v1.2.0d D16: spawn path removed; field kept for handleRegistry shape compat
   startMs: number;
   attempt_id: string;
@@ -119,12 +123,20 @@ export class SpawnDshDriver implements ExecutionDriver {
   private async start(request: RunRequest): Promise<DriverHandle> {
     const attempt_id = request.attempt_id;
     const controller = new AbortController();
+    // v1.2.0j+.6+ (F3+): cascade orchestrator's cancel signal into driver
+    // run loop. When orchestrator.cancel() fires ctrl.abort(), the inner
+    // controller also aborts, deepseekInvoke fetch is interrupted, and
+    // streamDeepseekInvoke emits driver.interrupted (not driver.failed).
+    if (request.signal) {
+      request.signal.addEventListener("abort", () => controller.abort(), { once: true });
+    }
     const cancel_token = `drv-${randomUUID()}`;
     const driver_kind: DriverKind = "codex_exec";
 
     const handle: DriverHandle = {
       cancel_token,
       controller,
+      externalSignal: request.signal,
       child: null, // v1.2.0d D16: spawn path removed
       startMs: Date.now(),
       attempt_id,
@@ -221,12 +233,14 @@ export class SpawnDshDriver implements ExecutionDriver {
       // v1.2.0d D16: on network failure (api.deepseek.com unreachable from
       // edge host), fall through to routedDsh() cross-host dispatch.
       const isNetworkFail = /fetch failed|ENOTFOUND|ETIMEDOUT|ECONNREFUSED|AbortError/i.test(message);
-      if (isNetworkFail && !handle.controller.signal.aborted) {
+      if (isNetworkFail && !handle.controller.signal.aborted && !handle.externalSignal?.aborted) {
         yield* this.streamRoutedDshFallback(handle, attempt_id, timeoutMs);
         return;
       }
       yield {
-        kind: handle.controller.signal.aborted ? "driver.interrupted" : "driver.failed",
+        kind: handle.controller.signal.aborted || handle.externalSignal?.aborted
+          ? "driver.interrupted"
+          : "driver.failed",
         attempt_id,
         payload: {
           error: message,
@@ -281,7 +295,7 @@ export class SpawnDshDriver implements ExecutionDriver {
     } catch (err) {
       const message = (err as Error).message ?? String(err);
       yield {
-        kind: handle.controller.signal.aborted
+        kind: handle.controller.signal.aborted || handle.externalSignal?.aborted
           ? "driver.interrupted"
           : "driver.failed",
         attempt_id,
