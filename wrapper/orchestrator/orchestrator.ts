@@ -420,18 +420,38 @@ export async function dispatch(
 
   // ── v1.2.0a: Aggregate via commander ─────────────────────────────────────
   let planStepsCount = planPlan?.steps.length ?? 0;
+  // v1.2.0j+.11+ NEW (D11 log noise fix): when the task was cancelled
+  // mid-step, _recordStepFailure writes 'interrupted: user cancel' to
+  // the in-memory step tracker (commander.ts:244-250), so aggregateResults
+  // surfaces cancelled-induced step failures as failed_steps. These are
+  // NOT real failures — they are an expected side-effect of the cancel
+  // signal propagating through the plan. Suppress the WARN noise by
+  // checking finalEntry.status (post-dsh-fallback snapshot) before
+  // logging. cancel → cancelled propagates: layer-1 entry guard (L281)
+  // OR cancelled-aware safeMarkCompleted (L404) ensures finalEntry.status
+  // is 'cancelled' at L419 in the cancel-race window.
+  const isCancelled = finalEntry?.status === "cancelled";
   try {
     const agg = await commander.aggregateResults(taskId);
     if (agg.output && typeof agg.output === 'object') {
       const out = agg.output as Record<string, unknown>;
       const failed = Array.isArray(out['failed_steps']) ? (out['failed_steps'] as readonly unknown[]).length : 0;
-      // Surface aggregate failures into the entry error log (without overriding dsh status)
-      if (failed > 0) {
+      if (failed > 0 && isCancelled) {
+        // Expected: cancel interrupted in-flight step(s). Info-level only —
+        // not a real plan execution failure.
+        console.log(`[orchestrator] aggregateResults: ${failed} plan step(s) marked failed by cancel (expected, not a real failure)`);
+      } else if (failed > 0) {
         console.warn(`[orchestrator] aggregateResults: ${failed} plan step(s) failed (synthetic stub; v1.2.0b real)`);
       }
     }
   } catch (err) {
-    console.warn(`[orchestrator] commander.aggregateResults failed: ${err}`);
+    if (isCancelled) {
+      // AggregateError (no steps tracked) is also expected during cancel —
+      // planStep may not have been called before cancel fired.
+      console.log(`[orchestrator] commander.aggregateResults skipped during cancel: ${err}`);
+    } else {
+      console.warn(`[orchestrator] commander.aggregateResults failed: ${err}`);
+    }
   }
 
   // ── v1.2.0d F26: reclaim SQLite pending → in-memory hot path ──────────────
