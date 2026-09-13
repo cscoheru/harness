@@ -29,6 +29,7 @@ import type { DshOpts, DshResponse } from "../dsh/types.js";
 import * as commander from "./commander.js";
 import * as workerModule from "./worker.js";
 import { getDefaultQueueStore } from "./queue_store.js";
+import { getDefaultTaskStore } from "./task_store.js";
 import {
   activeTaskCount,
   queueDepth,
@@ -42,18 +43,23 @@ import {
 const KERNEL_URL =
   process.env["HARNESS_RUNTIME_URL"] ?? "http://localhost:8000";
 
-/** In-memory task store — in production replace with SQLite via kernel */
-const _taskStore = new Map<string, InMemoryTask>();
+// ─── F3: Active task cancellation registry ──────────────────────────────────
+// Per-task AbortController for in-flight cancel signals. Pairs with
+// execution_driver.handleRegistry (driver-level interrupt) — the orchestrator
+// registry is at a higher level (per-task) and signals cancel via
+// controller.abort() + persist `cancelled` status to SQLite.
+//
+// F3 partial closure (per R10): full workerModule.run() integration requires
+// refactoring run() to expose RunHandle; deferred to v1.2.0j+.6+ (F3+).
+const _activeControllers = new Map<string, AbortController>();
 
-interface InMemoryTask {
-  taskId: string;
-  prompt: string;
-  modelClass: string;
-  status: "pending" | "running" | "completed" | "failed";
-  result: DshResponse | null;
-  error: string | null;
-  createdAt: number;
-  updatedAt: number;
+function getOrCreateController(taskId: string): AbortController {
+  let ctrl = _activeControllers.get(taskId);
+  if (!ctrl) {
+    ctrl = new AbortController();
+    _activeControllers.set(taskId, ctrl);
+  }
+  return ctrl;
 }
 
 // ─── Kernel HTTP client ────────────────────────────────────────────────────────
@@ -259,22 +265,25 @@ export async function dispatch(
   activeTaskCount.set(getDefaultQueueStore().inFlightCount());
   queueDepth.set(getDefaultQueueStore().pendingCount());
 
-  // Store task in memory
-  const entry: InMemoryTask = {
+  // ── F2: persist task to SQLite-backed store (replaces in-memory Map) ───────
+  const store = getDefaultTaskStore();
+  const now = Date.now();
+  store.setTask({
     taskId,
     prompt,
     modelClass,
     status: "pending",
-    result: null,
+    resultJson: null,
     error: null,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  };
-  _taskStore.set(taskId, entry);
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  // ── F3: register cancellation controller (paired with execution_driver) ────
+  const cancelCtrl = getOrCreateController(taskId);
 
   // ── v1.2.0a: Plan via commander ───────────────────────────────────────────
-  entry.status = "running";
-  entry.updatedAt = Date.now();
+  store.markRunning(taskId);
 
   let planPlan: PlanPlan | null = null;
   try {
@@ -355,18 +364,26 @@ export async function dispatch(
     dshResult = await runDsh(prompt, modelClass);
   }
 
-  // Update task state based on dsh result
-  entry.updatedAt = Date.now();
+  // Update task state based on dsh result — F2 persistence via SQLite store
   if (dshResult.exitCode === 0) {
-    entry.status = "completed";
-    entry.result = dshResult;
+    store.markCompleted(
+      taskId,
+      JSON.stringify({
+        stdout: dshResult.stdout,
+        exitCode: dshResult.exitCode,
+        stderr: dshResult.stderr,
+        wallMs: dshResult.wallMs,
+      }),
+    );
     console.log(`[orchestrator] dispatch(${taskId}) — completed wallMs=${dshResult.wallMs}`);
   } else {
-    entry.status = "failed";
-    entry.error = dshResult.stderr || `dsh exit ${dshResult.exitCode}`;
-    entry.result = dshResult;
+    store.markFailed(taskId, dshResult.stderr || `dsh exit ${dshResult.exitCode}`);
     console.warn(`[orchestrator] dispatch(${taskId}) — failed exit=${dshResult.exitCode} stderr=${dshResult.stderr}`);
   }
+  _activeControllers.delete(taskId);
+
+  // Read final status for return payload
+  const finalEntry = store.getTask(taskId);
 
   // ── v1.2.0a: Aggregate via commander ─────────────────────────────────────
   let planStepsCount = planPlan?.steps.length ?? 0;
@@ -389,7 +406,7 @@ export async function dispatch(
 
   return {
     task_id: taskId,
-    status: entry.status,
+    status: finalEntry?.status ?? "failed",
     output: {
       stdout: dshResult.stdout,
       wallMs: dshResult.wallMs,
@@ -397,7 +414,7 @@ export async function dispatch(
       plan_steps: planStepsCount,
       plan_source: (planPlan?.plan_metadata['source'] as string) ?? "none",
     },
-    error: entry.error,
+    error: finalEntry?.error ?? null,
   };
 }
 
@@ -440,7 +457,7 @@ function extractPrompt(task: Task): string {
  */
 export async function getTaskStatus(taskId: string): Promise<{
   task_id: string;
-  status: "pending" | "running" | "completed" | "failed";
+  status: "pending" | "dispatched" | "running" | "completed" | "failed" | "cancelled";
   result?: string;
   error?: string;
 }> {
@@ -450,13 +467,22 @@ export async function getTaskStatus(taskId: string): Promise<{
     return kernelStatus_;
   }
 
-  // Fall back to in-memory store
-  const entry = _taskStore.get(taskId);
+  // Fall back to SQLite-backed task store (F2 — survives process restart)
+  const entry = getDefaultTaskStore().getTask(taskId);
   if (entry) {
+    let resultStr: string | undefined;
+    if (entry.resultJson) {
+      try {
+        const parsed = JSON.parse(entry.resultJson) as Record<string, unknown>;
+        resultStr = typeof parsed["stdout"] === "string" ? parsed["stdout"] : entry.resultJson;
+      } catch {
+        resultStr = entry.resultJson;
+      }
+    }
     return {
       task_id: entry.taskId,
       status: entry.status,
-      result: entry.result?.stdout,
+      result: resultStr,
       error: entry.error ?? undefined,
     };
   }
@@ -470,37 +496,45 @@ export async function getTaskStatus(taskId: string): Promise<{
 
 /**
  * Cancel a running orchestration.
- * TODO(M1+): Propagate cancel signal to kernel / active commander + workers.
+ * F3: persists `cancelled` status to SQLite AND aborts the in-flight
+ * AbortController (paired with execution_driver.interrupt pattern). The
+ * AbortController triggers execution_driver's `driver.interrupted` event
+ * downstream when workerModule.run() integration lands (v1.2.0j+.6+ / F3+).
  */
 export async function cancel(taskId: string): Promise<void> {
   console.log(`[orchestrator] cancel(${taskId})`);
-  const entry = _taskStore.get(taskId);
-  if (entry && entry.status === "running") {
-    entry.status = "failed";
-    entry.error = "cancelled by user";
-    entry.updatedAt = Date.now();
+  const store = getDefaultTaskStore();
+  const entry = store.getTask(taskId);
+  if (entry && (entry.status === "pending" || entry.status === "running" || entry.status === "dispatched")) {
+    store.markCancelled(taskId);
+    const ctrl = _activeControllers.get(taskId);
+    if (ctrl) {
+      ctrl.abort();
+      _activeControllers.delete(taskId);
+    }
+    console.log(`[orchestrator] cancel(${taskId}) — propagated interrupt + persisted cancelled`);
+  } else {
+    console.log(`[orchestrator] cancel(${taskId}) — no active task (status=${entry?.status ?? "missing"})`);
   }
 }
 
 /**
- * List all active tasks from in-memory store.
- * TODO(M1+): Query SQLite tasks table via runtime kernel instead.
+ * List all tasks (active + terminal) from the SQLite-backed task store.
+ * F4: queries SQLite directly so terminal tasks (completed / failed /
+ * cancelled) survive process restart. Ordered by created_at DESC (newest first).
  */
 export async function listTasks(): Promise<Task[]> {
-  const tasks: Task[] = [];
-  for (const [taskId, entry] of _taskStore) {
-    tasks.push({
-      task_id: taskId,
-      status: entry.status,
-      workflow_pack: entry.modelClass,
-      workflow_version: "1.0",
-      input_blob_id: null,
-      created_at: new Date(entry.createdAt).toISOString(),
-      updated_at: new Date(entry.updatedAt).toISOString(),
-      result_blob_id: null,
-    });
-  }
-  return tasks;
+  const store = getDefaultTaskStore();
+  return store.listTasks().map((entry) => ({
+    task_id: entry.taskId,
+    status: entry.status,
+    workflow_pack: entry.modelClass,
+    workflow_version: "1.0",
+    input_blob_id: null,
+    created_at: new Date(entry.createdAt).toISOString(),
+    updated_at: new Date(entry.updatedAt).toISOString(),
+    result_blob_id: null,
+  }));
 }
 
 /**
