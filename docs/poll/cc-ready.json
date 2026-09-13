@@ -1285,5 +1285,76 @@
       "G7_on_failure_N_tune_LOW": "collect 48h evidence post-v1.2.0g deploy before bumping on-failure:3 → :5",
       "edge_host_rebuild_v1_2_0j_plus_8_plus_P1": "⏸️ USER OOB — rebuild edge hosts to pick up healthcheck block (v1.2.0j+.8+ U1). ssh edgeN 'cd /opt/fish-harness && git pull --ff-only && cd deploy && docker compose -f 6host-compose.edgeN.yml up -d' then verify '{\"Status\":\"healthy\"}'."
     }
+  },
+  "v1.2.0j_plus_10_plus_D8_dispatch_race_cancel": {
+    "task_id": "T-V1.2.0J.10-PLUS-D8-DISPATCH-RACE-CANCEL-CLOSURE-PASS",
+    "commit": "v1.2.0j+.10+ D8 dispatch cancel race fix (2026-09-13). 2 commits: 80b5ecf fix(orchestrator) (5 files / +491 lines / -17 lines: orchestrator.ts +62/-17 layer 1 + layer 2 race fixes, task_store.ts +52/-0 safeMarkCompleted + safeMarkFailed standalone exports, package.json +1/-0 test:dispatch-race:e2e script, test/unit/task_store_safe_mark.test.ts NEW +180 lines 11 tests, test/integration/dispatch_race_cancel.test.ts NEW +196 lines 3 tests), then this chore(cc-ready) flip. Trigger: v1.2.0j+.9+ closure §6 forward scope item D8 (dispatch dsh-fallback race deferred since v1.2.0j+.9+). User 2026-09-13 'step by step with a/b/c' + a-2 plan approval → step-by-step pattern + D1-D8 locked.",
+    "created_at": "2026-09-13T13:35:00Z",
+    "branch": "main",
+    "status": "✅ v1.2.0j+.10+ D8 dispatch cancel race CLOSED @ main 80b5ecf (2026-09-13). 5-layer verification PASS (tsc 0 / unit 11/11 / integration 3/3 / regression cancel_propagation_6host 5/5 + 244 unit/integration PASS / L8 0 secrets). Pre-existing failure (server.test.ts:162 macOS /data) NOT a regression — baseline main also fails identically. Tag v1.2.0j+.10+ → 80b5ecf PENDING user authorization per global CLAUDE.md + Codex 提交铁律 (修订 2026-09-05).",
+    "approach": "Two-layer race fix discovered during integration test verification: (1) layer 1 race at orchestrator.dispatch() entry — store.setTask + store.markRunning would unconditionally overwrite prior 'cancelled' status BEFORE dsh-fallback ran. Fix: cancelled-guard at entry with early-return. (2) layer 2 race at dsh-fallback terminal write — store.markCompleted/markFailed would overwrite cancelled. Fix: new standalone safeMarkCompleted/safeMarkFailed helpers in task_store.ts that check current status before writing. Layer 2 fix alone passed unit tests but layer 1 race was caught by integration test (1/3 → 3/3 after layer 1 fix).",
+    "scope_locked": "5 files only (wrapper/orchestrator/orchestrator.ts + task_store.ts + package.json + test/unit/task_store_safe_mark.test.ts NEW + test/integration/dispatch_race_cancel.test.ts NEW). 0 kernel code modified. 0 deploy YAML modified. 0 ADR bodies modified. harness/, spec/, spikes/, Dockerfile root, pyproject.toml, 10 ADR bodies all untouched (D3 lock preserved).",
+    "key_design_decisions": {
+      "D1_two_layer_race_fix": "D8 was initially diagnosed as single-layer (dsh-fallback race at orchestrator.ts:358-370). Integration test caught that layer 1 (dispatch entry setTask + markRunning) ALSO clobbered cancelled status. Fixed both layers — layer 1 with inline cancelled-guard at entry + early-return; layer 2 with safe* helpers in store.",
+      "D2_standalone_helpers_not_class_methods": "safeMarkCompleted / safeMarkFailed are standalone exported functions (NOT class methods on SqliteTaskStore). Rationale: orchestrator.ts is already calling store methods at module level (e.g. store.markCompleted(taskId, ...)) — adding class methods would require consumer to instantiate or fetch the singleton. Standalone functions match the existing calling style. Stored in task_store.ts alongside the class for cohesion.",
+      "D3_safeMarkFailed_allows_retry": "safeMarkFailed returns true when current status is 'failed' (allows retry overwriting prior failure). Only 'cancelled' and 'completed' block the write. Rationale: legitimate retry path should be able to overwrite prior failure, but cancelled/completed are user-meaningful terminal states that should never be overwritten by dsh-fallback.",
+      "D4_safeMarkCompleted_blocks_failed": "safeMarkCompleted returns false when current status is 'failed' (does NOT allow overwriting prior failure with success). Rationale: prior failure is a signal that something already went wrong — silently transitioning to 'completed' would lose the error context. If retry is intended, use markFailed→markFailed path explicitly.",
+      "D5_early_return_preserves_createdAt": "Layer 1 early-return at orchestrator.ts:282-294 uses store.getTask(taskId).createdAt when present (preserves original creation timestamp) — otherwise uses now. Rationale: re-dispatch of same task_id should not reset createdAt.",
+      "D6_layer1_returns_synthetic_OrchestrationResult": "Layer 1 early-return constructs {task_id, status: 'cancelled'} as OrchestrationResult — does not call kernelInvoke/runDsh/planStep. Rationale: caller of dispatch() expects a result object with at minimum task_id + status; constructing synthetic cancelled result matches the shape and prevents the dsh-fallback chain from running at all.",
+      "D7_no_changes_to_cancel_function": "orchestrator.cancel() (orchestrator.ts:509-524) is UNCHANGED. The fix is on the dispatch() side — cancel() writes 'cancelled' status synchronously to SQLite, and dispatch() now checks that status before doing any writes. cancel() was already idempotent and correct; the race was purely on dispatch()'s write side.",
+      "D8_unit_test_catches_helper_logic_e2e_catches_orchestrator_invariance": "Unit test (task_store_safe_mark.test.ts) verifies safe* helpers' logical invariant (cancelled-aware write). Integration test (dispatch_race_cancel.test.ts) verifies orchestrator ACTUALLY INVOKES safe* helpers in the right place and that layer 1 race doesn't bypass them. Both layers needed because unit tests don't catch cross-function ordering bugs."
+    },
+    "new_lessons": {
+      "L44_two_layer_race_fix_pattern": "When diagnosing a race between two async functions (e.g. cancel() vs dispatch()), the race may have MULTIPLE LAYERS — each function's write path can clobber the other's terminal state. Always verify with E2E test that the helper-layer fix actually takes effect; unit tests for the helper alone may pass while a higher-level write (e.g. setTask in dispatch() entry) clobbers first. Pattern: (1) identify all write sites on both sides, (2) make every terminal-write site check current status, (3) integration test must verify the FINAL state matches the WINNER of the race. Applied here: layer 1 (dispatch entry setTask) + layer 2 (dsh fallback markCompleted) both needed guards.",
+      "L45_singleton_aware_safe_write_helpers": "Standalone safeMark* functions (not class methods) for terminal-status writes in a process-wide singleton store. Pattern: function takes (store, taskId, payload) and checks store.getTask(taskId)?.status before delegating to store.markCompleted/markFailed. Returns boolean for caller observability. Why standalone: orchestrator's calling style is already module-level, no need to thread store instance through every consumer. Future safe* helpers (e.g. safeMarkRunning for retry-after-completed) should follow same pattern."
+    },
+    "resolved_by_v1_2_0j_plus_10_plus": {
+      "D8_dispatch_dsh_fallback_race_P2_CLOSED": "Forward scope D8 (v1.2.0j+.9+ closure §6 forward scope new item) → CLOSED by v1.2.0j+.10+. Two-layer race fix: (1) layer 1 — dispatch() entry cancelled-guard at orchestrator.ts:273-294; (2) layer 2 — dsh-fallback safeMarkCompleted/safeMarkFailed at orchestrator.ts:373-393 calling helpers in task_store.ts:358-413. Cancel HTTP path is now end-to-end reliable: POST /api/v1/tasks/:task_id/cancel always preserves 'cancelled' SQLite status regardless of dispatch() progress."
+    },
+    "u1_verification_results": {
+      "u1_layer1_typescript_compile": "npx tsc --noEmit → 0 errors PASS (2026-09-13)",
+      "u1_layer2_unit_test": "npx vitest run test/unit/task_store_safe_mark.test.ts → 11/11 PASS in 33ms (covers safeMarkCompleted × 5 cases + safeMarkFailed × 6 cases including cancelled/failed/completed/pending/running/missing-task paths)",
+      "u1_layer3_integration_test": "npm run test:dispatch-race:e2e → 3/3 PASS in 39ms after layer 1 fix (initial run 1/3 FAIL — integration test caught the layer 1 race that unit tests missed; after adding layer 1 entry guard all 3 PASS)",
+      "u1_layer4_regression": "npm run test:cancel:e2e → 5/5 PASS (v1.2.0j+.9+ cancel chain still works); unit + key integration → 244 PASS / 1 pre-existing FAIL (server.test.ts:162 macOS /data/task_store.db unwritable) NOT a regression — baseline main also fails identically per L19 hygiene stash test",
+      "u1_layer5_L8_hygiene": "grep -rE 'KEY|SECRET|TOKEN|PASSWORD|sk-[a-zA-Z0-9]{8,}|api[_-]key' wrapper/orchestrator/task_store.ts wrapper/orchestrator/orchestrator.ts wrapper/test/unit/task_store_safe_mark.test.ts wrapper/test/integration/dispatch_race_cancel.test.ts wrapper/package.json | grep -vE 'DEEPSEEK_API_KEY|sk-test-key' → 0 matches (only SQL schema 'task_id' column name matches, not a secret)",
+      "git_diff_stat": "git diff --stat → 5 files changed, 491 insertions(+), 17 deletions(-)"
+    },
+    "verification_checks_pass": {
+      "layer1_typescript_compile": "npx tsc --noEmit → 0 errors",
+      "layer2_unit_isolation": "npx vitest run test/unit/task_store_safe_mark.test.ts → 11/11 PASS, 33ms",
+      "layer3_integration_e2e": "npm run test:dispatch-race:e2e → 3/3 PASS, 39ms (post-layer1-fix)",
+      "layer4_regression_no_new_failures": "Pre-existing server.test.ts:162 failure NOT a regression — baseline main also fails identically",
+      "layer5_L8_secrets": "0 matches in diff (DEEPSEEK_API_KEY test stub excluded, SQL schema 'task_id' excluded as non-secret)",
+      "D3_lock_preserved": "Only wrapper/orchestrator/ + wrapper/test/ + wrapper/package.json modified. harness/, spec/, spikes/, Dockerfile (root), pyproject.toml, 10 ADR bodies all untouched.",
+      "git_diff_stat": "5 files changed, 491 insertions(+), 17 deletions(-)"
+    },
+    "tag_pushed": {
+      "tag_name": "v1.2.0j+.10+",
+      "points_to_commit": "80b5ecf (commit 1 fix(orchestrator), per L19 hygiene — NOT the cc-ready flip)",
+      "tag_sha": "PENDING — tag creation + push requires user authorization per global CLAUDE.md (Codex 提交铁律 修订 2026-09-05).",
+      "push_method_pending": "git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin main + git push origin v1.2.0j+.10+ (split into 2 ops per v1.2.0j classifier timeout lesson)"
+    },
+    "hygiene_checks": {
+      "L8_secrets": "0 secrets in diff (verified by grep — only SQL schema column names match)",
+      "D3_lock_preserved": "Only wrapper/ modified. harness/, spec/, spikes/, Dockerfile (root), pyproject.toml, 10 ADR bodies all untouched. deploy/, scripts/, docs/ all untouched (cc-ready.json flip in commit 2 only).",
+      "L19_sub_cycle_hygiene": "v1.2.0j+.10+ separate tag from v1.2.0j+.9+, NOT rolled in. Tag will point to commit 1 SHA 80b5ecf (fix(orchestrator) commit) per L19 hygiene.",
+      "D10_cc_ready_flip_separate": "cc-ready.json flip in separate commit 2 (audit trailing state pattern preserved per D10 + v1.2.0j+.4 cycle closure precedent).",
+      "no_new_dependencies": "No new dependencies introduced. test:dispatch-race:e2e npm script uses existing vitest.",
+      "set_euo_pipefail": "N/A — no shell scripts modified in this cycle."
+    },
+    "forward_scope_v1_2_0j_plus_11_plus": {
+      "1_kernel_http_cancel_list_endpoints_P2": "⏸️ NEXT CYCLE candidate — kernel-side FastAPI routes /api/orch/cancel/{task_id} + /api/orch/list. Requires D3 lock lift on harness/. ~50-80 lines Python.",
+      "2_tenant_isolation_listTasks_P2": "⏸️ DEFERRED — filter by tenant_id from request context. M1+ feature.",
+      "3_result_blob_storage_P2": "⏸️ DEFERRED — replace JSON string in result_json with blob_id reference. M1+ schema migration.",
+      "5_persistent_cancel_queue_signal_store_P2": "⏸️ DEFERRED — AbortSignal not serializable. F26 overflow queue needs separate signal store keyed by task_id.",
+      "6_approach_B_handle_event_yield_P3": "⏸️ DEFERRED — if replay/retry needs cancel_token exposure for workerModule.interrupt().",
+      "NEW_D9_commander_recordStepFailure_race_audit": "⏸️ DEFERRED — verify commander._recordStepFailure during cancel: if cancel fires mid-step, does _recordStepFailure overwrite cancelled? L44 two-layer race pattern suggests checking step tracker write paths too.",
+      "NEW_D10_layer1_re_dispatch_idempotence_audit": "⏸️ DEFERRED — verify orchestrator.dispatch() with same task_id twice: does the second call early-return correctly if first already cancelled? Or does it clobber?",
+      "G2_aliyun_edge3_install_MEDIUM": "⏸️ DEFERRED (user OOB)",
+      "G4_3_edge_gh_secrets_copy_LOW": "⏸️ DEFERRED (blocked on G2)",
+      "G5_tailscale_split_dns_LOW": "⏸️ DEFERRED (admin toggle)",
+      "G7_on_failure_N_tune_LOW": "collect 48h evidence post-v1.2.0g deploy before bumping on-failure:3 → :5",
+      "edge_host_rebuild_v1_2_0j_plus_8_plus_P1": "⏸️ USER OOB — rebuild edge hosts to pick up healthcheck block (v1.2.0j+.8+ U1)."
+    }
   }
 }
