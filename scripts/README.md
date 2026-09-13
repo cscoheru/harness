@@ -35,4 +35,26 @@ scripts/check-stale-build.sh --exit-on-stale                # exit 1 if stale (C
 
 **v1.2.0j+.4 NEW**. Pattern reusable for future CI gates.
 
+### `--remote=<host>` SSH mode (v1.2.0j+.7+ NEW)
+
+Check the deployed `wrapper/build/orchestrator/pwa_server.js` on a remote host via SSH, before/after deploying.
+
+**Usage**:
+```bash
+scripts/check-stale-build.sh --remote=newvps                              # remote informational
+scripts/check-stale-build.sh --remote=newvps --exit-on-stale              # remote CI gate
+scripts/check-stale-build.sh --remote=puer-hk --symbol='registerShutdown' # custom host + symbol
+scripts/check-stale-build.sh --dry-run --remote=newvps                    # preview SSH command
+```
+
+**Environment variables**:
+- `CHECK_STALE_BUILD_HOST=newvps` — override default remote host (`newvps` SSH alias)
+- `CHECK_STALE_BUILD_REPO_DIR=/opt/fish-harness` — override remote repo path (rare)
+
+**Remote path**: Defaults to `/opt/fish-harness/wrapper/build/orchestrator/pwa_server.js` per `scripts/newvps-deploy.sh` precedent. Uses SSH aliases from `~/.ssh/config`.
+
+**Exit codes** (remote mode): `0` fresh / informational stale, `1` stale (only when `--exit-on-stale` set), `2` file not found OR SSH unreachable.
+
+**v1.2.0j+.7+ NEW**. Requires valid SSH key auth to target host.
+
 @file scripts/README.md
