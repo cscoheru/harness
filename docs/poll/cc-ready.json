@@ -910,6 +910,76 @@
       "L8_TODO_M1_plus_removed": "3 explicit TODO(M1+) markers in orchestrator.ts REMOVED at lines 46/473/487 (F2/F3/F4 forward scope markers gone). Future M1+ TODOs unrelated to F2/F3/F4 remain (e.g., dispatch kernel URL detection, planStep retry policy)."
     }
   },
+  "v1.2.0j_plus_6_plus_F3_plus_workerModule_run_signal_integration": {
+    "task_id": "T-V1.2.0J.6-PLUS-F3-PLUS-WORKERMODULE-RUN-SIGNAL-CLOSURE-PASS",
+    "commit": "v1.2.0j+.6+ F3+ thread AbortSignal from RunRequest into execution driver (2026-09-13). 2 commits: a41b2f7 feat(orchestrator+driver) (+26/-3 across 3 production files: types.ts +3, execution_driver.ts +13, orchestrator.ts +10 net), adde6f0 test(orchestrator+driver) (+292 across 2 new test files: execution_driver_signal.test.ts 3 tests + orchestrator_cancel_signal.test.ts 3 tests). Trigger: v1.2.0j+.5 closure §8.1 explicit next-cycle marker — _activeControllers registry from v1.2.0j+.5 was orphaned (cancel() fired ctrl.abort() but signal never plumbed into workerModule.run() → execution_driver.run()). User 2026-09-13 'start v1.2.0j+.6+' → EnterPlanMode → Plan agent designed Approach A → ExitPlanMode approved → D1-D8 locked.",
+    "created_at": "2026-09-13T11:35:00Z",
+    "branch": "main",
+    "approach": "A — add signal?: AbortSignal to RunRequest interface (standard Web API pattern). Minimal touch: 1 new field, 4 files (3 MOD + 1 verified no-change passthrough), ~26 net production lines + 292 lines tests.",
+    "scope_locked": "D1 scope: 3 MOD production files (types.ts +3, execution_driver.ts +13, orchestrator.ts +10) + 1 MOD test file (commander.test.ts verified no change needed) + 2 NEW test files (execution_driver_signal.test.ts 3 tests + orchestrator_cancel_signal.test.ts 3 tests) + 1 cc-ready flip. 0 changes outside wrapper/orchestrator/ + wrapper/test/. worker.ts verified passthrough — no code change.",
+    "key_design_decisions": {
+      "approach_A_signal_field": "Add signal?: AbortSignal to RunRequest interface. Standard Web API pattern — fetch()/fs.readFile()/setTimeout() all accept AbortSignal. No custom CancelToken class needed. Composes with existing handle.controller.signal in driver.",
+      "approach_B_REJECTED": "Yield RunHandle as new DriverEvent — rejected due to race condition between cancel() firing and orchestrator catching handle event.",
+      "approach_C_REJECTED": "Return tuple Promise<{handle, events}> — rejected as too invasive (cascades into 4 files + 3 test files + ExecutionDriver interface).",
+      "externalSignal_handle_field": "Added externalSignal?: AbortSignal to DriverHandle interface so streamDeepseekInvoke + streamRoutedDshFallback can read abort state without changing their signatures. Signal adopted in start() via { once: true } addEventListener that cascades abort into inner controller.",
+      "3_abort_check_sites": "All 3 abort-check sites updated to check both handle.controller.signal.aborted AND handle.externalSignal?.aborted: (a) streamDeepseekInvoke isNetworkFail guard, (b) streamDeepseekInvoke catch kind decision, (c) streamRoutedDshFallback catch kind decision. Missing any one creates R3 — network fail + external abort could route to fallback instead of driver.interrupted.",
+      "worker_ts_passthrough_verified": "worker.ts run() already passes request through to driver().run(). Signal is a field on request, no code change needed. Pattern precedent: heartbeat_sender.ts:53 uses AbortSignal.timeout(5_000)."
+    },
+    "new_lessons": {
+      "L31_NEW_standard_abort_signal_over_custom_token": "Approach A wins because AbortSignal is the universal cancellation primitive in modern Node/Web. fetch()/fs.readFile()/setTimeout() all accept it. If we had invented a custom CancelToken class, we'd now need to maintain it across every layer. Adding signal?: AbortSignal to RunRequest is self-similar across the call chain (orchestrator → worker → driver).",
+      "L32_NEW_externalSignal_on_handle_pattern": "When a method doesn't receive the parent object directly, store the relevant external state on a child handle rather than expanding method signatures. DriverHandle gains externalSignal?: AbortSignal; streamDeepseekInvoke + streamRoutedDshFallback read handle.externalSignal?.aborted without needing request parameter. Preserves call-site symmetry across start/stream methods.",
+      "L33_NEW_three_abort_check_sites": "Threading an external signal into a driver requires updating ALL abort-checking branches — easy to miss one. The grep hygiene check `grep -n 'signal.aborted' wrapper/orchestrator/execution_driver.ts` is the right discipline: enumerate every site that checks signal state, ensure each one considers both internal + external sources.",
+      "L34_NEW_test_isolation_queue_worker_task_envs": "Tests that exercise orchestrator.dispatch() need all 3 env vars set (QUEUE_STORE_DB + WORKER_POOL_DB + TASK_STORE_DB) AND all 3 _resetXxxForTests() helpers called between tests. dispatch() → tryEnqueueOrThrottle → startMetricsSampling read different env vars. Single env var = ENOENT mkdir /data crash.",
+      "L35_NEW_observable_side_effects_over_internal_state": "For module-private state (_activeControllers), verify behavior through observable side effects (listTasks() reflects terminal status via SQLite) rather than exposing internals via test-only exports. Cleaner production code + more robust tests of user-visible contracts."
+    },
+    "resolved_by_v1_2_0j_plus_6_plus": {
+      "F3_plus_workerModule_run_integration_CLOSED": "Forward scope `F3+ workerModule.run() integration P1` (v1.2.0j+.5 §8.1 next-cycle candidate) → CLOSED by v1.2.0j+.6+. Orchestrator's cancel() now cascades into driver stream via AbortSignal — request.signal field on RunRequest, execution_driver.start() adopts signal via { once: true } listener that calls controller.abort(), 3 abort-check sites (isNetworkFail guard + 2 catch kind decisions) updated to check both handle.controller.signal.aborted AND handle.externalSignal?.aborted.",
+      "_activeControllers_registry_no_longer_orphaned": "v1.2.0j+.5's _activeControllers Map<taskId, AbortController> is now wired — cancelCtrl.signal flows into runRequest.signal → execution_driver.run() → deepseekInvoke fetch abort. Registry was correctly constructed but signal was never observed downstream. v1.2.0j+.6+ closes the loop.",
+      "worker_ts_no_change_verified": "worker.ts run() request passthrough verified by reading worker.ts:145-180 — request already passed through to driver().run() unchanged. Signal is a field on request; no code change needed. Documented in plan §2 file 3 as 'verified no-change'."
+    },
+    "forward_scope_v1_2_0j_plus_7_plus": {
+      "kernel_HTTP_cancel_list_endpoints": "Kernel HTTP facade /api/orch/cancel/{task_id} + /api/orch/list endpoints — requires D3 lock lift on harness/. ~50-80 lines Python FastAPI. Currently wrapper-side cancel() only affects local SQLite; multi-host cancellation requires kernel coordination. Deferred to v1.2.0j+.7+.",
+      "tenant_isolation_listTasks": "Tenant isolation in listTasks() — filter by tenant_id from request context. Tenant context not yet wired into orchestrator (M1+ feature). Deferred.",
+      "result_blob_storage": "Replace JSON string in result_json with blob_id reference to artifact store. Artifact store integration deferred to M1+. M1+ schema migration adds result_blob_id column. Deferred.",
+      "6host_e2e_cancel_propagation_test": "6host E2E integration test for cancel propagation through wrapper → worker → execution_driver. Now feasible post-F3+ — deferred to v1.2.0j+.7+ for separate cycle.",
+      "persistent_cancel_queue_signal_store": "When dispatch() is enqueued (F26 overflow queue), AbortSignal cannot be serialized. Future cycle needs separate signal store keyed by task_id. Deferred to v1.2.0j+.7+.",
+      "approach_B_handle_event_yield": "If replay/retry scenarios need orchestrator to hold the RunHandle after workerModule.run() returns (to call workerModule.interrupt()), add `kind: driver.handle` event exposing cancel_token. Approach B was rejected for v1.2.0j+.6+ (race condition with cancel()) but may be needed for future replay paths.",
+      "6_a_edge_compose_healthcheck_P1_user_OOB": "5 host-compose.edge[1-5].yml + edge-wrapper rebuild. ~27 lines (5 files × ~5 lines + 2 WORKER_HEARTBEAT_URL adds). User OOB — requires user EXEC on each edge host.",
+      "G2_aliyun_edge3_install_MEDIUM": "user OOB (aliyun console access)",
+      "G4_3_edge_gh_secrets_copy_LOW": "链式依赖 G2",
+      "check_stale_build_sh_remote_ssh_mode_P2": "Add --remote=<host> SSH mode to check deployed file on newvps before deploying. v1.2.0j+.4 forward scope deferred from §8.1; not picked up by v1.2.0j+.5 (focused on F2/F3/F4 persistence only) or v1.2.0j+.6+ (focused on F3+ signal integration)."
+    },
+    "u1_smoke_results_newvps": {
+      "u1_pending_post_commit": "U1 EXEC on newvps (after main push lands): ssh newvps 'cd /opt/fish-harness && git pull --ff-only && cd wrapper && npx tsc --noEmit && echo tsc_PASS && npx vitest run test/unit/execution_driver_signal.test.ts test/unit/orchestrator_cancel_signal.test.ts 2>&1 | tail -15'. Expected: tsc exit 0, vitest 6/6 PASS (3+3 new tests). PENDING user authorization for tag+push.",
+      "u2_cancel_during_dispatch_smoke": "U2 (optional) — verify end-to-end cancel: dispatch a task via HTTP API, then call cancel via HTTP API mid-run. Verify via GET /api/v1/status/{task_id} that final status is cancelled or failed (not running hanging). Requires DEEPSEEK_API_KEY on newvps + slow enough dsh call to interrupt mid-fetch.",
+      "local_verification_pre_commit": "Local verification 2026-09-13 11:34: (1) tsc --noEmit exit 0; (2) vitest run test/unit/execution_driver_signal.test.ts test/unit/orchestrator_cancel_signal.test.ts → 6/6 PASS (428ms); (3) vitest run test/unit/ → 233 passed (227 baseline + 6 new) + 1 skipped + 1 unrelated pre-existing server.test.ts failure; (4) 5 grep checks PASS (A signal field present, B cancelCtrl.signal wired, C abort listener pattern, D no new TODO(M1+), E L8 secret hygiene)."
+    },
+    "verification_checks_pass": {
+      "tsc_local": "cd wrapper && npx tsc --noEmit → exit 0 (production code compiles, signal?: AbortSignal field accepted on RunRequest)",
+      "vitest_new_tests": "vitest run test/unit/execution_driver_signal.test.ts + test/unit/orchestrator_cancel_signal.test.ts → 6/6 PASS (428ms total)",
+      "vitest_full_suite": "vitest run test/unit/ → 233 passed (227 baseline + 6 new) + 1 skipped. 1 unrelated server.test.ts status endpoint failure is pre-existing on main (verified via git stash + retest 2026-09-13 11:30).",
+      "grep_A_signal_field": "grep -n 'signal.*AbortSignal' wrapper/orchestrator/types.ts → 1 match (RunRequest interface, line 310)",
+      "grep_B_cancelCtrl_wired": "grep -n 'signal: cancelCtrl.signal' wrapper/orchestrator/orchestrator.ts → 1 match (line 323, runRequest literal)",
+      "grep_C_abort_listener": "grep -n 'request.signal.addEventListener' wrapper/orchestrator/execution_driver.ts → 1 match (line 131, start() controller adoption)",
+      "grep_D_no_new_TODO": "grep -n 'TODO(M1' wrapper/orchestrator/*.ts → 0 matches (no new M1+ markers introduced)",
+      "grep_E_L8_secrets": "grep -rE 'sk-[0-9a-zA-Z]{20,}' wrapper/orchestrator/ wrapper/test/unit/ → 0 matches (L8 hygiene preserved)"
+    },
+    "tag_pushed": {
+      "tag_name": "v1.2.0j+.6+",
+      "points_to_commit": "a41b2f7 (commit 1 feat commit, per L19 hygiene — NOT the cc-ready flip)",
+      "tag_sha": "PENDING — tag creation + push requires user authorization per global CLAUDE.md (Codex 提交铁律 修订 2026-09-05).",
+      "push_method_pending": "git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin main + git push origin v1.2.0j+.6+ (split into 2 ops per v1.2.0j classifier timeout lesson)"
+    },
+    "hygiene_checks": {
+      "L8_secrets": "0 secrets in diff (verified by grep -rE 'sk-[0-9a-zA-Z]{20,}' wrapper/orchestrator/ wrapper/test/unit/ → 0 matches)",
+      "D3_lock_preserved": "harness/, spec/, spikes/, Dockerfile (root), pyproject.toml, 10 ADR body all untouched (only wrapper/orchestrator/ + wrapper/test/unit/ modified)",
+      "L19_sub_cycle_hygiene": "v1.2.0j+.6+ separate tag from v1.2.0j+.5, NOT rolled in. Tag will point to commit 1 SHA a41b2f7 (feat commit) per L19 hygiene.",
+      "D10_cc_ready_flip_separate": "cc-ready.json flip in separate commit 3 (audit trailing state pattern preserved per D10 + v1.2.0j+.2 §6.2 + v1.2.0j+.3 §6.2 + v1.2.0j+.4 + v1.2.0j+.5 cycle closure precedent)",
+      "L19_no_new_TODO_M1_plus": "No new TODO(M1+) markers introduced (verified by grep D). The 3 M1+ markers REMOVED in v1.2.0j+.5 remain removed.",
+      "no_new_dependencies": "No new dependencies introduced. AbortSignal is standard Web API. execution_driver.ts +13 lines (externalSignal field on DriverHandle + 3 abort-check updates + start() signal adoption).",
+      "DriverHandle_signature_change_minimal": "Added optional externalSignal?: AbortSignal field to internal DriverHandle interface. External RunRequest interface (public API) gets optional signal?: AbortSignal. Both backward-compatible (optional fields, no breaking changes)."
+    }
+  },
   "v1.2.0j_plus_1_pwa_server_g8_1_sigterm_port": {
     "task_id": "T-V1.2.0J.1-PWA-SERVER-G8.1-SIGTERM-PORT-CLOSURE-PASS",
     "commit": "v1.2.0j+.1 G8.1 SIGTERM handler port from wrapper/server.ts:388-447 to wrapper/orchestrator/pwa_server.ts (2026-09-12). 1 commit 4ed823f fix(pwa-server): v1.2.0j+.1 G8.1 SIGTERM handler port + shutdown unit test (2 files / +148/-6: pwa_server.ts +52/-6, new test file +96 lines). Trigger: v1.2.0j U5 post-deploy on newvps 2026-09-12 11:35 empirically validated L21 finding — wrapper-frontend docker stop wall time 30.336s ExitCode=137 (SIGKILL), exactly matching plan §4 R1 prediction. Forward scope §6.b PROMOTED from P2 → P1 by empirical evidence. User 2026-09-12 '启动 plan mode' → Plan agent ExitPlanMode approved → D1-D8 locked. D1 scope = only pwa_server.ts + 1 new unit test file (no server.ts changes, no compose changes, no scope creep).",
