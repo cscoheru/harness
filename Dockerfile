@@ -84,5 +84,9 @@ RUN python -c "import sqlite3; v=sqlite3.sqlite_version; t=tuple(map(int, v.spli
 # covers both `import harness` and `from spec.interfaces import ...`.
 ENV PYTHONPATH=/app
 
-# Default CMD: print package version via `python -m harness` → harness/__main__.py
-CMD ["python", "-m", "harness"]
+# Default CMD: launch kernel HTTP daemon via `python -m harness server`
+# (per ADR 0012 Decision a). The v1.0 behavior of `python -m harness`
+# (version print) is preserved as the no-arg default; the server
+# subcommand triggers uvicorn. Host 0.0.0.0 + port 4001 match the
+# docker-compose kernel-http service contract.
+CMD ["python", "-m", "harness", "server", "--host", "0.0.0.0", "--port", "4001"]

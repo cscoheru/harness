@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "harness"
-version = "1.0.0"
-description = "fish-harness v1.0 runtime (Python kernel) — task orchestration with SQLite-backed worker pool, event sink, and tool gateway."
+version = "1.2.0k"
+description = "fish-harness v1.2.0k runtime (Python kernel) — task orchestration with SQLite-backed worker pool, event sink, tool gateway, and FastAPI HTTP daemon (per ADR 0012)."
 readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "MIT"}
@@ -13,6 +13,9 @@ authors = [{name = "cscoheru"}]
 dependencies = [
     "httpx>=0.28,<0.29",
     "jsonschema>=4.0,<5",
+    "fastapi>=0.115,<0.116",
+    "uvicorn[standard]>=0.32,<0.33",
+    "pydantic>=2.6,<3",
 ]
 
 [project.optional-dependencies]

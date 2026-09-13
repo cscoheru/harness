@@ -44,9 +44,24 @@ import {
 
 // ─── Config ────────────────────────────────────────────────────────────────────
 
-/** v1.0 runtime kernel HTTP base URL */
-const KERNEL_URL =
-  process.env["HARNESS_RUNTIME_URL"] ?? "http://localhost:8000";
+/** v1.2.0k kernel HTTP base URL (per ADR 0012 Decision c).
+ *
+ * Reads HARNESS_RUNTIME_URL env var so existing deploy scripts keep working.
+ * Default port bumped from 8000 → 4001 to match the kernel-http service in
+ * docker-compose.yml (per ADR 0012 Decision b).
+ *
+ * Implementation note: function (NOT const) so tests can override
+ * HARNESS_RUNTIME_URL via process.env at runtime. Each call re-reads env
+ * — negligible overhead vs const, enables per-test isolation.
+ *
+ * Override examples:
+ *   - Production (compose):    http://kernel-http:4001 (auto via compose DNS)
+ *   - Local dev:               export HARNESS_RUNTIME_URL=http://localhost:4001
+ *   - 6host edge:              http://<tailscale-host>:4001
+ */
+function kernelBaseUrl(): string {
+  return process.env["HARNESS_RUNTIME_URL"] ?? "http://localhost:4001";
+}
 
 // ─── F3: Active task cancellation registry ──────────────────────────────────
 // Per-task AbortController for in-flight cancel signals. Pairs with
@@ -96,7 +111,7 @@ async function kernelInvoke(
   prompt: string,
   modelClass: string,
 ): Promise<KernelInvokeResult> {
-  const url = `${KERNEL_URL}/api/orch/invoke`;
+  const url = `${kernelBaseUrl()}/api/orch/invoke`;
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
@@ -130,7 +145,7 @@ interface KernelInvokeResult {
  * Query the v1.0 kernel HTTP facade — GET /api/orch/status/{task_id}.
  */
 async function kernelStatus(taskId: string): Promise<KernelStatusResult | null> {
-  const url = `${KERNEL_URL}/api/orch/status/${encodeURIComponent(taskId)}`;
+  const url = `${kernelBaseUrl()}/api/orch/status/${encodeURIComponent(taskId)}`;
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
@@ -190,7 +205,7 @@ export function scoreMacBookWorker(baseScore: number, date: Date = new Date()): 
  * Returns real kernel response if reachable; stub otherwise.
  */
 export async function health(): Promise<HealthResponse> {
-  const url = `${KERNEL_URL}/health`;
+  const url = `${kernelBaseUrl()}/health`;
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);

@@ -18,16 +18,37 @@
 #     codex-review.yml, not here.
 
 services:
+  # v1.2.0k (per ADR 0012): kernel HTTP daemon — FastAPI on :4001.
+  # Replaces the v1.0 placeholder (which ran `python -m harness` and
+  # exited after printing version). Now serves 5 routes:
+  #   POST /api/orch/invoke, POST /api/orch/cancel/{task_id},
+  #   GET  /api/orch/list, GET /api/orch/status/{task_id},
+  #   GET  /api/orch/healthz
+  kernel-http:
+    build: .
+    image: fish-harness:1.2.0k
+    container_name: fish-harness-kernel-http
+    command: ["python", "-m", "harness", "server", "--host", "0.0.0.0", "--port", "4001"]
+    ports:
+      - "4001:4001"
+    volumes:
+      - harness_db:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4001/api/orch/healthz', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  # v1.0 placeholder preserved for spike-suite smoke runs.
+  # Does NOT long-run a daemon; runs `python -m harness` (version print)
+  # so v1.0 contracts still hold. Keep this service in compose for
+  # backward compat with existing deploy scripts.
   harness:
     build: .
-    # v1.0.0a1 image is byte-identical to v1.0.0a0 at the library layer
-    # (only `.github/workflows/deploy.yml` changed between tags); compose
-    # pins to v1.0.0a1 to match the latest published GHCR tag and the
-    # default `docker build -t fish-harness:1.0.0a1 .` invocation.
-    image: fish-harness:1.0.0
-    # Long-running placeholder. v1.0 has no daemon loop yet; the
-    # container runs `python -m harness` (prints version) and exits.
-    # Future T-DO-* will replace this with a worker entrypoint.
+    image: fish-harness:1.2.0k
+    command: ["python", "-m", "harness"]
     volumes:
       - harness_db:/data
 
