@@ -157,6 +157,19 @@ export class SpawnDshDriver implements ExecutionDriver {
 
     const modelClass = (request.metadata?.["model_class"] as "orch" | "commander" | "worker" | undefined) ?? "worker";
 
+    // v1.2.0j+.12+ D12 NEW: expose RunHandle BEFORE driver.started so the
+    // orchestrator's for-await loop can capture it for workerModule.interrupt()
+    // calls. handleRegistry is already populated (start() at L146); interrupt()
+    // can resolve via handleRegistry.get(cancel_token). toRunHandle() strips
+    // controller/externalSignal/child/startMs/finished — public shape only.
+    yield {
+      kind: "driver.handle",
+      attempt_id,
+      payload: {
+        handle: toRunHandle(handle),
+      },
+    };
+
     yield {
       kind: "driver.started",
       attempt_id,

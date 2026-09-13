@@ -206,7 +206,7 @@ describe("worker.run()", () => {
     expect(events.length).toBeGreaterThan(0);
   });
 
-  it("yields driver.started first + driver.finished last on success", async () => {
+  it("yields driver.handle first + driver.started second + driver.finished last on success", async () => {
     globalThis.fetch = vi.fn(async () =>
       new Response("result\n", { status: 200 }),
     ) as unknown as typeof fetch;
@@ -215,7 +215,12 @@ describe("worker.run()", () => {
     for await (const ev of workerRun(SAMPLE_REQUEST)) {
       events.push(ev);
     }
-    expect(events[0].kind).toBe("driver.started");
+    // v1.2.0j+.12+ D12 NEW: driver.handle event is yielded FIRST (exposes
+    // RunHandle to the orchestrator before driver.started). driver.started
+    // is now events[1]. The single prior assertion on events[0] was at this
+    // line in v1.2.0j+.11+ — updated to reflect the new stream contract.
+    expect(events[0].kind).toBe("driver.handle");
+    expect(events[1].kind).toBe("driver.started");
     const last = events[events.length - 1];
     expect(["driver.finished", "driver.failed"]).toContain(last.kind);
   });

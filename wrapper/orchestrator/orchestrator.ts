@@ -23,6 +23,7 @@ import type {
   Task,
   HealthResponse,
   DriverEvent,
+  RunHandle,
 } from "./types.js";
 import { deepseekInvoke } from "../dsh/deepseek_client.js";
 import type { DshOpts, DshResponse } from "../dsh/types.js";
@@ -64,6 +65,25 @@ function getOrCreateController(taskId: string): AbortController {
     _activeControllers.set(taskId, ctrl);
   }
   return ctrl;
+}
+
+// v1.2.0j+.12+ D12 NEW: parallel registry to _activeControllers. Tracks
+// RunHandle captured from driver.handle event (yielded by execution_driver
+// streamEvents before driver.started) so orchestrator can call
+// workerModule.interrupt(handle, reason) — the first production caller
+// (0 callers before this cycle per L46 audit).
+const _activeHandles = new Map<string, RunHandle>();
+
+/**
+ * v1.2.0j+.12+ D12 NEW: first production caller of workerModule.interrupt().
+ * Idempotent — no-op if no handle was captured yet (race window) or already
+ * cleaned up. Safe to call from cancel(), per-step terminal event, and
+ * dispatch() end without coordination.
+ */
+async function interruptByTaskId(taskId: string, reason: string): Promise<void> {
+  const handle = _activeHandles.get(taskId);
+  if (!handle) return;
+  await workerModule.interrupt(handle, reason);
 }
 
 // ─── Kernel HTTP client ────────────────────────────────────────────────────────
@@ -344,6 +364,12 @@ export async function dispatch(
         };
         let lastEvent: DriverEvent | null = null;
         for await (const ev of workerModule.run(runRequest)) {
+          // v1.2.0j+.12+ D12 NEW: capture handle on first event of stream.
+          // toRunHandle() (execution_driver.ts:342) produces the public shape;
+          // ev.payload["handle"] is the RunHandle captured for interrupt().
+          if (ev.kind === "driver.handle") {
+            _activeHandles.set(taskId, ev.payload["handle"] as RunHandle);
+          }
           lastEvent = ev;
           if (ev.kind === "driver.failed") {
             commander._recordStepFailure(
@@ -362,6 +388,10 @@ export async function dispatch(
             break;
           }
         }
+        // v1.2.0j+.12+ D12 NEW: cleanup captured handle on terminal event.
+        // interruptByTaskId is idempotent — no-op if handle already gone.
+        await interruptByTaskId(taskId, `step complete: ${lastEvent?.kind ?? "unknown"}`);
+        _activeHandles.delete(taskId);
         if (lastEvent?.kind === "driver.finished") {
           commander._recordStepResult(taskId, step.name, {
             stdout: String(lastEvent.payload?.stdout ?? ""),
@@ -414,6 +444,12 @@ export async function dispatch(
     console.log(`[orchestrator] dispatch(${taskId}) — terminal write skipped (honoured prior status=${prior})`);
   }
   _activeControllers.delete(taskId);
+  // v1.2.0j+.12+ D12 NEW: catch-all cleanup at dispatch end. Per-step cleanup
+  // (inside step for-await loop) catches successful paths. This catches edge
+  // case where no plan steps ran (e.g., planStep returned empty) so any
+  // captured handle doesn't leak in _activeHandles Map.
+  await interruptByTaskId(taskId, "dispatch complete");
+  _activeHandles.delete(taskId);
 
   // Read final status for return payload
   const finalEntry = store.getTask(taskId);
@@ -565,6 +601,13 @@ export async function cancel(taskId: string): Promise<void> {
       ctrl.abort();
       _activeControllers.delete(taskId);
     }
+    // v1.2.0j+.12+ D12 NEW: also interrupt via workerModule.interrupt() if a
+    // handle was captured for this task. Idempotent — no-op if capture hasn't
+    // happened yet (race window) or handle was already cleaned up. AbortController
+    // .abort() (above) is independent of this path; both exercise different
+    // abort layers.
+    await interruptByTaskId(taskId, "cancelled by user");
+    _activeHandles.delete(taskId);
     console.log(`[orchestrator] cancel(${taskId}) — propagated interrupt + persisted cancelled`);
   } else {
     console.log(`[orchestrator] cancel(${taskId}) — no active task (status=${entry?.status ?? "missing"})`);

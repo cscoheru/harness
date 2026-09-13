@@ -266,6 +266,7 @@ export interface ArtifactStore {
 export type DriverKind = "codex_sdk" | "codex_app_server" | "codex_exec";
 
 export type DriverEventKind =
+  | "driver.handle" // v1.2.0j+.12+ D12 NEW: yields RunHandle so orchestrator can call workerModule.interrupt() — 0 callers before this cycle per L46 audit
   | "driver.started"
   | "driver.output_chunk"
   | "driver.tool_call_requested"
