@@ -759,6 +759,78 @@
       "L26_NEW_dry_run_state_queries_real_ssh": "U4 caught the dry-run design issue; fix commit ebceb88 makes dry-run a faithful preview. Pattern reusable for future automation scripts."
     }
   },
+  "v1.2.0j_plus_4_scripts_check_stale_build_sh_standalone_detector": {
+    "task_id": "T-V1.2.0J.4-SCRIPTS-CHECK-STALE-BUILD-SH-STANDALONE-DETECTOR-CLOSURE-PASS",
+    "status": "✅ v1.2.0j+.4 scripts/check-stale-build.sh standalone L25 detector CLOSED @ HEAD `565b114` main (2026-09-13 09:08). D1 严 scope: 1 NEW scripts/check-stale-build.sh (60 lines bash strict mode) + 1 MOD scripts/README.md (+17 lines append check-stale-build.sh section). Extracts L25 stale-build detection pattern (grep -c <symbol> wrapper/build/orchestrator/pwa_server.js) from scripts/newvps-deploy.sh:81-85 inline idempotent guard into standalone bash script for CI gate / manual pre-deploy verification. Trigger: v1.2.0j+.3 §8.1 forward scope marked scripts/check-stale-build.sh as next-cycle P2 candidate. L25 validated end-to-end in v1.2.0j+.3 U4 (build/.js age=4986s detected → rebuild). D1-D8 per Explore agent recommendation 2026-09-13.",
+    "branch": "main",
+    "commit": "565b114b7c10bcb88a0e5d32ce8d2dc8ef4a8fa9",
+    "fix_commit_sha": "565b114",
+    "tag_points_to": "565b114",
+    "created_at": "2026-09-13T01:08:00Z",
+    "files_modified_count": 2,
+    "code_changes": {
+      "scripts_check_stale_build_sh_NEW": "60 lines. Shebang `#!/usr/bin/env bash`, `set -euo pipefail` (D6 per deploy/install-dsh.sh:36 + edge-webhook/install.sh:20 + newvps-deploy.sh:22 precedent). Default sentinel `service: \"pwa-server\"` (D2 — unique to current v1.2.0j+ builds per wrapper/orchestrator/pwa_server.ts:32-35). 3 optional flags: --symbol=<regex> override; --exit-on-stale for CI gates (exit 1 when stale); --help prints comment header lines 2-17. Exit codes per D8: 0 = fresh/informational; 1 = stale (only when --exit-on-stale set); 2 = file not found. Local-only mode for v1.2.0j+.4 (D3); remote SSH mode deferred to v1.2.0j+.5+. ANSI color timestamped logging to stderr per newvps-deploy.sh:32-37 precedent. Strict mode pattern parallels 3 existing scripts.",
+      "scripts_README_md_MOD_section_check_stale_build_sh": "+17 lines. Append check-stale-build.sh section after newvps-deploy.sh. Documents use case (CI gate / manual pre-deploy), 3 usage examples (default/--symbol/--exit-on-stale), exit codes, and v1.2.0j+.4 NEW marker. Includes @file scripts/README.md trailing comment."
+    },
+    "design_decisions_d1_d8": {
+      "D1_scope_2_files": "1 NEW scripts/check-stale-build.sh (~15-20 lines bash strict mode per newvps-deploy.sh precedent) + 1 MOD scripts/README.md (+15-17 lines append check-stale-build.sh section). 0 production code touched. 0 tests (no shell test framework in repo; user EXEC validates).",
+      "D2_default_symbol_service_pwa_server": "Default symbol = `service: \"pwa-server\"` — unique to current v1.2.0j+ builds. Validated by grep -c default symbol returns 1 in fresh wrapper/build/orchestrator/pwa_server.js. Stale builds (pre-v1.2.0j or missing rebuild) return 0 matches. Symbol stable for v1.2.0j+.4 (R3 LOW; future hardening if sentinel drift observed).",
+      "D3_local_only_mode_v1_2_0j_plus_4": "Local-only mode for v1.2.0j+.4 (checks repo's wrapper/build/orchestrator/pwa_server.js). Remote SSH mode (`--remote=newvps`) deferred to v1.2.0j+.5+. Explore agent recommendation: ship local first to validate the pattern, then extend to remote if user feedback demands.",
+      "D4_CLI_surface_3_flags": "--symbol=<regex> override default sentinel; --exit-on-stale for CI gates (exit 1 when stale); --help prints comment header (lines 2-17). No positional args. Unknown flag → exit 2 with diagnostic.",
+      "D5_logging_color_timestamp_stderr": "ANSI color timestamped prefix `[check-stale-build <ISO-8601>]` on all status lines (parallels newvps-deploy.sh:32-37 log helper). log() green, status messages red for STALE. Output to stderr for status; grep count returned silently in stdout (so CI parsers can capture match count).",
+      "D6_strict_mode_per_3_precedents": "`set -euo pipefail` parallels deploy/install-dsh.sh:36 + wrapper/deploy/edge-webhook/install.sh:20 + scripts/newvps-deploy.sh:22 (3 existing scripts in repo use this pattern). 4th application establishes scripts/ directory as bash strict mode convention.",
+      "D7_shebang_per_edge_webhook": "Shebang `#!/usr/bin/env bash` per wrapper/deploy/edge-webhook/install.sh:1 (portable across systems).",
+      "D8_exit_codes_0_fresh_1_stale_2_missing": "Exit 0 = fresh (symbol found ≥ 1 match) OR informational mode. Exit 1 = stale (count = 0) ONLY when --exit-on-stale is set (D8). Exit 2 = file not found (build never ran on this checkout, error diagnostic printed). Default mode is informational — never accidentally breaks local dev (R5 LOW)."
+    },
+    "new_lessons": {
+      "L25_EXTENDED_standalone_detector": "L25 stale-build detection pattern extracted from inline newvps-deploy.sh:81-85 (stat -c %Y mtime check) into standalone grep -c <symbol> detector. Now usable as CI gate (--exit-on-stale), manual pre-deploy check (informational mode), and debugging tool (`why is my .js not picking up changes?`). Pattern parallels `grep -c 'new_symbol' wrapper/build/*.js` from v1.2.0j+.2 §7 L25 NEW.",
+      "L27_NEW_ci_gate_pattern": "Detection scripts benefit from dual-mode: informational (default, exit 0 always) + CI gate (--exit-on-stale, exit 1 on failure). Informational mode serves humans; CI gate mode serves pipelines. Documented in script header comment so future maintainers don't accidentally drop the dual-mode design."
+    },
+    "resolved_by_v1_2_0j_plus_4": {
+      "forward_scope_scripts_check_stale_build_sh_P2_CLOSED": "Forward scope `scripts/check-stale-build.sh P2` (v1.2.0j+.3 §8.1 next-cycle candidate) → CLOSED by v1.2.0j+.4. 60-line bash script with --symbol/--exit-on-stale flags, exit codes per D8, paralleling newvps-deploy.sh patterns.",
+      "L25_standalone_extraction": "L25 detection pattern extracted from inline newvps-deploy.sh guard into reusable standalone script. CI gate / manual pre-deploy verification now uses 1 command instead of remembering grep pattern."
+    },
+    "forward_scope_v1_2_0j_plus_5": {
+      "check_stale_build_sh_remote_ssh_mode_P2": "Add `--remote=<host>` SSH mode to check deployed file on newvps before deploying. Useful as pre-deploy gate that complements newvps-deploy.sh idempotent guard. Explore agent recommendation deferred to v1.2.0j+.5 if user feedback demands.",
+      "sentinel_auto_detection_P3": "Scan wrapper/orchestrator/pwa_server.ts source for export signatures and use those as default symbols. R3 LOW future hardening if sentinel drift observed.",
+      "multi_host_orchestration_deploy_all_sh_P2": "Single command deploy to newvps + 5 edge hosts (parallels edge-pull.ts webhook but centralized). Currently edge hosts use webhook; newvps uses newvps-deploy.sh. Future: scripts/deploy-all.sh orchestrator.",
+      "6_a_edge_compose_healthcheck_P1_user_OOB": "5 host-compose.edge[1-5].yml + edge-wrapper rebuild. ~27 lines (5 files × ~5 lines + 2 WORKER_HEARTBEAT_URL adds). User OOB — requires user EXEC on each edge host.",
+      "6_c_F2_F3_F4_persistence_P2_M1_plus": "Orchestrator.ts:487 _taskStore persistence (~30-40 lines) + orchestrator.ts:473 cancel propagation (~20 lines) + commander.ts:52 _stepTracker persistence (new gap, D1 schema decision). Total ~75-80 lines after F4 NoActiveWorkerError circuit breaker already-shipped subtraction (worker_pool.ts:329 + commander.ts:124). F4 TODOs explicitly `TODO(M1+)` per orchestrator.ts:473/487 — defer to M1+ integration cycle.",
+      "G2_aliyun_edge3_install_MEDIUM": "user OOB (aliyun console access)",
+      "G4_3_edge_gh_secrets_copy_LOW": "链式依赖 G2"
+    },
+    "u1_smoke_results_newvps": {
+      "u1_pending_post_commit": "U1 EXEC on newvps (after main push lands): ssh newvps 'cd /opt/fish-harness && git pull --ff-only && bash -n scripts/check-stale-build.sh && bash scripts/check-stale-build.sh 2>&1' → bash -n exit 0 + default check on remote's wrapper/build/ (may show STALE if not recently built — informational mode). PENDING user authorization for tag+push (per global CLAUDE.md).",
+      "local_verification_pre_commit": "5 local checks PASS 2026-09-13 09:07: (1) bash -n exit 0; (2) --help prints lines 2-17; (3) default mode: 1 match for service sentinel, exit 0; (4) --exit-on-stale mode: exit 0 when fresh; (5) custom symbol --symbol='nonexistent_function_xyz': 0 matches, informational STALE message, exit 0.",
+      "u2_u4_SKIPPED": "SKIPPED — v1.2.0j+.4 is local-only script (no remote deploy); U2-U4 (live deploy + healthcheck) N/A for this cycle."
+    },
+    "verification_checks_pass": {
+      "bash_n_local": "bash -n scripts/check-stale-build.sh exit 0",
+      "help_flag_local": "prints comment header (lines 2-17), exit 0",
+      "default_mode_local": "1 match for service: \"pwa-server\" sentinel, exit 0 (D8 informational mode)",
+      "exit_on_stale_mode_local": "exit 0 when fresh (D8)",
+      "custom_symbol_local": "0 matches for nonexistent_function_xyz, prints STALE message, exit 0 (D8 informational)",
+      "grep_A_strict_mode": "set -euo pipefail at scripts/check-stale-build.sh line 23 (D6)",
+      "grep_B_L25_references": "L25 references at lines 3, 5, 7 (header + v1.2.0j+.4 NEW + U4 validation)",
+      "grep_C_README_cross_ref": "check-stale-build.sh referenced 4 times in scripts/README.md (heading + first-mention + 2 in usage block)",
+      "L8_secrets_hygiene": "0 matches for KEY/SECRET/TOKEN/PASSWORD/sk-/api_key in diff (R8 secret hygiene preserved)",
+      "trailing_newline_present": "file ends with newline (no \\ No newline at end of file warning)"
+    },
+    "tag_pushed": {
+      "tag_name": "v1.2.0j+.4",
+      "points_to_commit": "565b114",
+      "tag_sha": "PENDING — tag creation + push requires user authorization per global CLAUDE.md (Codex 提交铁律 修订 2026-09-05: Claude 可代劳 git tag + push via Clash proxy per user authorization). Plan presented via ExitPlanMode-equivalent cycle closure memory.",
+      "push_method_pending": "git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin main + git push origin v1.2.0j+.4 (split into 2 ops per v1.2.0j classifier timeout lesson)",
+      "remote_state_pending_authorization": true
+    },
+    "hygiene_checks": {
+      "L8_secrets": "0 secrets in diff (verified by grep -E 'KEY|SECRET|TOKEN|PASSWORD|sk-|api_key' on both files)",
+      "D3_lock_preserved": "harness/, spec/, spikes/, Dockerfile (root), pyproject.toml, 10 ADR body all untouched (no production code modified, docs/scripts only)",
+      "L19_sub_cycle_hygiene": "v1.2.0j+.4 separate tag from v1.2.0j+.3, NOT rolled in. Tag will point to commit 1 SHA 565b114 (script + README) per L19 hygiene.",
+      "L24_stale_build_hygiene_CLOSED_again": "scripts/check-stale-build.sh IS the standalone detection tool for L24 hygiene. Future cycles can integrate as CI gate (--exit-on-stale) for pre-merge checks.",
+      "L25_EXTENDED_standalone_detector": "L25 pattern extracted from newvps-deploy.sh inline guard into standalone script. Dual-mode (informational + --exit-on-stale) per L27 NEW ci_gate_pattern."
+    }
+  },
   "v1.2.0j_plus_1_pwa_server_g8_1_sigterm_port": {
     "task_id": "T-V1.2.0J.1-PWA-SERVER-G8.1-SIGTERM-PORT-CLOSURE-PASS",
     "commit": "v1.2.0j+.1 G8.1 SIGTERM handler port from wrapper/server.ts:388-447 to wrapper/orchestrator/pwa_server.ts (2026-09-12). 1 commit 4ed823f fix(pwa-server): v1.2.0j+.1 G8.1 SIGTERM handler port + shutdown unit test (2 files / +148/-6: pwa_server.ts +52/-6, new test file +96 lines). Trigger: v1.2.0j U5 post-deploy on newvps 2026-09-12 11:35 empirically validated L21 finding — wrapper-frontend docker stop wall time 30.336s ExitCode=137 (SIGKILL), exactly matching plan §4 R1 prediction. Forward scope §6.b PROMOTED from P2 → P1 by empirical evidence. User 2026-09-12 '启动 plan mode' → Plan agent ExitPlanMode approved → D1-D8 locked. D1 scope = only pwa_server.ts + 1 new unit test file (no server.ts changes, no compose changes, no scope creep).",
