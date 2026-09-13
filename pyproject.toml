@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "harness"
-version = "1.2.0k"
+version = "1.2.0+0.k"
 description = "fish-harness v1.2.0k runtime (Python kernel) — task orchestration with SQLite-backed worker pool, event sink, tool gateway, and FastAPI HTTP daemon (per ADR 0012)."
 readme = "README.md"
 requires-python = ">=3.12"
