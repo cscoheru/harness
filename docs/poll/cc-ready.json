@@ -1409,6 +1409,62 @@
     },
     "resolved_by_v1_2_0j_plus_11_plus": {
       "D9_aggregateResults_log_noise_P3_CLOSED": "Forward scope item NEW_D9 (from v1.2.0j+.10+ post-cycle audit) → CLOSED by v1.2.0j+.11+. Two log paths in orchestrator.ts:421-456 now check finalEntry.status === 'cancelled' before WARN. Cancel-induced failed_steps downgrade to INFO. AggregateError during cancel also downgrade to INFO. No more spurious WARN noise when cancel fires mid-plan. Race fix from v1.2.0j+.10+ (layer 1 + layer 2) still primary; this cycle adds layer 3 (log noise guard)."
+    },
+    "forward_scope_v1_2_0j_plus_12_plus": {
+      "1_kernel_http_cancel_list_endpoints_P2": "⏸️ NEXT CYCLE candidate — kernel-side FastAPI routes /api/orch/cancel/{task_id} + /api/orch/list. Requires D3 lock lift on harness/. ~50-80 lines Python.",
+      "2_tenant_isolation_listTasks_P2": "⏸️ DEFERRED — filter by tenant_id from request context. M1+ feature.",
+      "3_result_blob_storage_P2": "⏸️ DEFERRED — replace JSON string in result_json with blob_id reference. M1+ schema migration.",
+      "5_persistent_cancel_queue_signal_store_P2": "⏸️ DEFERRED — AbortSignal not serializable. F26 overflow queue needs separate signal store keyed by task_id.",
+      "G2_aliyun_edge3_install_MEDIUM": "⏸️ DEFERRED (user OOB)",
+      "G4_3_edge_gh_secrets_copy_LOW": "⏸️ DEFERRED (blocked on G2)",
+      "G5_tailscale_split_dns_LOW": "⏸️ DEFERRED (admin toggle)",
+      "G7_on_failure_N_tune_LOW": "collect 48h evidence post-v1.2.0g deploy before bumping on-failure:3 → :5",
+      "edge_host_rebuild_v1_2_0j_plus_8_plus_P1": "⏸️ USER OOB — rebuild edge hosts to pick up healthcheck block (v1.2.0j+.8+ U1).",
+      "6_approach_B_handle_event_yield_P3": "✅ CLOSED by v1.2.0j+.12+ — see v1_2_0j_plus_12_plus_cycle_closure below."
+    },
+    "v1_2_0j_plus_12_plus_cycle_closure": {
+      "summary": "v1.2.0j+.12+ cycle: D12 driver.handle yield + first interrupt() caller. Two-part change: (1) execution_driver.ts:streamEvents() now yields a `driver.handle` event BEFORE `driver.started`, exposing the RunHandle (driver_kind, attempt_id, cancel_token) to the orchestrator's for-await loop; (2) orchestrator.ts adds _activeHandles: Map<string, RunHandle> (mirroring _activeControllers pattern) + interruptByTaskId() helper — the FIRST production caller of workerModule.interrupt() (0 callers before this cycle per L46 audit). 5 files changed, +533/-2 wrapper-only, 0 D3 changes. Per L46 audit, workerModule.interrupt() had 0 callers in production; without this path, replay/retry scenarios that need cancel_token exposure cannot exist. Cleanup is invoked from 3 sites: cancel(), per-step terminal event, dispatch() end — all idempotent (no-op when handle not captured).",
+      "fix_files": [
+        "wrapper/orchestrator/types.ts",
+        "wrapper/orchestrator/execution_driver.ts",
+        "wrapper/orchestrator/orchestrator.ts",
+        "wrapper/test/unit/worker.test.ts",
+        "wrapper/test/unit/orchestrator_handle_roundtrip.test.ts (NEW)"
+      ],
+      "git_diff_stat_actual": "5 files changed, 533 insertions(+), 2 deletions(-) — production code ~64 lines + new test file ~470 lines (7 tests)",
+      "decision_locked": {
+        "D12_option_b_selected": "Option (b) chosen over cosmetic-only Option (a). Adds BOTH driver.handle event AND interruptByTaskId() as first production caller. +64 production lines + ~470 test lines total. Production caller is the key deliverable — without it, interrupt() remains dead code per L46 audit.",
+        "D12_no_D3_lock_lift": "All D3-locked paths untouched (harness/, spec/, spikes/, Dockerfile root, pyproject.toml, 10 ADR bodies). Wrapper-only changes.",
+        "D12_interruptByTaskId_is_idempotent": "interruptByTaskId() checks _activeHandles.get(taskId) before calling workerModule.interrupt(). Safe to call multiple times (from cancel() + step loop + dispatch end). Matches L45 cancelled-aware safeMark* guard pattern.",
+        "D12_3_layer_cancel_defense_preserved": "Layer 1 (cancel() abort ctrl) + layer 2 (safeMark*) + layer 3 (log noise guard from j+.11+) all unchanged. interruptByTaskId() adds a 4th cancel abort path but does not replace any existing layer. AbortController.abort() is idempotent (calling multiple times is safe).",
+        "D12_handle_yield_position": "driver.handle is yielded FIRST in streamEvents() AFTER start() populates handleRegistry (execution_driver.ts:146) — so by the time orchestrator receives the event, workerModule.interrupt(handle) can resolve via handleRegistry.get(cancel_token).",
+        "D12_3_cleanup_sites": "interruptByTaskId called from 3 sites: (1) per-step for-await loop exit (cleanup after terminal event); (2) cancel() after ctrl.abort() + safeMarkCancelled; (3) dispatch() end as catch-all for empty-plan edge case."
+      },
+      "new_lessons": {
+        "L48_hidden_handle_pattern": "When a handle is stored in an internal Map (e.g., execution_driver.handleRegistry) but never exposed via the public event stream, replay/retry scenarios that need cancel_token exposure cannot exist. Pattern: yield the handle in the FIRST event of the stream (BEFORE driver.started); consumer captures it; downstream cleanup paths call interrupt(handle) to ensure the function has at least one production caller. If workerModule.interrupt() has 0 callers in production, it's dead code per L46 audit — surface it via the event stream. Combined with L45 idempotent guard pattern, this enables safe multiple-call abort paths without coordination."
+      },
+      "verification_checks_pass": {
+        "layer1_typescript_compile": "npx tsc --noEmit → 0 errors",
+        "layer2_new_unit_isolation": "npx vitest run test/unit/orchestrator_handle_roundtrip.test.ts → 7/7 PASS in 158ms (T1 stream shape, T2 capture+cleanup, T3 finished cleanup, T4 interrupted cleanup, T5 failed cleanup, T6 cancel interrupt roundtrip, T7 idempotent dispatch-end cleanup)",
+        "layer3_updated_worker_test": "npx vitest run test/unit/worker.test.ts → 19/19 PASS (events[0]='driver.handle' assertion updated from driver.started)",
+        "layer4_full_regression": "npx vitest run → 255/256 PASS + 178 skipped. 1 pre-existing FAIL: test/unit/server.test.ts:162 macOS /data DEEPSEEK_API_KEY env issue — NOT a regression (baseline main fails identically per j+.11+ closure pre-test)",
+        "layer5_L8_secrets": "grep orchestrator.ts + execution_driver.ts + types.ts + worker.test.ts + orchestrator_handle_roundtrip.test.ts for KEY|SECRET|TOKEN|PASSWORD|sk- → 0 real secrets (DEEPSEEK_API_KEY='sk-test-key-for-handle-roundtrip' is standard vitest stub, not a real key)"
+      },
+      "hygiene_checks": {
+        "L8_secrets": "0 real secrets in diff. Test mock uses standard vitest module-import suppression pattern with stub key 'sk-test-key-for-handle-roundtrip' — same pattern as orchestrator_aggregate_cancel.test.ts.",
+        "D3_lock_preserved": "Only wrapper/orchestrator/ + wrapper/test/ modified. harness/, spec/, spikes/, Dockerfile (root), pyproject.toml, 10 ADR bodies all untouched.",
+        "L19_sub_cycle_hygiene": "v1.2.0j+.12+ separate tag from v1.2.0j+.11+, NOT rolled in. Tag → commit 1 SHA `28a76d0`, NOT cc-ready flip.",
+        "no_new_dependencies": "No new dependencies introduced.",
+        "L45_pattern_reused": "interruptByTaskId() mirrors safeMarkCompleted/Failed cancelled-aware guard pattern from L45 (v1.2.0j+.10+) — idempotent no-op when handle not present."
+      },
+      "tag_pushed": {
+        "tag_name": "v1.2.0j+.12+",
+        "points_to_commit": "28a76d0 (commit 1 feat SHA), per L19 hygiene — NOT the cc-ready flip",
+        "push_method": "git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin main + git push origin v1.2.0j+.12+ (per Codex 提交铁律 修订 2026-09-05; requires user authorization)"
+      }
+    },
+    "resolved_by_v1_2_0j_plus_12_plus": {
+      "D12_approach_B_handle_event_yield_P3_CLOSED": "Forward scope item 6 from v1.2.0j+.11+ closure → CLOSED by v1.2.0j+.12+. driver.handle event now exposes RunHandle as first event of every workerModule.run() stream. interruptByTaskId() is the first production caller of workerModule.interrupt() — 0 callers before per L46 audit. Replay/retry scenarios that need cancel_token exposure are now possible. 3-layer cancel defense (L44 entry guard + L45 safeMark* + L47 log noise guard) preserved; this cycle adds 4th abort path (workerModule.interrupt via handleRegistry) — AbortController.abort() is idempotent so no coordination needed."
     }
   }
 }
