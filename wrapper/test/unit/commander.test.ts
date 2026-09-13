@@ -48,6 +48,9 @@ import type {
   Task,
 } from '../../orchestrator/types.js';
 import * as workerPoolModule from '../../orchestrator/worker_pool.js';
+// v1.2.0j+.5: reset task_store singleton between tests so dispatch() doesn't
+// leak /data/task_store.db state across runs
+import { _resetTaskStoreForTests as _resetTaskStore } from '../../orchestrator/task_store.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -79,6 +82,7 @@ describe('commander (v1.2.0a real)', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     _resetTracker();
+    _resetTaskStore();
     // v1.2.0b: pre-create a temp SQLite-backed WorkerPool so dispatchStep
     // can claim a worker without touching /data/worker_pool.db
     commanderTempDir = mkdtempSync(join(tmpdir(), 'commander-test-'));
@@ -92,6 +96,7 @@ describe('commander (v1.2.0a real)', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     _resetTracker();
+    _resetTaskStore();
     workerPoolModule._resetWorkerPoolForTests();
     if (commanderTestPool) commanderTestPool.close();
     delete process.env['WORKER_POOL_DB'];
