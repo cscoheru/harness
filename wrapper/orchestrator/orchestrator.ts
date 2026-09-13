@@ -29,7 +29,11 @@ import type { DshOpts, DshResponse } from "../dsh/types.js";
 import * as commander from "./commander.js";
 import * as workerModule from "./worker.js";
 import { getDefaultQueueStore } from "./queue_store.js";
-import { getDefaultTaskStore } from "./task_store.js";
+import {
+  getDefaultTaskStore,
+  safeMarkCompleted,
+  safeMarkFailed,
+} from "./task_store.js";
 import {
   activeTaskCount,
   queueDepth,
@@ -265,8 +269,24 @@ export async function dispatch(
   activeTaskCount.set(getDefaultQueueStore().inFlightCount());
   queueDepth.set(getDefaultQueueStore().pendingCount());
 
-  // ── F2: persist task to SQLite-backed store (replaces in-memory Map) ───────
+  // ── v1.2.0j+.10+ NEW (D8 race fix): cancelled-guard at dispatch() entry.
+  // If the task is already in a terminal 'cancelled' state (orchestrator.cancel()
+  // ran before this dispatch reached this line, or while it was awaiting the
+  // F26 throttle check above), return early WITHOUT overwriting the cancelled
+  // status. Without this guard, the L275 setTask + L290 markRunning below
+  // would clobber the cancelled status before the dsh-fallback safeMarkCompleted
+  // guard at L373-386 ever gets a chance to run.
   const store = getDefaultTaskStore();
+  const existing = store.getTask(taskId);
+  if (existing?.status === "cancelled") {
+    console.log(`[orchestrator] dispatch(${taskId}) — early-return (prior cancelled status preserved)`);
+    _activeControllers.delete(taskId);
+    reclaimAndUpdateMetrics();
+    return {
+      task_id: taskId,
+      status: "cancelled",
+    } as OrchestrationResult;
+  }
   const now = Date.now();
   store.setTask({
     taskId,
@@ -275,7 +295,7 @@ export async function dispatch(
     status: "pending",
     resultJson: null,
     error: null,
-    createdAt: now,
+    createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   });
 
@@ -369,21 +389,29 @@ export async function dispatch(
     dshResult = await runDsh(prompt, modelClass);
   }
 
-  // Update task state based on dsh result — F2 persistence via SQLite store
-  if (dshResult.exitCode === 0) {
-    store.markCompleted(
-      taskId,
-      JSON.stringify({
-        stdout: dshResult.stdout,
-        exitCode: dshResult.exitCode,
-        stderr: dshResult.stderr,
-        wallMs: dshResult.wallMs,
-      }),
-    );
-    console.log(`[orchestrator] dispatch(${taskId}) — completed wallMs=${dshResult.wallMs}`);
+  // Update task state based on dsh result — F2 persistence via SQLite store.
+  // v1.2.0j+.10+ NEW (D8 race fix): use cancelled-aware safe* helpers so a
+  // concurrent orchestrator.cancel() that ran during the kernelInvoke/runDsh
+  // await window is honoured. Without this guard, the dsh-fallback path would
+  // overwrite a 'cancelled' SQLite status with 'completed'/'failed'.
+  const resultJson = JSON.stringify({
+    stdout: dshResult.stdout,
+    exitCode: dshResult.exitCode,
+    stderr: dshResult.stderr,
+    wallMs: dshResult.wallMs,
+  });
+  const writeOk = dshResult.exitCode === 0
+    ? safeMarkCompleted(store, taskId, resultJson)
+    : safeMarkFailed(store, taskId, dshResult.stderr || `dsh exit ${dshResult.exitCode}`);
+  if (writeOk) {
+    if (dshResult.exitCode === 0) {
+      console.log(`[orchestrator] dispatch(${taskId}) — completed wallMs=${dshResult.wallMs}`);
+    } else {
+      console.warn(`[orchestrator] dispatch(${taskId}) — failed exit=${dshResult.exitCode} stderr=${dshResult.stderr}`);
+    }
   } else {
-    store.markFailed(taskId, dshResult.stderr || `dsh exit ${dshResult.exitCode}`);
-    console.warn(`[orchestrator] dispatch(${taskId}) — failed exit=${dshResult.exitCode} stderr=${dshResult.stderr}`);
+    const prior = store.getTask(taskId)?.status ?? "unknown";
+    console.log(`[orchestrator] dispatch(${taskId}) — terminal write skipped (honoured prior status=${prior})`);
   }
   _activeControllers.delete(taskId);
 

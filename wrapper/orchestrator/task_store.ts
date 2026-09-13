@@ -365,3 +365,55 @@ export function _resetTaskStoreForTests(): void {
     _singleton = null;
   }
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// v1.2.0j+.10+ NEW (D8 race fix): cancelled-aware terminal-write helpers.
+// Standalone functions (not class methods) to match the module-level calling
+// style in orchestrator.ts. Both check current SQLite status BEFORE writing;
+// returns true if the write succeeded, false if skipped because the task was
+// already in a terminal state (cancelled / failed / completed) that the
+// caller should not overwrite. This prevents the dsh-fallback path from
+// racing with orchestrator.cancel() and overwriting a cancelled status.
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Cancelled-aware markCompleted.
+ * Writes 'completed' status only if the task is currently NOT in a terminal
+ * state ('cancelled', 'failed', 'completed'). Returns true if the write
+ * happened, false if it was skipped to preserve an earlier terminal state.
+ */
+export function safeMarkCompleted(
+  store: SqliteTaskStore,
+  taskId: string,
+  resultJson: string,
+): boolean {
+  const current = store.getTask(taskId);
+  if (current === null) return false;
+  if (current.status === "cancelled" || current.status === "failed" || current.status === "completed") {
+    return false;
+  }
+  store.markCompleted(taskId, resultJson);
+  return true;
+}
+
+/**
+ * Cancelled-aware markFailed.
+ * Writes 'failed' status only if the task is currently NOT in a terminal
+ * state ('cancelled', 'completed'). 'failed' is NOT protected here because
+ * a legitimate retry should be able to overwrite a prior failure — but a
+ * prior 'completed' or 'cancelled' should win. Returns true if the write
+ * happened, false if skipped.
+ */
+export function safeMarkFailed(
+  store: SqliteTaskStore,
+  taskId: string,
+  error: string,
+): boolean {
+  const current = store.getTask(taskId);
+  if (current === null) return false;
+  if (current.status === "cancelled" || current.status === "completed") {
+    return false;
+  }
+  store.markFailed(taskId, error);
+  return true;
+}
