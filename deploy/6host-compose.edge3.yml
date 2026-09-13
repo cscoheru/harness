@@ -55,6 +55,20 @@ services:
     command: ["node", "build/server.js"]
     mem_limit: 1g
     memswap_limit: 1g
+    # v1.2.0j+.8+ NEW per §6.a (P1 forward scope, deferred from v1.2.0j+.7+ closure):
+    # Mirror 6host-compose.newvps.yml wrapper-orchestrator healthcheck pattern
+    # (lines 193-198). Probe http://localhost:4001/health every 30s with 10s timeout.
+    # 3 retries fail → unhealthy → `restart: unless-stopped` restart. start_period
+    # 15s gives boot time before first probe. stop_grace_period 30s parallels
+    # the existing F27 graceful drain — G8.1 SIGTERM handler (already present in
+    # wrapper server.ts via v1.2.0i G8.1) gets time to drain in-flight requests.
+    # Edge hosts need rebuild to pick up healthcheck (user OOB).
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:4001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     stop_grace_period: 30s
     # v1.2.0d NEW per D7 + F27: edge wrapper 1G + 30s graceful drain
 
