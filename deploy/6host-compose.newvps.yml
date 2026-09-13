@@ -82,7 +82,8 @@ services:
     env_file:
       - env/newvps.env.example
     environment:
-      HARNESS_API_URL: "http://harness-kernel:8000"
+      HARNESS_RUNTIME_URL: "http://fish-harness-kernel-http:4091"
+      HARNESS_API_URL: "http://fish-harness-kernel-http:4091"
       WRAPPER_API_URL: "http://wrapper-orchestrator:4000"
       WORKER_ID: "${WORKER_ID:-stt-worker-001}"
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
@@ -116,7 +117,8 @@ services:
     env_file:
       - env/newvps.env.example
     environment:
-      HARNESS_API_URL: "http://harness-kernel:8000"
+      HARNESS_RUNTIME_URL: "http://fish-harness-kernel-http:4091"
+      HARNESS_API_URL: "http://fish-harness-kernel-http:4091"
       PUSH_PORT: "8081"
       VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY:-placeholder}"
       # VAPID_PRIVATE_KEY: env-inject only (hygiene §4.7 — never commit real key)
@@ -165,7 +167,8 @@ services:
     env_file:
       - env/newvps.env.example
     environment:
-      HARNESS_API_URL: "http://harness-kernel:8000"
+      HARNESS_RUNTIME_URL: "http://fish-harness-kernel-http:4091"
+      HARNESS_API_URL: "http://fish-harness-kernel-http:4091"
       WRAPPER_PORT: "4000"
       WORKER_ID: "${WORKER_ID:-wrapper-orchestrator}"
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
@@ -212,7 +215,8 @@ services:
     env_file:
       - env/newvps.env.example
     environment:
-      HARNESS_API_URL: "http://harness-kernel:8000"
+      HARNESS_RUNTIME_URL: "http://fish-harness-kernel-http:4091"
+      HARNESS_API_URL: "http://fish-harness-kernel-http:4091"
       WRAPPER_PORT: "4001"
       WORKER_ID: "${WORKER_ID:-wrapper-commander}"
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
@@ -257,7 +261,8 @@ services:
     env_file:
       - env/newvps.env.example
     environment:
-      HARNESS_API_URL: "http://harness-kernel:8000"
+      HARNESS_RUNTIME_URL: "http://fish-harness-kernel-http:4091"
+      HARNESS_API_URL: "http://fish-harness-kernel-http:4091"
       WRAPPER_PORT: "4003"
       WORKER_ID: "wrapper-commander-2"
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
@@ -302,7 +307,7 @@ services:
     env_file:
       - env/newvps.env.example
     environment:
-      HARNESS_RUNTIME_URL: "http://harness-kernel:8000"
+      HARNESS_RUNTIME_URL: "http://fish-harness-kernel-http:4091"
       WRAPPER_API_URL: "http://wrapper-orchestrator:4000"
       PWA_PORT: "4002"
       WORKER_ID: "${WORKER_ID:-wrapper-frontend}"
