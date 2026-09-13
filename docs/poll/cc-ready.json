@@ -1366,13 +1366,49 @@
       "3_result_blob_storage_P2": "⏸️ DEFERRED — replace JSON string in result_json with blob_id reference. M1+ schema migration.",
       "5_persistent_cancel_queue_signal_store_P2": "⏸️ DEFERRED — AbortSignal not serializable. F26 overflow queue needs separate signal store keyed by task_id.",
       "6_approach_B_handle_event_yield_P3": "⏸️ DEFERRED — if replay/retry needs cancel_token exposure for workerModule.interrupt().",
-      "NEW_D9_commander_recordStepFailure_race_audit": "✅ AUDITED 2026-09-13 — NO RACE. commander._recordStepFailure / _recordStepResult write to in-memory _stepTracker: Map<taskId, PlanStep[]> (commander.ts:52), NOT to SqliteTaskStore. Cancel path writes 'cancelled' to SQLite (orchestrator.ts:542) but step tracker is independent storage. driver.interrupted event from cancel actually records 'interrupted: user cancel' as step status — semantically correct (cancel IS a step interruption). aggregateResults() in orchestrator.ts:396 may log fake 'failed_steps' warning post-cancel, but this is log noise, not SQLite state pollution. P3 defer for log noise cleanup.",
+      "NEW_D9_commander_recordStepFailure_race_audit": "✅ CLOSED by v1.2.0j+.11+ (cycle closure below). aggregateResults() log noise guard at orchestrator.ts:421-456 — checks finalEntry.status === 'cancelled' before logging WARN. When cancelled, _recordStepFailure's 'interrupted: user cancel' fake failed_steps surface as INFO ('marked failed by cancel, expected') not WARN. AggregateError catch block also downgrades to INFO during cancel.",
       "NEW_D10_layer1_re_dispatch_idempotence_audit": "✅ COVERED by v1.2.0j+.10+ layer 1 guard. orchestrator.dispatch() with same task_id twice: first dispatch() sets pending/running. If cancel() runs between calls and writes 'cancelled' to SQLite, second dispatch() call hits layer 1 guard at orchestrator.ts:280-294 (store.getTask(taskId)?.status === 'cancelled' check) and early-returns with {task_id, status: 'cancelled'}. Layer 1 guard makes dispatch() naturally idempotent under cancel. Verified by reading orchestrator.ts:280-294 + 537-552. No new code needed.",
       "G2_aliyun_edge3_install_MEDIUM": "⏸️ DEFERRED (user OOB)",
       "G4_3_edge_gh_secrets_copy_LOW": "⏸️ DEFERRED (blocked on G2)",
       "G5_tailscale_split_dns_LOW": "⏸️ DEFERRED (admin toggle)",
       "G7_on_failure_N_tune_LOW": "collect 48h evidence post-v1.2.0g deploy before bumping on-failure:3 → :5",
       "edge_host_rebuild_v1_2_0j_plus_8_plus_P1": "⏸️ USER OOB — rebuild edge hosts to pick up healthcheck block (v1.2.0j+.8+ U1)."
+    },
+    "v1_2_0j_plus_11_plus_cycle_closure": {
+      "summary": "v1.2.0j+.11+ cycle: aggregateResults() log noise cleanup (D11). One-line root cause: cancel() mid-step makes commander._recordStepFailure write 'interrupted: user cancel' to in-memory step tracker, which aggregateResults() surfaces as failed_steps → orchestrator.ts:430 logged fake WARN ('X plan step(s) failed'). Fix: check finalEntry.status === 'cancelled' before logging; cancel-induced failed_steps downgrade to INFO. AggregateError catch block also downgrades to INFO during cancel. Per L46 methodology from v1.2.0j+.10+ post-cycle audit — this is a LOG-NOISE fix, NOT a race fix (in-memory _stepTracker writes do not race with SQLite per D9 audit). ~15 lines orchestrator.ts + 1 new unit test (3 cases: cancel suppresses, regression preserves, AggregateError+cancel suppresses).",
+      "fix_files": [
+        "wrapper/orchestrator/orchestrator.ts",
+        "wrapper/test/unit/orchestrator_aggregate_cancel.test.ts (NEW)"
+      ],
+      "git_diff_stat_pending": "2 files changed, ~145 insertions, ~5 deletions (orchestrator.ts +15/-5 + new test file ~125 lines)",
+      "decision_locked": {
+        "D11_log_noise_fix_only": "v1.2.0j+.11+ ONLY addresses the log noise. Does NOT change the underlying behavior of _recordStepFailure (still writes status='failed' to in-memory tracker during cancel). This is correct per D9 audit — semantically cancel IS a step interruption. Changing _recordStepFailure to write status='cancelled' instead would propagate into aggregateResults.overallStatus logic (commander.ts:197-206) and break the 'failed.length === 0 && running.length === 0' branch. Log-level guard is the surgical fix.",
+        "D11_regression_preserved": "Guard must NOT over-suppress — when task was NOT cancelled (happy path), WARN still fires for real plan execution failures. Verified by orchestrator_aggregate_cancel.test.ts test 2 (regression).",
+        "D11_layer1_layer2_unchanged": "v1.2.0j+.10+ layer 1 (entry guard) + layer 2 (safeMark*) are STILL the primary cancel→cancelled propagation guarantees. v1.2.0j+.11+ adds a 3rd layer (log noise guard) that prevents downstream WARN noise without affecting actual status propagation."
+      },
+      "new_lessons": {
+        "L47_cancel_silent_log_noise_pattern": "When a feature has well-defined 'cancel produces expected side-effects' semantics (e.g. _recordStepFailure writing status='failed' during cancel because cancel IS a step interruption), downstream logging that surfaces those side-effects MUST check the cancelled state and downgrade noise to INFO. Three sites in this cycle: (1) failed_steps WARN at orchestrator.ts:430; (2) AggregateError catch block at orchestrator.ts:435; (3) future: any new log path around aggregateResults, planStep, or workerModule events. Pattern: use the post-dsh-fallback finalEntry snapshot (orchestrator.ts:419) as the canonical 'was this cancelled?' check — it survives both layer 1 (entry early-return) and layer 2 (safeMarkCompleted preserves cancelled) race windows per L44."
+      },
+      "verification_checks_pass": {
+        "layer1_typescript_compile": "npx tsc --noEmit → 0 errors",
+        "layer2_unit_isolation": "npx vitest run test/unit/orchestrator_aggregate_cancel.test.ts → 3/3 PASS in 444ms (covers cancel-suppresses-failed-steps-WARN + regression-preserves-WARN-when-not-cancelled + AggregateError-throw-suppressed-during-cancel)",
+        "layer3_regression_no_new_failures": "Full suite: 247/248 PASS + 178 skipped. 1 pre-existing FAIL (test/unit/server.test.ts:162 DEEPSEEK_API_KEY env issue on macOS) NOT a regression — baseline main fails identically per stash test",
+        "layer4_L8_secrets": "grep orchestrator.ts + orchestrator_aggregate_cancel.test.ts for KEY|SECRET|TOKEN|PASSWORD|sk- → 0 real secrets (only false positive: variable name 'taskId' containing 'Key' substring)"
+      },
+      "hygiene_checks": {
+        "L8_secrets": "0 real secrets in diff (test stub DEEPSEEK_API_KEY='sk-test-key-for-aggregate-cancel' is the standard vitest pattern, NOT a real key)",
+        "D3_lock_preserved": "Only wrapper/orchestrator/orchestrator.ts + wrapper/test/unit/orchestrator_aggregate_cancel.test.ts modified. harness/, spec/, spikes/, Dockerfile (root), pyproject.toml, 10 ADR bodies all untouched. cc-ready.json flip in chore commit.",
+        "L19_sub_cycle_hygiene": "v1.2.0j+.11+ separate tag from v1.2.0j+.10+, NOT rolled in.",
+        "no_new_dependencies": "No new dependencies introduced."
+      },
+      "tag_pushed": {
+        "tag_name_pending": "v1.2.0j+.11+",
+        "points_to_commit_pending": "TBD — commit 1 feat(orchestrator) SHA, per L19 hygiene — NOT the cc-ready flip",
+        "push_method_pending": "git -c http.proxy=127.0.0.1:7890 -c https.proxy=127.0.0.1:7890 push origin main + git push origin v1.2.0j+.11+ (per Codex 提交铁律 修订 2026-09-05; requires user authorization)"
+      }
+    },
+    "resolved_by_v1_2_0j_plus_11_plus": {
+      "D9_aggregateResults_log_noise_P3_CLOSED": "Forward scope item NEW_D9 (from v1.2.0j+.10+ post-cycle audit) → CLOSED by v1.2.0j+.11+. Two log paths in orchestrator.ts:421-456 now check finalEntry.status === 'cancelled' before WARN. Cancel-induced failed_steps downgrade to INFO. AggregateError during cancel also downgrade to INFO. No more spurious WARN noise when cancel fires mid-plan. Race fix from v1.2.0j+.10+ (layer 1 + layer 2) still primary; this cycle adds layer 3 (log noise guard)."
     }
   }
 }
