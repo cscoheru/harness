@@ -181,6 +181,40 @@ const handleStatusById: RouteHandler = async (req, res) => {
 };
 registerApiRoute('get', '/api/v1/status/:task_id', handleStatusById);
 
+// POST /api/v1/tasks/:task_id/cancel — v1.2.0j+.9+ NEW per §6 forward scope (d):
+// Wire orchestrator.cancel() to HTTP layer. Triggers F3+ chain: SQLite markCancelled
+// + AbortController.abort() → execution_driver signal listener (execution_driver.ts:131)
+// → deepseekInvoke AbortError → driver.interrupted event (execution_driver.ts:241).
+// Idempotent: cancel of unknown task_id resolves without throwing (orchestrator.ts:521-523).
+const handleCancelTask: RouteHandler = async (req, res) => {
+  try {
+    const taskId = req.params['task_id'] as string | undefined;
+    if (!taskId) {
+      res.status(400).json({ status: 'error', error: 'task_id required' });
+      return;
+    }
+    await orchestrator.cancel(taskId);
+    res.json({ task_id: taskId, status: 'cancelled' });
+  } catch (err) {
+    res.status(500).json({ status: 'error', error: String(err) });
+  }
+};
+registerApiRoute('post', '/api/v1/tasks/:task_id/cancel', handleCancelTask);
+
+// GET /api/v1/tasks — list all tasks (active + terminal) from SqliteTaskStore.
+// v1.2.0j+.9+ NEW per §6 (d): wire orchestrator.listTasks() to HTTP layer.
+// F4 persistence (v1.2.0j+.5) means terminal tasks (completed/failed/cancelled)
+// survive process restart. Ordered by created_at DESC (newest first).
+const handleListTasks: RouteHandler = async (_req, res) => {
+  try {
+    const tasks = await orchestrator.listTasks();
+    res.json({ tasks });
+  } catch (err) {
+    res.status(500).json({ status: 'error', error: String(err) });
+  }
+};
+registerApiRoute('get', '/api/v1/tasks', handleListTasks);
+
 // POST /api/v1/worker/heartbeat — v1.2.0b REAL: schema-validated body →
 // worker.register() (first call) or worker.heartbeat() (subsequent) →
 // WorkerPool SQLite persist → {worker_id, status, last_heartbeat_at}.
