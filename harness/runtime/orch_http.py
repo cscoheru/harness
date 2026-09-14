@@ -67,11 +67,20 @@ class InvokeRequest(BaseModel):
     Mirror of wrapper RunRequest (orchestrator.ts:47-65). Field names
     match wrapper exactly so JSON serialization is symmetric across the
     wrapper → kernel HTTP boundary.
+
+    v1.2.0k.3: ``tenant_id`` is REQUIRED for tenant isolation. The
+    schema (``spec/kernel-schema.sql``) already declares
+    ``tenant_id TEXT NOT NULL`` + ``idx_tasks_tenant``. Without this
+    field, callers would see ALL tenants' tasks via GET /api/orch/list.
     """
 
     task_id: str
+    # v1.2.0k.3 P0 SECURITY: required for tenant isolation. Wrapper
+    # must forward X-Tenant-ID (header + body) for every invoke; direct
+    # kernel callers (curl, scripts) must supply it in body too.
+    tenant_id: str
     workflow_pack: str = "worker"
-    workflow_version: str = "1.2.0k"
+    workflow_version: str = "1.2.0k.3"
     input_blob_id: Optional[str] = None
     capability_profile: dict
     lease_token: str
@@ -83,9 +92,14 @@ class InvokeRequest(BaseModel):
 
 
 class TaskStatus(BaseModel):
-    """Status snapshot returned by GET /api/orch/status/{task_id}."""
+    """Status snapshot returned by GET /api/orch/status/{task_id}.
+
+    v1.2.0k.3: ``tenant_id`` added so ``list_tasks(tenant_id)`` can
+    filter snapshots by tenant (P0 — multi-tenant SaaS invariant).
+    """
 
     task_id: str
+    tenant_id: Optional[str] = None  # v1.2.0k.3: tenant scoping for list
     status: str  # pending | dispatched | running | completed | failed | cancelled
     attempt_id: Optional[str] = None
     cancel_token: Optional[str] = None
@@ -215,11 +229,13 @@ class DriverInvoke:
         # Pre-seed tasks row in SQLite so dispatches table FK is satisfied
         # if downstream code ever records a dispatch. Direct INSERT gives
         # us deterministic task_id (vs seed_task() which auto-generates a uuid).
+        # v1.2.0k.3 P0 SECURITY: use req.tenant_id (was hardcoded 't1' —
+        # every existing task was mislabeled to phantom tenant 't1').
         try:
             self._db_conn.execute(
                 "INSERT INTO tasks (task_id, tenant_id, workflow_pack, "
-                "  workflow_version, status) VALUES (?, 't1', ?, ?, 'pending')",
-                (req.task_id, req.workflow_pack, req.workflow_version),
+                "  workflow_version, status) VALUES (?, ?, ?, ?, 'pending')",
+                (req.task_id, req.tenant_id, req.workflow_pack, req.workflow_version),
             )
             self._db_conn.commit()
         except Exception:
@@ -254,9 +270,11 @@ class DriverInvoke:
         }
         self._registry.register(spec_handle, req.task_id)
 
-        # Initialize status snapshot
+        # Initialize status snapshot — v1.2.0k.3: tag with tenant_id
+        # so list_tasks(tenant_id) can filter per-tenant (P0 isolation).
         self._tasks[req.task_id] = TaskStatus(
             task_id=req.task_id,
+            tenant_id=req.tenant_id,
             status="dispatched",
             attempt_id=attempt_id,
             cancel_token=cancel_token,
@@ -321,9 +339,16 @@ class DriverInvoke:
         finally:
             self._registry.unregister(cancel_token)
 
-    async def list_tasks(self) -> list[TaskStatus]:
-        """GET /api/orch/list — return all known task snapshots."""
-        return list(self._tasks.values())
+    async def list_tasks(self, tenant_id: str) -> list[TaskStatus]:
+        """GET /api/orch/list — return known task snapshots for a tenant.
+
+        v1.2.0k.3 P0 SECURITY: tenant_id is REQUIRED; snapshots are
+        filtered to match. Multi-tenant SaaS invariant — a caller MUST
+        NOT see another tenant's tasks. Legacy tasks inserted before
+        this cycle carry tenant_id='t1' (pre-cycle hardcode) and will
+        only appear to callers explicitly requesting 't1'.
+        """
+        return [t for t in self._tasks.values() if t.tenant_id == tenant_id]
 
     async def get_status(self, task_id: str) -> Optional[TaskStatus]:
         """GET /api/orch/status/{task_id} — single task snapshot."""

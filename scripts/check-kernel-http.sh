@@ -2,10 +2,10 @@
 # scripts/check-kernel-http.sh — kernel HTTP daemon smoke test (per ADR 0012).
 #
 # Verifies 5 routes return expected shapes:
-#   GET  /api/orch/healthz     → status=ok, version=1.2.0k.2, active_tasks
+#   GET  /api/orch/healthz     → status=ok, version=1.2.0k.3, active_tasks
 #   POST /api/orch/invoke      → SSE stream with driver.handle + driver.finished
 #                                AND v1.2.0k.2 driver.output_chunk (N>=1)
-#   GET  /api/orch/list        → non-empty array post-invoke
+#   GET  /api/orch/list        → tenant-filtered via X-Tenant-ID (v1.2.0k.3)
 #   GET  /api/orch/status/{id} → task snapshot with status=completed
 #
 # Usage: scripts/check-kernel-http.sh [--port 4001] [--host localhost]
@@ -31,8 +31,8 @@ if [[ "${STATUS}" != "ok" ]]; then
   echo "[kernel-http] FAIL: healthz status=${STATUS} (expected ok)" >&2
   exit 1
 fi
-if [[ "${VERSION}" != "1.2.0k.2" ]]; then
-  echo "[kernel-http] FAIL: healthz version=${VERSION} (expected 1.2.0k.2)" >&2
+if [[ "${VERSION}" != "1.2.0k.3" ]]; then
+  echo "[kernel-http] FAIL: healthz version=${VERSION} (expected 1.2.0k.3)" >&2
   exit 1
 fi
 
@@ -45,8 +45,10 @@ SSE_TMP=$(mktemp)
 trap "rm -f ${SSE_TMP}" EXIT
 curl -s -N -X POST "${BASE}/api/orch/invoke" \
   -H "Content-Type: application/json" \
+  -H "X-Tenant-ID: smoke-tenant" \
   -d "{
     \"task_id\": \"${TASK_ID}\",
+    \"tenant_id\": \"smoke-tenant\",
     \"workflow_pack\": \"web_research\",
     \"workflow_version\": \"1.0.0\",
     \"capability_profile\": {\"driver_kind\": \"codex_exec\"},
@@ -77,13 +79,21 @@ CHUNK_COUNT=$(grep -c "event: driver.output_chunk" "${SSE_TMP}" || true)
 echo "[kernel-http] invoke SSE contains ${CHUNK_COUNT} driver.output_chunk event(s)"
 
 # ─── list ───────────────────────────────────────────────────────────────
-echo "[kernel-http] GET /api/orch/list"
-LIST=$(curl -sf "${BASE}/api/orch/list")
+echo "[kernel-http] GET /api/orch/list (X-Tenant-ID: smoke-tenant)"
+LIST=$(curl -sf "${BASE}/api/orch/list" -H "X-Tenant-ID: smoke-tenant")
 LIST_COUNT=$(echo "${LIST}" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
 if [[ "${LIST_COUNT}" -lt 1 ]]; then
   echo "[kernel-http] FAIL: list count=${LIST_COUNT} (expected >=1)" >&2
   exit 1
 fi
+
+# v1.2.0k.3: missing header must return 400 (not leak all tenants)
+NO_TENANT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/api/orch/list")
+if [[ "${NO_TENANT_STATUS}" != "400" ]]; then
+  echo "[kernel-http] FAIL: list without X-Tenant-ID returned ${NO_TENANT_STATUS} (expected 400)" >&2
+  exit 1
+fi
+echo "[kernel-http] list without X-Tenant-ID returns 400 (tenant isolation enforced)"
 
 # ─── status ─────────────────────────────────────────────────────────────
 echo "[kernel-http] GET /api/orch/status/${TASK_ID}"

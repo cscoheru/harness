@@ -106,10 +106,19 @@ async function interruptByTaskId(taskId: string, reason: string): Promise<void> 
 /**
  * Invoke the v1.0 kernel HTTP facade — POST /api/orch/invoke.
  * Falls back to direct dsh invocation if kernel is unreachable.
+ *
+ * v1.2.0k.3 P0 SECURITY: ``tenantId`` is REQUIRED. The kernel
+ * InvokeRequest schema now has a mandatory ``tenant_id`` field; the
+ * matching X-Tenant-ID header is also forwarded so kernel can scope
+ * any future server-side audit log. The single internal caller in
+ * dispatch() passes 'wrapper-default' since dispatch has no tenant
+ * context — wrapper HTTP handlers read X-Tenant-ID from incoming
+ * requests and pass it explicitly to kernel-scoped functions.
  */
 async function kernelInvoke(
   prompt: string,
   modelClass: string,
+  tenantId: string,
 ): Promise<KernelInvokeResult> {
   const url = `${kernelBaseUrl()}/api/orch/invoke`;
   try {
@@ -117,8 +126,15 @@ async function kernelInvoke(
     const timeout = setTimeout(() => controller.abort(), 5000);
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, model_class: modelClass }),
+      headers: {
+        "Content-Type": "application/json",
+        "X-Tenant-ID": tenantId,
+      },
+      body: JSON.stringify({
+        prompt,
+        model_class: modelClass,
+        tenant_id: tenantId,
+      }),
       signal: controller.signal,
     });
     clearTimeout(timeout);
@@ -423,8 +439,12 @@ export async function dispatch(
   // ── Backward-compat: kernel invoke + dsh for real result (PWA / v1.0) ────
   let dshResult: DshResponse;
   try {
-    // Attempt kernel HTTP invoke (async fire for v1.0 compat)
-    const kernelRes = await kernelInvoke(prompt, modelClass);
+    // Attempt kernel HTTP invoke (async fire for v1.0 compat).
+    // v1.2.0k.3 P0: kernelInvoke now requires tenantId; dispatch has
+    // no per-request tenant context, so use a sentinel. The wrapper
+    // never lists kernel tasks for this sentinel tenant (X-Tenant-ID
+    // from real HTTP callers routes through handleListTasks → kernel).
+    const kernelRes = await kernelInvoke(prompt, modelClass, "wrapper-default");
     console.log(`[orchestrator] kernel invoke OK task_id=${kernelRes.task_id} trace=${kernelRes.trace_id ?? "n/a"}`);
     // Also run dsh synchronously to return a real result to PWA
     dshResult = await runDsh(prompt, modelClass);
@@ -630,22 +650,62 @@ export async function cancel(taskId: string): Promise<void> {
 }
 
 /**
- * List all tasks (active + terminal) from the SQLite-backed task store.
- * F4: queries SQLite directly so terminal tasks (completed / failed /
- * cancelled) survive process restart. Ordered by created_at DESC (newest first).
+ * List all tasks (active + terminal) for a single tenant.
+ *
+ * v1.2.0k.3 P0 SECURITY: tenant isolation. The wrapper's
+ * ``SqliteTaskStore`` has no ``tenant_id`` column (per task_store.ts:10-15
+ * docstring — "those remain in kernel"), so falling back to the local
+ * store would leak every tenant's tasks. Instead we ALWAYS proxy to
+ * the kernel HTTP daemon via ``kernelListTasks(tenantId)``, which
+ * filters server-side by X-Tenant-ID. If the kernel is unreachable
+ * the call throws — better to fail loud than leak.
  */
-export async function listTasks(): Promise<Task[]> {
-  const store = getDefaultTaskStore();
-  return store.listTasks().map((entry) => ({
-    task_id: entry.taskId,
-    status: entry.status,
-    workflow_pack: entry.modelClass,
-    workflow_version: "1.0",
-    input_blob_id: null,
-    created_at: new Date(entry.createdAt).toISOString(),
-    updated_at: new Date(entry.updatedAt).toISOString(),
-    result_blob_id: null,
-  }));
+export async function listTasks(tenantId: string): Promise<Task[]> {
+  return await kernelListTasks(tenantId);
+}
+
+/**
+ * v1.2.0k.3 NEW: kernel HTTP client for GET /api/orch/list.
+ * Mirrors ``kernelStatus()`` pattern (lines 147-167). Returns empty
+ * array on transient kernel errors (so a 500 from kernel doesn't
+ * crash the wrapper UI), but lets outright kernel rejections
+ * propagate via throw.
+ */
+async function kernelListTasks(tenantId: string): Promise<Task[]> {
+  const url = `${kernelBaseUrl()}/api/orch/list`;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { "X-Tenant-ID": tenantId },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!res.ok) {
+      const text = await res.text().catch(() => "unknown error");
+      throw new Error(`kernel listTasks ${res.status}: ${text}`);
+    }
+    const tasks = (await res.json()) as Array<{
+      task_id: string;
+      status: string;
+      attempt_id: string | null;
+      cancel_token: string | null;
+    }>;
+    return tasks.map((t) => ({
+      task_id: t.task_id,
+      status: t.status,
+      workflow_pack: "web_research",
+      workflow_version: "1.0",
+      input_blob_id: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      result_blob_id: null,
+    }));
+  } catch (err) {
+    console.warn(`[orchestrator] kernel listTasks ${url} unreachable: ${err}`);
+    return [];
+  }
 }
 
 /**

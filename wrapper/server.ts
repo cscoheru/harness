@@ -201,13 +201,21 @@ const handleCancelTask: RouteHandler = async (req, res) => {
 };
 registerApiRoute('post', '/api/v1/tasks/:task_id/cancel', handleCancelTask);
 
-// GET /api/v1/tasks — list all tasks (active + terminal) from SqliteTaskStore.
+// GET /api/v1/tasks — list tasks for a tenant via kernel HTTP proxy.
 // v1.2.0j+.9+ NEW per §6 (d): wire orchestrator.listTasks() to HTTP layer.
 // F4 persistence (v1.2.0j+.5) means terminal tasks (completed/failed/cancelled)
 // survive process restart. Ordered by created_at DESC (newest first).
-const handleListTasks: RouteHandler = async (_req, res) => {
+// v1.2.0k.3 P0 SECURITY: require X-Tenant-ID header; reject with 400
+// if missing (multi-tenant SaaS invariant). Forwards header to kernel
+// so kernel can filter by tenant server-side.
+const handleListTasks: RouteHandler = async (req, res) => {
   try {
-    const tasks = await orchestrator.listTasks();
+    const tenantId = req.headers['x-tenant-id'] as string | undefined;
+    if (!tenantId) {
+      res.status(400).json({ status: 'error', error: 'X-Tenant-ID header is required' });
+      return;
+    }
+    const tasks = await orchestrator.listTasks(tenantId);
     res.json({ tasks });
   } catch (err) {
     res.status(500).json({ status: 'error', error: String(err) });

@@ -41,7 +41,7 @@ from harness.runtime.orch_http import (
     TaskStatus,
 )
 
-KERNEL_VERSION = "1.2.0k.2"
+KERNEL_VERSION = "1.2.0k.3"
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -181,13 +181,21 @@ async def cancel(task_id: str) -> JSONResponse:
 
 
 @app.get("/api/orch/list")
-async def list_tasks() -> JSONResponse:
-    """List all known task status snapshots.
+async def list_tasks(request: Request) -> JSONResponse:
+    """List known task status snapshots for the tenant in X-Tenant-ID.
 
-    Mirror of wrapper pwa_server /api/orch/list route (j+.9+ commit 31fca58).
+    v1.2.0k.3 P0 SECURITY: tenant isolation. Returns 400 if the
+    X-Tenant-ID header is missing — refusing to leak cross-tenant.
+    Mirror of wrapper handleListTasks (server.ts:208-216).
     """
+    tenant_id = request.headers.get("X-Tenant-ID")
+    if not tenant_id:
+        raise HTTPException(
+            status_code=400,
+            detail="X-Tenant-ID header is required for tenant isolation",
+        )
     driver_invoke: DriverInvoke = app.state.driver_invoke
-    tasks = await driver_invoke.list_tasks()
+    tasks = await driver_invoke.list_tasks(tenant_id)
     return JSONResponse([t.model_dump() for t in tasks])
 
 

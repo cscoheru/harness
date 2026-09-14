@@ -34,9 +34,17 @@ def inv(conn: sqlite3.Connection) -> DriverInvoke:
 
 
 def _make_request(driver_kind: str = "codex_exec") -> InvokeRequest:
-    """Build a minimal InvokeRequest for codex_exec stub."""
+    """Build a minimal InvokeRequest for codex_exec stub.
+
+    v1.2.0k.3: ``tenant_id`` is required (P0 tenant isolation).
+    Tests use a single sentinel tenant so cross-test isolation
+    doesn't matter; the dedicated tenant-isolation test file
+    (``test_tenant_isolation.py``) verifies that ``list_tasks``
+    actually filters by tenant.
+    """
     return InvokeRequest(
         task_id=f"task-test-{driver_kind}",
+        tenant_id="test-tenant",
         workflow_pack="web_research",
         workflow_version="1.0.0",
         capability_profile={"driver_kind": driver_kind},
@@ -255,3 +263,78 @@ def test_driver_kind_flows_from_http_request_to_sse(
     assert "text" in payload
     assert payload["sequence"] == 0
     assert payload["total_chunks"] == 3
+
+
+# ─── T10 (v1.2.0k.3): tenant_id is REQUIRED on InvokeRequest ───────────
+def test_invoke_request_requires_tenant_id() -> None:
+    """v1.2.0k.3 P0: Pydantic must reject InvokeRequest without tenant_id.
+
+    Without this guard, ``list_tasks`` would have no tenant to filter
+    by — every call would leak cross-tenant data.
+    """
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError) as exc_info:
+        InvokeRequest(
+            task_id="task-missing-tenant",
+            workflow_pack="web_research",
+            workflow_version="1.0.0",
+            capability_profile={"driver_kind": "codex_exec"},
+            lease_token="lease-no-tenant",
+            fence_version=1,
+            prompt="no tenant",
+            model_class="worker",
+        )
+    # Pydantic v2 surfaces missing field by name in errors()
+    err_str = str(exc_info.value)
+    assert "tenant_id" in err_str, (
+        f"ValidationError must mention tenant_id, got: {err_str}"
+    )
+
+
+# ─── T11 (v1.2.0k.3): list_tasks filters by tenant ──────────────────────
+def test_list_tasks_filters_by_tenant_id(
+    inv: DriverInvoke,
+) -> None:
+    """v1.2.0k.3 P0: list_tasks("tenant-A") MUST NOT return tenant-B tasks."""
+    import asyncio
+
+    async def seed() -> None:
+        # Drain both streams so TaskStatus snapshots persist
+        async for _ in inv.run(
+            _make_request_with("task-A", tenant_id="tenant-A")
+        ):
+            pass
+        async for _ in inv.run(
+            _make_request_with("task-B", tenant_id="tenant-B")
+        ):
+            pass
+
+    asyncio.run(seed())
+
+    async def gather() -> tuple[list[str], list[str], list[str]]:
+        return (
+            [t.task_id for t in await inv.list_tasks("tenant-A")],
+            [t.task_id for t in await inv.list_tasks("tenant-B")],
+            [t.task_id for t in await inv.list_tasks("tenant-UNKNOWN")],
+        )
+
+    a, b, u = asyncio.run(gather())
+    assert a == ["task-A"], f"LEAK: tenant-A sees {a}"
+    assert b == ["task-B"], f"LEAK: tenant-B sees {b}"
+    assert u == [], f"LEAK: unknown tenant sees {u}"
+
+
+def _make_request_with(task_id: str, tenant_id: str) -> InvokeRequest:
+    """Variant of _make_request with explicit task_id + tenant_id."""
+    return InvokeRequest(
+        task_id=task_id,
+        tenant_id=tenant_id,
+        workflow_pack="web_research",
+        workflow_version="1.0.0",
+        capability_profile={"driver_kind": "codex_exec"},
+        lease_token="lease-tenant-test",
+        fence_version=1,
+        prompt="tenant isolation test",
+        model_class="worker",
+    )

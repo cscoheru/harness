@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-__version__ = "1.2.0k.2"
+__version__ = "1.2.0k.3"
 
 
 @runtime_checkable
