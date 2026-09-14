@@ -29,6 +29,7 @@ import { minimaxInvoke } from "../dsh/minimax_client.js";
 import type { DshOpts, DshResponse } from "../dsh/types.js";
 import * as commander from "./commander.js";
 import * as workerModule from "./worker.js";
+import { getDefaultWorkerPool } from "./worker_pool.js";
 import { getDefaultQueueStore } from "./queue_store.js";
 import {
   getDefaultTaskStore,
@@ -371,6 +372,20 @@ export async function dispatch(
         const dispatchRes = await commander.dispatchStep(taskId, step.name);
         console.log(`[orchestrator] dispatchStep ${step.name} → worker=${dispatchRes.worker_id}`);
 
+        // v1.2.0k.6 NEW: look up the worker's host from worker_pool to route
+        // the execution to that specific host. worker_id came from
+        // commander.dispatchStep() which called getDefaultWorkerPool().dispatch().
+        // If no worker registered yet (fresh boot), workerInfo is null and
+        // runDsh falls back to newvps primary via getCapableHosts.
+        let hostHint: string | undefined;
+        if (dispatchRes.worker_id) {
+          const workerInfo = getDefaultWorkerPool().getWorker(dispatchRes.worker_id);
+          if (workerInfo?.host) {
+            hostHint = workerInfo.host;
+            console.log(`[orchestrator] routing step ${step.name} to host=${hostHint}`);
+          }
+        }
+
         // v1.2.0b: actually run the step on the claimed worker via
         // ExecutionDriver. Worker.run() yields a DriverEvent stream; we
         // consume it inline to drive the in-memory step tracker state
@@ -386,7 +401,12 @@ export async function dispatch(
           capability_profile: workerModule.capability(),
           lease_token: `lease-${taskId}`,
           fence_version: 1,
-          metadata: { prompt: prompt.slice(0, 1024) },
+          metadata: {
+            prompt: prompt.slice(0, 1024),
+            // v1.2.0k.6 NEW: host_hint from worker_pool so execution routes
+            // to the same host that owns the worker (cross-host orchestration)
+            host_hint: hostHint,
+          },
           // v1.2.0j+.6+ (F3+): cascade cancel signal into driver run loop.
           // When orchestrator.cancel() calls cancelCtrl.abort(), this signal
           // fires, execution_driver.start() adopts it via addEventListener,
@@ -546,20 +566,32 @@ export async function dispatch(
  * Run dsh headless with the given prompt and model class.
  * DEEPSEEK_API_KEY is injected via process.env (never hardcoded).
  *
+ * v1.2.0k.6 NEW: primary path now routes via 6host_router.routedDsh() instead
+ * of calling minimaxInvoke() directly. routedDsh() picks a host based on
+ * modelClass: orch/commander → newvps primary; worker → edge round-robin.
+ * On "no host available", routedDsh() falls back to direct minimaxInvoke.
+ *
  * Coerces unknown modelClass strings to 'orch' (default) so the call stays within
  * the documented ModelClass union; task.workflow_pack can be any string from the API
  * but PROFILE_YAML_MAP only has 3 keys (orch/commander/worker).
  */
-async function runDsh(prompt: string, modelClass: string): Promise<DshResponse> {
+async function runDsh(prompt: string, modelClass: string, hostHint?: string): Promise<DshResponse> {
   const validClass: DshOpts["modelClass"] =
     modelClass === "orch" || modelClass === "commander" || modelClass === "worker"
       ? modelClass
       : "orch";
-  const opts: DshOpts = {
-    modelClass: validClass,
-    timeoutMs: 120_000,
-  };
-  return await minimaxInvoke(prompt, opts);
+  // v1.2.0k.6: primary dispatch via 6host_router (cross-host routing)
+  try {
+    const { routedDsh } = await import("./6host_router.js");
+    return await routedDsh(prompt, validClass, hostHint);
+  } catch (err) {
+    // Last-resort fallback: direct LLM API call (when 6host_router finds no host)
+    console.warn(`[orchestrator] runDsh routedDsh failed (${(err as Error).message}); falling back to direct minimaxInvoke`);
+    return await minimaxInvoke(prompt, {
+      modelClass: validClass,
+      timeoutMs: 120_000,
+    });
+  }
 }
 
 /**

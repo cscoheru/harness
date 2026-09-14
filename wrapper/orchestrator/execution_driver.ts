@@ -60,6 +60,10 @@ interface DriverHandle {
   // When set, abort propagates from orchestrator → driver → deepseekInvoke
   // fetch. Listener attached in start() cascades abort into controller.
   externalSignal?: AbortSignal;
+  // v1.2.0k.6 NEW: host_hint from orchestrator's worker_pool lookup.
+  // Drives routedDsh() target host. When undefined, routedDsh() falls back
+  // to newvps primary (which is always capable of "worker").
+  hostHint?: string;
   child: null; // v1.2.0d D16: spawn path removed; field kept for handleRegistry shape compat
   startMs: number;
   attempt_id: string;
@@ -133,10 +137,15 @@ export class SpawnDshDriver implements ExecutionDriver {
     const cancel_token = `drv-${randomUUID()}`;
     const driver_kind: DriverKind = "codex_exec";
 
+    // v1.2.0k.6 NEW: extract host_hint from request metadata (set by orchestrator
+    // from worker_pool lookup). Drives routedDsh() target.
+    const hostHint = request.metadata?.["host_hint"] as string | undefined;
+
     const handle: DriverHandle = {
       cancel_token,
       controller,
       externalSignal: request.signal,
+      hostHint,
       child: null, // v1.2.0d D16: spawn path removed
       startMs: Date.now(),
       attempt_id,
@@ -189,8 +198,13 @@ export class SpawnDshDriver implements ExecutionDriver {
   }
 
   /**
-   * v1.2.0d NEW (per D16): primary path = deepseekInvoke() direct HTTP call
-   * to api.deepseek.com. Replaces legacy dsh binary invocation.
+   * v1.2.0k.6 NEW: primary path = routedDsh() via 6host_router. Cross-host
+   * routing — picks host based on modelClass + optional hostHint from
+   * worker_pool. On "no host available" or network failure, falls through to
+   * direct minimaxInvoke() as last-resort.
+   *
+   * v1.2.0d primary path (deepseekInvoke direct) is now the LAST-RESORT
+   * fallback; routedDsh() is primary.
    */
   private async *streamDeepseekInvoke(
     handle: DriverHandle,
@@ -202,21 +216,57 @@ export class SpawnDshDriver implements ExecutionDriver {
       attempt_id: handle.attempt_id,
       task_id: handle.attempt_id,
       workflow_pack: "deepseek",
-      workflow_version: "1.2.0d",
+      workflow_version: "1.2.0k.6",
       input_blob_id: null,
       capability_profile: this.capability(),
       lease_token: `lease-${handle.attempt_id}`,
       fence_version: 1,
-      metadata: { source: "execution_driver_deepseek", model_class: modelClass },
+      metadata: { source: "execution_driver_routed", model_class: modelClass },
     });
 
+    // v1.2.0k.6: try routedDsh() first
+    try {
+      const { routedDsh } = await import("./6host_router.js");
+      const resp = await routedDsh(prompt, modelClass, handle.hostHint);
+      handle.finished = true;
+      const stdout = resp.stdout || "";
+      if (stdout.length > 0) {
+        yield {
+          kind: "driver.output_chunk",
+          attempt_id,
+          payload: {
+            chunk: stdout.slice(0, MAX_CHUNK_BYTES),
+            byte_size: Buffer.byteLength(stdout, "utf8"),
+            source: "routed_dsh",
+          },
+        };
+      }
+      yield {
+        kind: "driver.finished",
+        attempt_id,
+        payload: {
+          exit_code: resp.exitCode,
+          stdout,
+          wall_ms: Date.now() - handle.startMs,
+          source: "routed_dsh",
+          trace_id: resp.traceId,
+          token_usage: resp.tokenUsage,
+        },
+      };
+      return;
+    } catch (err) {
+      // v1.2.0k.6: routedDsh failed — fall through to last-resort direct LLM call
+      const message = (err as Error).message ?? String(err);
+      console.warn(`[execution_driver] routedDsh failed (${message}); falling back to direct minimaxInvoke`);
+    }
+
+    // Last-resort fallback: direct LLM API call (v1.2.0d D16 path)
     try {
       const resp = await minimaxInvoke(prompt, {
         modelClass,
         timeoutMs,
       });
       handle.finished = true;
-      // Yield one output_chunk with stdout (preserves event stream shape for callers)
       const stdout = resp.stdout || "";
       if (stdout.length > 0) {
         yield {
@@ -243,13 +293,6 @@ export class SpawnDshDriver implements ExecutionDriver {
       };
     } catch (err) {
       const message = (err as Error).message ?? String(err);
-      // v1.2.0d D16: on network failure (api.deepseek.com unreachable from
-      // edge host), fall through to routedDsh() cross-host dispatch.
-      const isNetworkFail = /fetch failed|ENOTFOUND|ETIMEDOUT|ECONNREFUSED|AbortError/i.test(message);
-      if (isNetworkFail && !handle.controller.signal.aborted && !handle.externalSignal?.aborted) {
-        yield* this.streamRoutedDshFallback(handle, attempt_id, timeoutMs);
-        return;
-      }
       yield {
         kind: handle.controller.signal.aborted || handle.externalSignal?.aborted
           ? "driver.interrupted"

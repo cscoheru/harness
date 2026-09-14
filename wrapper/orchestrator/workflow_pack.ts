@@ -130,13 +130,23 @@ export async function plan(task: Task): Promise<PlanPlan> {
     return heuristicPlan(task, manifest);
   }
 
-  // Try dsh-based plan generation first
+  // Try dsh-based plan generation first (v1.2.0k.6: routed via 6host_router)
   const prompt = buildPlanPrompt(task, manifest);
   try {
-    const dshResp = await minimaxInvoke(prompt, {
-      modelClass: 'commander',
-      timeoutMs: PLAN_TIMEOUT_MS,
-    });
+    // v1.2.0k.6 NEW: planner routes via 6host_router so commander-class
+    // dispatch hits newvps primary (where the commander LLM profile lives).
+    // Falls back to direct minimaxInvoke if router finds no host.
+    let dshResp;
+    try {
+      const { routedDsh } = await import('./6host_router.js');
+      dshResp = await routedDsh(prompt, 'commander');
+    } catch (routerErr) {
+      console.warn(`[workflow_pack] routedDsh failed (${(routerErr as Error).message}); falling back to direct minimaxInvoke`);
+      dshResp = await minimaxInvoke(prompt, {
+        modelClass: 'commander',
+        timeoutMs: PLAN_TIMEOUT_MS,
+      });
+    }
     if (dshResp.exitCode === 0) {
       const steps = parsePlanJson(dshResp.stdout);
       if (steps.length > 0) {

@@ -82,9 +82,17 @@ export function buildArgs(
 // `minimax_client.ts` directly. The re-export at the bottom preserves
 // backward compatibility for any code path that still imports `callDshHeadless`.
 
-// ─── Backward-compat re-export (v1.2.0d → v1.2.0k.4: Minimax swap) ───────
+// ─── Backward-compat re-export (v1.2.0d → v1.2.0k.4: Minimax swap → v1.2.0k.6: routedDsh) ─────
 // v1.2.0d: dsh binary spawn is deprecated (per D16). Existing callers
 // that still import callDshHeadless get minimaxInvoke under the same
-// name so they compile without changes. New code should import
-// minimaxInvoke directly from minimax_client.ts.
+// name so they compile without changes.
+//
+// v1.2.0k.6: this re-export is DEPRECATED for new code. The primary
+// dispatch path is now `routedDsh()` from `wrapper/orchestrator/6host_router.ts`
+// which selects the target host based on modelClass + host_hint from
+// worker_pool. Direct `minimaxInvoke()` (this re-export) skips cross-host
+// routing and only works as a last-resort fallback when 6host_router finds
+// no available host.
+//
+// New code SHOULD import `routedDsh` from 6host_router.ts instead.
 export { minimaxInvoke as callDshHeadless } from './minimax_client.js';
