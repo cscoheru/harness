@@ -1,26 +1,30 @@
-/** @file wrapper/dsh/deepseek_client.ts */
+/** @file wrapper/dsh/minimax_client.ts */
 
 /**
- * DeepSeek HTTP API direct caller — replaces dsh binary spawn.
+ * MiniMax HTTP API direct caller — replaces deepseek_client.ts.
  *
- * Per v1.2.0d D16/D17 decision: the harness replaces dsh CLI with a direct
- * OpenAI-compatible HTTP call to `https://api.deepseek.com/v1/chat/completions`.
+ * Per v1.2.0k.4 cycle (planned): swap DeepSeek for MiniMax M3 to
+ * reduce per-token cost. MiniMax offers an OpenAI-compatible chat
+ * completions API, so the request/response shape is structurally
+ * identical to deepseek_client.ts — differences are limited to:
+ *   - base URL:   https://api.minimaxi.com/v1  (China region)
+ *   - auth:       Bearer ${MINIMAX_API_KEY}    (was DEEPSEEK_API_KEY)
+ *   - model:      MiniMax-M3                   (1M context, agentic)
+ *   - extra:      response may include a <think>...</think> reasoning
+ *                 block BEFORE the actual content (M3 chain-of-thought
+ *                 by default). We strip it from stdout so downstream
+ *                 consumers see a clean answer.
  *
- * Model selection (resolveModelOverride, three role defaults):
- *   orch      → deepseek-v4-pro      (high-reasoning tier)
- *   commander → deepseek-v4-flash    (mid-context tier)
- *   worker    → deepseek-v4-flash    (low-cost batch tier)
- *
- * Cost-mode behavior:
- *   DEEPSEEK_COST_MODE=cheap (default) — all roles use v4-flash
- *   DEEPSEEK_COST_MODE=full          — roles use their yaml defaults (orch → v4-pro)
- *   DSH_MODEL env var overrides everything
+ * M3 also supports prompt caching (visible in `usage.prompt_tokens_details
+ * .cached_tokens`). We log this for cost visibility but do not act on it.
  *
  * Retry-After handling: 429 responses trigger exponential backoff (max 3 retries).
  *
- * Endpoint override: set DEEPSEEK_ENDPOINT to redirect to a different base URL.
+ * Endpoint override: set MINIMAX_ENDPOINT to redirect to a different base URL
+ * (useful for global region `https://api.minimax.io/v1` or self-hosted gateway).
  *
- * Security: DEEPSEEK_API_KEY is read from process.env only (never hardcoded).
+ * Security: MINIMAX_API_KEY is read from process.env only (never hardcoded).
+ * Key fingerprint logged once at module init (per v1.2.0e.1 D8 pattern).
  */
 
 import type { DshOpts, DshResponse, ModelClass } from './types.js';
@@ -29,7 +33,7 @@ import type { DshOpts, DshResponse, ModelClass } from './types.js';
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Default timeouts per model class (ms). */
+/** Default timeouts per model class (ms) — mirror deepseek_client. */
 const DEFAULT_TIMEOUT_MS: Record<ModelClass, number> = {
   orch: 300_000,      // 5 min — high-reasoning cross-project decisions
   commander: 180_000, // 3 min — mid-context single-workflow changes
@@ -37,26 +41,24 @@ const DEFAULT_TIMEOUT_MS: Record<ModelClass, number> = {
 };
 
 /**
- * Role-default models (mirrors docs/m0b/profile-override-{orch,commander,worker}.yaml).
- * These are the yaml-patch-selected models; overridden by cost mode / DSH_MODEL.
- */
-/**
- * Role-default models (mirrors docs/m0b/profile-override-{orch,commander,worker}.yaml).
- * These are the yaml-patch-selected models; overridden by cost mode / DSH_MODEL.
- * Re-exported for test introspection of the source of truth; callers should use
- * `resolveModelOverride` instead.
+ * Role-default models (all roles use MiniMax-M3 for v1.2.0k.4+).
+ * M3 handles all three tiers (orch / commander / worker) with acceptable
+ * latency; the per-role model split from deepseek_client is dropped
+ * because M3's quality is uniform across tiers.
+ *
+ * Override at call time via MINIMAX_MODEL env var.
  */
 export const ROLE_DEFAULT_MODEL: Record<ModelClass, string> = {
-  orch: 'deepseek-v4-pro',        // high-reasoning tier
-  commander: 'deepseek-v4-flash', // mid-context tier
-  worker: 'deepseek-v4-flash',    // low-cost batch tier
+  orch: 'MiniMax-M3',
+  commander: 'MiniMax-M3',
+  worker: 'MiniMax-M3',
 };
-
-/** Target model for DEEPSEEK_COST_MODE=cheap downgrades. */
-const CHEAP_MODEL = 'deepseek-v4-flash';
 
 /** Maximum retry attempts for 429 responses. */
 const MAX_RETRIES = 3;
+
+/** Regex to strip M3's leading chain-of-thought block from content. */
+const THINK_BLOCK_RE = /^<think>[\s\S]*?<\/think>\s*/;
 
 // ---------------------------------------------------------------------------
 // Model resolution
@@ -66,18 +68,12 @@ const MAX_RETRIES = 3;
  * Resolve the model string for a given model class.
  *
  * Precedence (highest first):
- *   1. DSH_MODEL          — direct override, wins over everything
- *   2. DEEPSEEK_COST_MODE — 'full' keeps role-patch defaults (orch stays v4-pro);
- *                           'cheap' (default) downgrades every class to v4-flash
+ *   1. MINIMAX_MODEL env var — direct override, wins over everything
+ *   2. role default           — all three tiers default to MiniMax-M3
  */
 export function resolveModelOverride(modelClass: ModelClass): string {
-  if (process.env.DSH_MODEL) return process.env.DSH_MODEL!;
-  const mode = process.env.DEEPSEEK_COST_MODE ?? 'cheap';
-  if (mode !== 'cheap') return ROLE_DEFAULT_MODEL[modelClass];
-  // cheap: only override if the role default is NOT already the cheap model
-  return ROLE_DEFAULT_MODEL[modelClass] === CHEAP_MODEL
-    ? CHEAP_MODEL
-    : CHEAP_MODEL;
+  if (process.env.MINIMAX_MODEL) return process.env.MINIMAX_MODEL!;
+  return ROLE_DEFAULT_MODEL[modelClass];
 }
 
 // ---------------------------------------------------------------------------
@@ -85,26 +81,26 @@ export function resolveModelOverride(modelClass: ModelClass): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Call the DeepSeek Chat Completions API directly via fetch().
+ * Call the MiniMax Chat Completions API directly via fetch().
  *
  * @param prompt  - user message content
  * @param opts    - call options (modelClass determines model/timeout)
- * @returns DshResponse compatible object
+ * @returns DshResponse-compatible object
  */
-export async function deepseekInvoke(
+export async function minimaxInvoke(
   prompt: string,
   opts?: DshOpts,
 ): Promise<DshResponse> {
   const modelClass: ModelClass = opts?.modelClass ?? 'commander';
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS[modelClass];
-  const apiKey = opts?.apiKey ?? process.env.DEEPSEEK_API_KEY;
+  const apiKey = opts?.apiKey ?? process.env.MINIMAX_API_KEY;
 
   if (!apiKey) {
-    throw new Error('deepseekInvoke: DEEPSEEK_API_KEY is not set');
+    throw new Error('minimaxInvoke: MINIMAX_API_KEY is not set');
   }
 
   const model = resolveModelOverride(modelClass);
-  const baseUrl = process.env.DEEPSEEK_ENDPOINT ?? 'https://api.deepseek.com';
+  const baseUrl = process.env.MINIMAX_ENDPOINT ?? 'https://api.minimaxi.com';
   const url = `${baseUrl}/v1/chat/completions`;
 
   const body: Record<string, unknown> = {
@@ -145,13 +141,27 @@ export async function deepseekInvoke(
     if (res.ok) {
       const json = await res.json() as {
         choices: Array<{ message: { content: string } }>;
-        usage: { prompt_tokens: number; completion_tokens: number };
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          prompt_tokens_details?: { cached_tokens?: number };
+        };
         id?: string;
       };
 
       const wallMs = Date.now() - startMs;
+      // Strip M3's leading <think>...</think> block so stdout is clean
+      const rawContent = json.choices?.[0]?.message?.content ?? '';
+      const stdout = rawContent.replace(THINK_BLOCK_RE, '');
+
+      // Log cache hit for cost visibility (one line per call)
+      const cached = json.usage?.prompt_tokens_details?.cached_tokens;
+      if (cached && cached > 0) {
+        console.log(`[minimax] prompt cache hit: ${cached} tokens (savings ~75%)`);
+      }
+
       return {
-        stdout: json.choices?.[0]?.message?.content ?? '',
+        stdout,
         stderr: '',
         exitCode: 0,
         wallMs,
@@ -167,7 +177,7 @@ export async function deepseekInvoke(
       attempt++;
       if (attempt > MAX_RETRIES) {
         const text = await res.text().catch(() => '');
-        throw new Error(`deepseekInvoke: 429 after ${MAX_RETRIES} retries — ${text}`);
+        throw new Error(`minimaxInvoke: 429 after ${MAX_RETRIES} retries — ${text}`);
       }
       const retryAfter = res.headers.get('Retry-After');
       const delayMs = retryAfter
@@ -179,11 +189,11 @@ export async function deepseekInvoke(
 
     // Non-2xx, non-429
     const text = await res.text().catch(() => '');
-    throw new Error(`deepseekInvoke: HTTP ${res.status} — ${text}`);
+    throw new Error(`minimaxInvoke: HTTP ${res.status} — ${text}`);
   }
 
   // Unreachable — MAX_RETRIES loop always throws or returns
-  throw new Error('deepseekInvoke: unexpected loop exit');
+  throw new Error('minimaxInvoke: unexpected loop exit');
 }
 
 // ---------------------------------------------------------------------------
@@ -191,34 +201,32 @@ export async function deepseekInvoke(
 // ---------------------------------------------------------------------------
 
 /**
- * v1.2.0e.1 NEW (per D8 + F46): log a non-secret fingerprint of the API key
- * at module init time. Helps triage env drift between compose profiles
- * (e.g., puer-hk container's env showed sk-347b9b09... while the real key
- * is sk-3f55470...; finding this took an env grep across containers).
+ * v1.2.0k.4 NEW: log a non-secret fingerprint of the MiniMax API key
+ * at module init time. Mirrors v1.2.0e.1 D8 deepseek fingerprint
+ * pattern (slice(0,7) only exposes vendor prefix + length, not secret).
  *
- * NEVER log the full key or any prefix > 7 chars. `slice(0,7)` only exposes
- * the vendor prefix + first few chars (e.g., "sk-3f55") — not enough to
- * reconstruct the secret. Length is non-sensitive.
+ * If MINIMAX_API_KEY is missing, log an error (not throw — let the
+ * caller decide whether to abort based on context).
  */
-export function logDeepseekKeyFingerprint(): void {
-  const key = process.env.DEEPSEEK_API_KEY;
+export function logMinimaxKeyFingerprint(): void {
+  const key = process.env.MINIMAX_API_KEY;
   if (!key) {
-    console.error('[deepseek] FATAL: DEEPSEEK_API_KEY missing');
+    console.error('[minimax] FATAL: MINIMAX_API_KEY missing');
     return;
   }
   const key_prefix = key.slice(0, 7);
   const key_len = key.length;
-  console.log(`[deepseek] key_prefix=${key_prefix}... key_len=${key_len}`);
+  console.log(`[minimax] key_prefix=${key_prefix}... key_len=${key_len}`);
 }
 
-// Auto-run at module init — runs once when deepseek_client is first imported.
+// Auto-run at module init — runs once when minimax_client is first imported.
 // Gated by an idempotent flag so test imports that have already evaluated
 // the module don't re-log on each test.
 let _keyFingerprintLogged = false;
 function _maybeLogKeyFingerprint(): void {
   if (_keyFingerprintLogged) return;
   _keyFingerprintLogged = true;
-  logDeepseekKeyFingerprint();
+  logMinimaxKeyFingerprint();
 }
 _maybeLogKeyFingerprint();
 

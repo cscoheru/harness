@@ -25,7 +25,7 @@ import type {
   DriverEvent,
   RunHandle,
 } from "./types.js";
-import { deepseekInvoke } from "../dsh/deepseek_client.js";
+import { minimaxInvoke } from "../dsh/minimax_client.js";
 import type { DshOpts, DshResponse } from "../dsh/types.js";
 import * as commander from "./commander.js";
 import * as workerModule from "./worker.js";
@@ -559,7 +559,7 @@ async function runDsh(prompt: string, modelClass: string): Promise<DshResponse> 
     modelClass: validClass,
     timeoutMs: 120_000,
   };
-  return await deepseekInvoke(prompt, opts);
+  return await minimaxInvoke(prompt, opts);
 }
 
 /**

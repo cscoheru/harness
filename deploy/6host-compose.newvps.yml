@@ -86,7 +86,7 @@ services:
       HARNESS_API_URL: "http://fish-harness-kernel-http:4091"
       WRAPPER_API_URL: "http://wrapper-orchestrator:4000"
       WORKER_ID: "${WORKER_ID:-stt-worker-001}"
-      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
+      MINIMAX_API_KEY: "${MINIMAX_API_KEY}"
       STT_CLASS: "stt-worker"
       DSH_PROFILE: "headless"
       # whisper.cpp model: absolute path only (hygiene §4.6)
@@ -171,7 +171,7 @@ services:
       HARNESS_API_URL: "http://fish-harness-kernel-http:4091"
       WRAPPER_PORT: "4000"
       WORKER_ID: "${WORKER_ID:-wrapper-orchestrator}"
-      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
+      MINIMAX_API_KEY: "${MINIMAX_API_KEY}"
       ORCHESTRATOR_CLASS: "orchestrator"
       DSH_PROFILE: "headless"
     networks:
@@ -219,7 +219,7 @@ services:
       HARNESS_API_URL: "http://fish-harness-kernel-http:4091"
       WRAPPER_PORT: "4001"
       WORKER_ID: "${WORKER_ID:-wrapper-commander}"
-      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
+      MINIMAX_API_KEY: "${MINIMAX_API_KEY}"
       ORCHESTRATOR_CLASS: "commander"
       DSH_PROFILE: "headless"
     networks:
@@ -265,7 +265,7 @@ services:
       HARNESS_API_URL: "http://fish-harness-kernel-http:4091"
       WRAPPER_PORT: "4003"
       WORKER_ID: "wrapper-commander-2"
-      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
+      MINIMAX_API_KEY: "${MINIMAX_API_KEY}"
       ORCHESTRATOR_CLASS: "commander"
       DSH_PROFILE: "headless"
     networks:
@@ -311,7 +311,7 @@ services:
       WRAPPER_API_URL: "http://wrapper-orchestrator:4000"
       PWA_PORT: "4002"
       WORKER_ID: "${WORKER_ID:-wrapper-frontend}"
-      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
+      MINIMAX_API_KEY: "${MINIMAX_API_KEY}"
       ORCHESTRATOR_CLASS: "frontend"
       DSH_PROFILE: "headless"
     networks:

@@ -16,7 +16,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SpawnDshDriver } from '../../orchestrator/execution_driver.js';
 import type { RunRequest, DriverEvent, DriverCapabilities } from '../../orchestrator/types.js';
-import * as deepseekModule from '../../dsh/deepseek_client.js';
+
+// v1.2.0k.4 LLM swap: use vi.mock at module level (vi.spyOn doesn't work
+// on ESM module namespace bindings — minimaxInvoke is a frozen binding).
+// The mock factory replaces the module entirely so all import sites
+// (execution_driver.ts, dsh_client.ts re-exports) get the mocked version.
+const { mockMinimaxInvoke } = vi.hoisted(() => ({ mockMinimaxInvoke: vi.fn() }));
+vi.mock('../../dsh/minimax_client.js', () => ({
+  minimaxInvoke: mockMinimaxInvoke,
+  ROLE_DEFAULT_MODEL: {
+    orch: 'MiniMax-M3',
+    commander: 'MiniMax-M3',
+    worker: 'MiniMax-M3',
+  },
+  resolveModelOverride: () => 'MiniMax-M3',
+  logMinimaxKeyFingerprint: () => undefined,
+}));
 
 function makeRequest(signal?: AbortSignal): RunRequest {
   const capability: DriverCapabilities = {
@@ -49,6 +64,7 @@ describe('SpawnDshDriver — F3+ signal integration', () => {
   });
 
   afterEach(() => {
+    mockMinimaxInvoke.mockReset();
     vi.restoreAllMocks();
   });
 
@@ -59,10 +75,8 @@ describe('SpawnDshDriver — F3+ signal integration', () => {
     ctrl.abort(); // abort BEFORE run() is called
     const req = makeRequest(ctrl.signal);
 
-    // Mock deepseekInvoke to reject with a network error
-    const spy = vi.spyOn(deepseekModule, 'deepseekInvoke').mockRejectedValue(
-      new Error('mocked network fail'),
-    );
+    // Mock minimaxInvoke to reject with a network error
+    mockMinimaxInvoke.mockRejectedValue(new Error('mocked network fail'));
 
     const driver = new SpawnDshDriver({ dshHttpUrl: 'http://localhost:9999' });
     const events: DriverEvent[] = [];
@@ -75,7 +89,7 @@ describe('SpawnDshDriver — F3+ signal integration', () => {
     const last = events[events.length - 1];
     expect(last).toBeDefined();
     expect(last!.kind).toBe('driver.interrupted');
-    expect(spy).toHaveBeenCalled();
+    expect(mockMinimaxInvoke).toHaveBeenCalled();
   });
 
   it('no signal yields driver.failed on error (backward compat)', async () => {
@@ -83,9 +97,7 @@ describe('SpawnDshDriver — F3+ signal integration', () => {
     // error path still emits driver.failed (existing behavior).
     const req = makeRequest(undefined);
 
-    vi.spyOn(deepseekModule, 'deepseekInvoke').mockRejectedValue(
-      new Error('mocked network fail'),
-    );
+    mockMinimaxInvoke.mockRejectedValue(new Error('mocked network fail'));
 
     const driver = new SpawnDshDriver({ dshHttpUrl: 'http://localhost:9999' });
     const events: DriverEvent[] = [];
@@ -100,18 +112,18 @@ describe('SpawnDshDriver — F3+ signal integration', () => {
 
   it('signal abort mid-run yields driver.interrupted', async () => {
     // v1.2.0j+.6+ F3+: cascading abort — when orchestrator.cancel() fires
-    // ctrl.abort() while deepseekInvoke is in flight, the fetch is aborted
+    // ctrl.abort() while minimaxInvoke is in flight, the fetch is aborted
     // and the driver emits driver.interrupted.
     const ctrl = new AbortController();
     const req = makeRequest(ctrl.signal);
 
-    vi.spyOn(deepseekModule, 'deepseekInvoke').mockImplementation(
+    mockMinimaxInvoke.mockImplementation(
       async () => {
         // Simulate cancel() firing during the in-flight fetch
         setTimeout(() => ctrl.abort(), 10);
         // Wait for the abort to settle + a margin
         await new Promise((r) => setTimeout(r, 50));
-        // Throw an AbortError-like error (the deepseekInvoke fetch wrapper
+        // Throw an AbortError-like error (the minimaxInvoke fetch wrapper
         // would throw this when the underlying AbortController fires)
         throw new DOMException('The user aborted the request.', 'AbortError');
       },

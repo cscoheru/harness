@@ -1,18 +1,18 @@
 /**
- * Execution driver — DeepSeek HTTP direct + cross-host routed fallback.
+ * Execution driver — MiniMax HTTP direct + cross-host routed fallback.
  *
- * Why dual-model (per D2 = Option C → v1.2.0d D16 DeepSeek HTTP 直调):
- *   - Primary path: deepseekInvoke() (wrapper/dsh/deepseek_client.ts) — fetch()
- *     POST to https://api.deepseek.com/v1/chat/completions with
- *     env-injected DEEPSEEK_API_KEY. No dsh binary dependency.
+ * Why dual-model (per v1.2.0k.4 LLM swap):
+ *   - Primary path: minimaxInvoke() (wrapper/dsh/minimax_client.ts) — fetch()
+ *     POST to https://api.minimaxi.com/v1/chat/completions with
+ *     env-injected MINIMAX_API_KEY. No dsh binary dependency.
  *   - Fallback path: routedDsh() — fetch() POST to DSH_HTTP_URL/api/v1/tasks
  *     for cross-host dispatch (per v1.2.0c F12). Used when primary fails
- *     (network unreachable to api.deepseek.com from edge host).
+ *     (network unreachable to api.minimaxi.com from edge host).
  *
  * v1.2.0d NEW (per D16):
  *   - Removed legacy dsh binary invocation path entirely (was a dead
  *     command since dsh 0.1.1-rc.2 — only web profile, no headless CLI).
- *   - Default model: deepseek-v4-flash (worker class default).
+ *   - Default model: MiniMax-M3 (worker class default).
  *   - DEFAULT_DSH_BIN constant kept for backward compat but no longer spawned.
  *
  * DriverEvent stream contract (per types.ts:262-270):
@@ -27,7 +27,7 @@
 
 import { randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
-import { deepseekInvoke } from "../dsh/deepseek_client.js";
+import { minimaxInvoke } from "../dsh/minimax_client.js";
 import type {
   DriverCapabilities,
   DriverEvent,
@@ -42,7 +42,7 @@ import type {
 const DEFAULT_TIMEOUT_SECONDS = 60;
 const DEFAULT_DSH_BIN = "dsh"; // DEPRECATED (v1.2.0d D16): kept for backward compat but never spawned
 const DEFAULT_PROFILE = "headless";
-const DEFAULT_MODEL = "deepseek-v4-flash";
+const DEFAULT_MODEL = "MiniMax-M3";
 const DEFAULT_HTTP_URL = "http://127.0.0.1:4001";
 
 /** Cap chunk payload size to keep DriverEvent envelopes small. */
@@ -211,7 +211,7 @@ export class SpawnDshDriver implements ExecutionDriver {
     });
 
     try {
-      const resp = await deepseekInvoke(prompt, {
+      const resp = await minimaxInvoke(prompt, {
         modelClass,
         timeoutMs,
       });

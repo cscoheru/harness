@@ -79,12 +79,12 @@ export function buildArgs(
 // Public API (DEPRECATED since v1.2.0d D16)
 // ---------------------------------------------------------------------------
 // All public exports below are legacy shims. New code MUST import from
-// `deepseek_client.ts` directly. The re-export at the bottom preserves
+// `minimax_client.ts` directly. The re-export at the bottom preserves
 // backward compatibility for any code path that still imports `callDshHeadless`.
 
-// ─── Backward-compat re-export (v1.2.0d) ─────────────────────────────────
+// ─── Backward-compat re-export (v1.2.0d → v1.2.0k.4: Minimax swap) ───────
 // v1.2.0d: dsh binary spawn is deprecated (per D16). Existing callers
-// that still import callDshHeadless get deepseekInvoke under the same
+// that still import callDshHeadless get minimaxInvoke under the same
 // name so they compile without changes. New code should import
-// deepseekInvoke directly from deepseek_client.ts.
-export { deepseekInvoke as callDshHeadless } from './deepseek_client.js';
+// minimaxInvoke directly from minimax_client.ts.
+export { minimaxInvoke as callDshHeadless } from './minimax_client.js';

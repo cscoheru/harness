@@ -15,8 +15,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock('../../dsh/dsh_client', () => ({
-  callDshHeadless: vi.fn().mockResolvedValue({
+vi.mock('../../dsh/minimax_client', () => ({
+  minimaxInvoke: vi.fn().mockResolvedValue({
     stdout: '',
     stderr: 'mocked: dsh disabled in pack_plan e2e',
     exitCode: 1,

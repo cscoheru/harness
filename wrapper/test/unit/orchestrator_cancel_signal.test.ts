@@ -13,7 +13,7 @@
  *
  * Mocks:
  *   - commander.planStep / dispatchStep / aggregateResults via vi.spyOn
- *   - deepseekInvoke via vi.mock so the real fetch is never attempted
+ *   - minimaxInvoke via vi.mock so the real fetch is never attempted
  *
  * @file test/unit/orchestrator_cancel_signal.test.ts
  */
@@ -23,13 +23,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-// Suppress DEEPSEEK_API_KEY auto-log at module import time
-process.env['DEEPSEEK_API_KEY'] = 'sk-test-key-for-unit-tests';
+// Suppress MINIMAX_API_KEY auto-log at module import time
+process.env['MINIMAX_API_KEY'] = 'sk-test-key-for-unit-tests';
 
 // Mock deepseek_client so deepseekInvoke is a stub returning a successful
 // response (or throws on demand per test).
-vi.mock('../../dsh/deepseek_client.js', () => ({
-  deepseekInvoke: vi.fn(async () => ({
+vi.mock('../../dsh/minimax_client.js', () => ({
+  minimaxInvoke: vi.fn(async () => ({
     stdout: 'ok',
     stderr: '',
     exitCode: 0,

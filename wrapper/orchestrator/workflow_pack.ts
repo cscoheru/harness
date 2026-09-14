@@ -23,7 +23,7 @@
 import { existsSync, readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { deepseekInvoke } from '../dsh/deepseek_client.js';
+import { minimaxInvoke } from '../dsh/minimax_client.js';
 import type {
   PackManifest,
   PackStep,
@@ -120,20 +120,20 @@ function syntheticManifest(name: string): PackManifest {
 export async function plan(task: Task): Promise<PlanPlan> {
   const manifest = loadManifest(task.workflow_pack);
 
-  // v1.2.0a review fix (per audit-scope §7-2 design intent): without
-  // DEEPSEEK_API_KEY the dsh call cannot succeed — short-circuit to the
-  // heuristic plan instead of burning a 60s spawn+timeout first. This is what
-  // makes unit tests deterministic ("unit test 默认场景下 plan() 走 heuristic
-  // 1-step plan，不依赖 DEEPSEEK_API_KEY") and keeps production key-less
-  // misconfigurations fast-failing instead of hanging each plan for 60s.
-  if (!process.env['DEEPSEEK_API_KEY']) {
+  // v1.2.0k.4 LLM swap (DeepSeek → MiniMax M3): without MINIMAX_API_KEY the
+  // dsh call cannot succeed — short-circuit to the heuristic plan instead of
+  // burning a 60s spawn+timeout first. This is what makes unit tests
+  // deterministic ("unit test 默认场景下 plan() 走 heuristic 1-step plan，不依赖
+  // MINIMAX_API_KEY") and keeps production key-less misconfigurations fast-failing
+  // instead of hanging each plan for 60s.
+  if (!process.env['MINIMAX_API_KEY']) {
     return heuristicPlan(task, manifest);
   }
 
   // Try dsh-based plan generation first
   const prompt = buildPlanPrompt(task, manifest);
   try {
-    const dshResp = await deepseekInvoke(prompt, {
+    const dshResp = await minimaxInvoke(prompt, {
       modelClass: 'commander',
       timeoutMs: PLAN_TIMEOUT_MS,
     });

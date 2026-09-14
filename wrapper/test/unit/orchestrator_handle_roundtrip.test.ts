@@ -21,13 +21,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Suppress DEEPSEEK_API_KEY auto-log at module import time
-process.env["DEEPSEEK_API_KEY"] = "sk-test-key-for-handle-roundtrip";
+// Suppress MINIMAX_API_KEY auto-log at module import time
+process.env["MINIMAX_API_KEY"] = "sk-test-key-for-handle-roundtrip";
 
 // Mock deepseek_client — same pattern as orchestrator_aggregate_cancel.test.ts.
 // This is the dsh-fallback path in dispatch() at orchestrator.ts:402.
-vi.mock("../../dsh/deepseek_client.js", () => ({
-  deepseekInvoke: vi.fn(async () => ({
+vi.mock("../../dsh/minimax_client.js", () => ({
+  minimaxInvoke: vi.fn(async () => ({
     stdout: "ok",
     stderr: "",
     exitCode: 0,
@@ -321,7 +321,7 @@ describe("T2-T5: orchestrator captures + cleans up handle on terminal events", (
       yield {
         kind: "driver.failed",
         attempt_id: attemptId,
-        payload: { error: "deepseek timeout" },
+        payload: { error: "minimax timeout" },
       };
     });
 

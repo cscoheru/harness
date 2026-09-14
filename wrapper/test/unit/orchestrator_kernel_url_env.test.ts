@@ -21,12 +21,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Suppress DEEPSEEK_API_KEY auto-log
-process.env["DEEPSEEK_API_KEY"] = "sk-test-key-for-kernel-url-env";
+// Suppress MINIMAX_API_KEY auto-log
+process.env["MINIMAX_API_KEY"] = "sk-test-key-for-kernel-url-env";
 
-// Mock deepseek_client for the dsh fallback path
-vi.mock("../../dsh/deepseek_client.js", () => ({
-  deepseekInvoke: vi.fn(async () => ({
+// Mock minimax_client for the dsh fallback path
+vi.mock("../../dsh/minimax_client.js", () => ({
+  minimaxInvoke: vi.fn(async () => ({
     stdout: "fallback ok",
     stderr: "",
     exitCode: 0,

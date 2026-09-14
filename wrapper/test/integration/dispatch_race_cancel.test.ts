@@ -33,13 +33,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Suppress DEEPSEEK_API_KEY auto-log at module import time
-process.env["DEEPSEEK_API_KEY"] = "sk-test-key-for-dispatch-race";
+// Suppress MINIMAX_API_KEY auto-log at module import time
+process.env["MINIMAX_API_KEY"] = "sk-test-key-for-dispatch-race";
 
-// Mock deepseek_client so the dsh-fallback path in dispatch() doesn't hit
+// Mock minimax_client so the dsh-fallback path in dispatch() doesn't hit
 // the real network. Returns a successful response (exitCode 0).
-vi.mock("../../dsh/deepseek_client.js", () => ({
-  deepseekInvoke: vi.fn(async () => ({
+vi.mock("../../dsh/minimax_client.js", () => ({
+  minimaxInvoke: vi.fn(async () => ({
     stdout: "mocked-ok",
     stderr: "",
     exitCode: 0,

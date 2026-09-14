@@ -17,7 +17,7 @@
  * @file wrapper/dsh/tool_provider.ts
  */
 
-import { deepseekInvoke } from './deepseek_client.js';
+import { minimaxInvoke } from './minimax_client.js';
 import { loadProfile, getRolePatchPath } from './profile.js';
 import type {
   DshInvokeOptions,
@@ -150,7 +150,7 @@ export class DshToolProvider implements IToolProvider {
   async invoke(request: ToolInvokeRequest): Promise<ToolInvokeResult> {
     const prompt = this._buildPrompt(request);
 
-    const response = await deepseekInvoke(prompt, {
+    const response = await minimaxInvoke(prompt, {
       modelClass: this._modelClass,
       timeoutMs: this._profile.timeoutMs,
     });
@@ -185,7 +185,7 @@ export class DshToolProvider implements IToolProvider {
    */
   private _parseResponse(
     request: ToolInvokeRequest,
-    response: Awaited<ReturnType<typeof deepseekInvoke>>,
+    response: Awaited<ReturnType<typeof minimaxInvoke>>,
   ): ToolInvokeResult {
     const { stdout, stderr, exitCode, wallMs, traceId, tokenUsage, denialReason } = response;
     const fallbackTraceId = traceId ?? `dsh-${request.taskId}-${wallMs}-${Math.random().toString(36).slice(2, 8)}`;
