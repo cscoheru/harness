@@ -58,7 +58,9 @@ class StubDriverBase:
             driver_kind=self._driver_kind,
             evidence_uri=self._evidence_uri,
             max_concurrent_attempts=1,
-            supports_streaming=False,
+            # v1.2.0k.2: stub emits 3 synthetic output_chunk events
+            # per run(); pipeline passthrough verified via scripts/check-kernel-http.sh.
+            supports_streaming=True,
             supports_interrupt=True,
             supports_heartbeat=True,
             # Per spec §ExecutionDriver: a driver without real evidence
@@ -73,11 +75,45 @@ class StubDriverBase:
         if cache_key not in self._stream_cache:
             # Build the synthetic event stream once. No subprocess, no
             # network, no SDK imports — purely in-memory stub.
+            #
+            # v1.2.0k.2: emit 3 synthetic output_chunk events between
+            # STARTED and FINISHED. Total sequence = 5 events:
+            #   driver.started, driver.output_chunk (x3), driver.finished.
+            # Payload shape {text, sequence, total_chunks} follows common
+            # streaming event semantics; sequence provides ordering
+            # anchor for consumers that reassemble chunks.
             self._stream_cache[cache_key] = [
                 DriverEvent(
                     kind=DriverEventKind.STARTED,
                     attempt_id=request.attempt_id,
                     payload={},
+                ),
+                DriverEvent(
+                    kind=DriverEventKind.OUTPUT_CHUNK,
+                    attempt_id=request.attempt_id,
+                    payload={
+                        "text": "Thinking... ",
+                        "sequence": 0,
+                        "total_chunks": 3,
+                    },
+                ),
+                DriverEvent(
+                    kind=DriverEventKind.OUTPUT_CHUNK,
+                    attempt_id=request.attempt_id,
+                    payload={
+                        "text": "Analyzing request... ",
+                        "sequence": 1,
+                        "total_chunks": 3,
+                    },
+                ),
+                DriverEvent(
+                    kind=DriverEventKind.OUTPUT_CHUNK,
+                    attempt_id=request.attempt_id,
+                    payload={
+                        "text": "Done.",
+                        "sequence": 2,
+                        "total_chunks": 3,
+                    },
                 ),
                 DriverEvent(
                     kind=DriverEventKind.FINISHED,

@@ -167,7 +167,10 @@ class DriverInvoke:
             driver_kind=driver_kind,
             evidence_uri="file://harness/drivers/evidence-exec-stub.json",
             max_concurrent_attempts=1,
-            supports_streaming=False,
+            # v1.2.0k.2: flip to True so SpecRunRequest carries the
+            # streaming capability through the kernel HTTP pipeline.
+            # Mirrors StubDriverBase.capability() in harness/drivers/_stub.py.
+            supports_streaming=True,
             supports_interrupt=True,
             supports_heartbeat=True,
             supports_tool_gateway=False,

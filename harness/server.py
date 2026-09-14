@@ -41,7 +41,7 @@ from harness.runtime.orch_http import (
     TaskStatus,
 )
 
-KERNEL_VERSION = "1.2.0k"
+KERNEL_VERSION = "1.2.0k.2"
 
 
 # ──────────────────────────────────────────────────────────────────────

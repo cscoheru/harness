@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # scripts/check-kernel-http.sh — kernel HTTP daemon smoke test (per ADR 0012).
 #
-# Verifies 4 routes return expected shapes:
-#   GET  /api/orch/healthz     → status=ok, version=1.2.0k, active_tasks
+# Verifies 5 routes return expected shapes:
+#   GET  /api/orch/healthz     → status=ok, version=1.2.0k.2, active_tasks
 #   POST /api/orch/invoke      → SSE stream with driver.handle + driver.finished
+#                                AND v1.2.0k.2 driver.output_chunk (N>=1)
 #   GET  /api/orch/list        → non-empty array post-invoke
 #   GET  /api/orch/status/{id} → task snapshot with status=completed
 #
@@ -30,8 +31,8 @@ if [[ "${STATUS}" != "ok" ]]; then
   echo "[kernel-http] FAIL: healthz status=${STATUS} (expected ok)" >&2
   exit 1
 fi
-if [[ "${VERSION}" != "1.2.0k" ]]; then
-  echo "[kernel-http] FAIL: healthz version=${VERSION} (expected 1.2.0k)" >&2
+if [[ "${VERSION}" != "1.2.0k.2" ]]; then
+  echo "[kernel-http] FAIL: healthz version=${VERSION} (expected 1.2.0k.2)" >&2
   exit 1
 fi
 
@@ -64,6 +65,16 @@ if ! grep -q "event: driver.finished" "${SSE_TMP}"; then
   echo "[kernel-http] FAIL: invoke SSE missing driver.finished event" >&2
   exit 1
 fi
+# v1.2.0k.2: stub emits 3 synthetic driver.output_chunk events per run().
+# Pipeline passthrough via harness/runtime/orch_http.py:188-201 (_to_http_event)
+# → harness/server.py:108-125 SSE yield loop. Verify at least 1 chunk
+# reached the wire (stub emits 3, so we expect >= 1).
+if ! grep -q "event: driver.output_chunk" "${SSE_TMP}"; then
+  echo "[kernel-http] FAIL: invoke SSE missing driver.output_chunk event" >&2
+  exit 1
+fi
+CHUNK_COUNT=$(grep -c "event: driver.output_chunk" "${SSE_TMP}" || true)
+echo "[kernel-http] invoke SSE contains ${CHUNK_COUNT} driver.output_chunk event(s)"
 
 # ─── list ───────────────────────────────────────────────────────────────
 echo "[kernel-http] GET /api/orch/list"
