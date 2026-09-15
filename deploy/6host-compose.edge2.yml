@@ -56,6 +56,13 @@ services:
       - harness_net
     ports:
       - "4001:4001"
+    # v1.2.0m NEW: extra_hosts forces newvps.fish-harness.ts.net to the
+    # Tailscale IP. Edge containers' DNS goes through Docker's internal
+    # 127.0.0.11 stub which has no MagicDNS upstream — `extra_hosts`
+    # bypasses DNS entirely. Tailscale IPs from `tailscale status` on
+    # newvps (TS_NEWVPS_IP=100.99.5.90).
+    extra_hosts:
+      - "newvps.fish-harness.ts.net:${TS_NEWVPS_IP:-100.99.5.90}"
     # v1.2.0e.1 NEW per D7: Tailscale MagicDNS + public DNS fallback (same as
     # newvps-compose.yml wrapper service). Without 1.1.1.1/8.8.8.8, containers
     # can resolve *.fish-harness.ts.net (100.100.100.100) but fail on public

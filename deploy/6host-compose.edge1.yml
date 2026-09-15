@@ -39,6 +39,9 @@ services:
       # fetch from inside newvps's docker DNS and re-emits the result. The
       # previous default `http://localhost:4001` made edge wrappers spam
       # "kernel unreachable, returning stub" every 30s on each /health probe.
+      # Uses MagicDNS hostname; `extra_hosts` below forces DNS to the
+      # Tailscale IP because Docker's internal 127.0.0.11 DNS has no
+      # MagicDNS upstream.
       HARNESS_RUNTIME_URL: "http://newvps.fish-harness.ts.net:4000"
       # Cross-host routing: MagicDNS name (no pinned IP; hygiene §4.5)
       HARNESS_API_URL: "http://newvps.fish-harness.ts.net:4000"
@@ -63,6 +66,10 @@ services:
       - harness_net
     ports:
       - "4001:4001"
+    # v1.2.0m NEW: extra_hosts forces newvps.fish-harness.ts.net to the
+    # Tailscale IP (no Docker internal DNS upstream to MagicDNS).
+    extra_hosts:
+      - "newvps.fish-harness.ts.net:${TS_NEWVPS_IP:-100.99.5.90}"
     # v1.2.0e.1 NEW per D7: Tailscale MagicDNS + public DNS fallback (same as
     # newvps-compose.yml wrapper service). Without 1.1.1.1/8.8.8.8, containers
     # can resolve *.fish-harness.ts.net (100.100.100.100) but fail on public
