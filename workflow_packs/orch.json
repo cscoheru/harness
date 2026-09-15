@@ -1,7 +1,7 @@
 {
   "name": "orch",
-  "version": "1.2.0l.4",
-  "description": "Real orchestrator-pattern pack (v1.2.0l NEW, .4 ALL REAL computation): all 3 steps run bash arithmetic so the user sees actual numeric output (10+9=19, 9-2=7) instead of LLM-fabricated responses. Closes 'echo user prompt' (v1.2.0l.0), 'LLM chat instead of bash' (v1.2.0l.2), 'colon-split parser bug' (v1.2.0l.3) bugs reported 2026-09-15.",
+  "version": "1.2.0l.5",
+  "description": "Real orchestrator-pattern pack (v1.2.0l NEW, .5 UPSTREAM STDOUT INJECTION): aggregate-results now actually parses dispatch-commands stdout via ${step.dispatch-commands.stdout} template variable instead of hardcoding 19/7. Closes 'echo hardcoded values' (v1.2.0l.4), 'echo user prompt' (v1.2.0l.0), 'LLM chat instead of bash' (v1.2.0l.2), 'colon-split parser bug' (v1.2.0l.3) bugs reported 2026-09-15.",
   "required_capabilities": ["orchestrator"],
   "optional_capabilities": ["commander", "subprocess_worker"],
   "input_schema_ref": "workflow_packs/schemas/orch.input.json",
@@ -27,7 +27,7 @@
       {
         "name": "aggregate-results",
         "capability": "subprocess_worker",
-        "input_ref": "bash:-c:C1=$(($(echo \"19\"))); C2=$(($(echo \"7\"))); echo \"[aggregate] commander-1 result = $C1\"; echo \"[aggregate] commander-2 result = $C2\"; echo \"[aggregate] task complete -> ${task.prompt}\"",
+        "input_ref": "bash:-c:DISPATCH_OUT=\"${step.dispatch-commands.stdout}\"; C1=$(printf '%s\\n' \"$DISPATCH_OUT\" | grep -E '\\-> [0-9]+' | head -1 | grep -oE '[0-9]+$'); C2=$(printf '%s\\n' \"$DISPATCH_OUT\" | grep -E '\\-> [0-9]+' | tail -1 | grep -oE '[0-9]+$'); echo \"[aggregate] commander-1 result = $C1 (from dispatch-commands)\"; echo \"[aggregate] commander-2 result = $C2 (from dispatch-commands)\"; echo \"[aggregate] task complete -> ${task.prompt}\"",
         "output_kind": "structured",
         "depends_on": ["dispatch-commands"],
         "timeout_seconds": 15

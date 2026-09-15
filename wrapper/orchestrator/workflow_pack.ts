@@ -24,6 +24,7 @@ import { existsSync, readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { minimaxInvoke } from '../dsh/minimax_client.js';
+import * as commander from './commander.js';
 import type {
   PackManifest,
   PackStep,
@@ -266,12 +267,100 @@ function enrichStep(step: PackStep): PlanStep {
 // static literal. Closes the "spawn-workers always says hello from
 // spawned worker" hardcoded-output bug reported 2026-09-15.
 function enrichStepWithTask(step: PackStep, task: Task): PlanStep {
-  const interpolated = expandTemplate(step.input_ref, {
+  const interpolated = expandStepTemplate(step.input_ref, task);
+  return enrichStep({ ...step, input_ref: interpolated });
+}
+
+/**
+ * v1.2.0l.5 NEW: expandStepTemplate resolves two families of template
+ * variables inside step.input_ref:
+ *
+ *   1. ${task.prompt} / ${task.task_id} / ${task.workflow_pack}
+ *      - resolved via a small vars dict (same as v1.2.0l.1 expandTemplate)
+ *
+ *   2. ${step.<name>.stdout | host | wallMs | exit_code}
+ *      - resolved at template-expansion time via commander.getStepStatuses()
+ *      - permits aggregate-results (and any future "consume upstream output"
+ *        step) to read the stdout of a prior step
+ *      - if the named step is not found OR has not yet produced the field →
+ *        leave the literal ${step.<name>.<field>} in place so bash reports a
+ *        clear "unbound variable" error instead of silently inserting ""
+ *      - values are POSIX shell-escaped (`"` `\"`, `\` `\\`, `$` `\$`,
+ *        backtick `` ` `` ``\` ``) before being interpolated into the
+ *        double-quoted bash -c string so an upstream stdout containing
+ *        `"` or `; rm -rf /` cannot break out of the quote context
+ *
+ * Closes the v1.2.0l.4 "aggregate-results hardcodes 19/7" bug: orch authors
+ * now write `${step.dispatch-commands.stdout}` instead of `echo "19"`.
+ */
+function expandStepTemplate(inputRef: string, task: Task): string {
+  const taskVars: Record<string, string> = {
     'task.prompt': extractPrompt(task),
     'task.task_id': task.task_id,
     'task.workflow_pack': task.workflow_pack,
+  };
+  // Phase 1: resolve ${task.*} via simple dict lookup (v1.2.0l.1 behavior).
+  let out = inputRef.replace(/\$\{([a-zA-Z0-9_.]+)\}/g, (_m, key: string) => taskVars[key] ?? `\${${key}}`);
+
+  // Phase 2: resolve ${step.<name>.<field>} by reading commander._stepTracker.
+  // We only touch the pattern if it's present — leaves every other var literal.
+  if (!/\$\{step\.[a-zA-Z0-9_-]+\.[a-zA-Z_]+\}/.test(out)) {
+    return out;
+  }
+  const steps = commander.getStepStatuses(task.task_id);
+  const stepByName = new Map<string, { stdout: string; host: string | null; wallMs: number | null; exit_code: number | null; status: string }>();
+  for (const s of steps) {
+    stepByName.set(s.name, {
+      stdout: s.stdout,
+      host: s.host,
+      wallMs: s.wallMs,
+      exit_code: typeof (s as unknown as { exit_code?: number }).exit_code === "number"
+        ? (s as unknown as { exit_code?: number }).exit_code ?? null
+        : null,
+      status: s.status,
+    });
+  }
+
+  out = out.replace(/\$\{step\.([a-zA-Z0-9_-]+)\.([a-zA-Z_]+)\}/g, (_m, name: string, field: string) => {
+    const step = stepByName.get(name);
+    if (!step) return `\${step.${name}.${field}}`; // unknown step → preserve literal
+    // Only resolve fields whose backing step is already completed; otherwise
+    // bash would see an empty value and silently produce wrong results.
+    if (step.status !== "completed" && step.status !== "failed") {
+      return `\${step.${name}.${field}}`;
+    }
+    let raw: string | null;
+    switch (field) {
+      case "stdout": raw = step.stdout; break;
+      case "host": raw = step.host; break;
+      case "wallMs": raw = step.wallMs != null ? String(step.wallMs) : null; break;
+      case "exit_code": raw = step.exit_code != null ? String(step.exit_code) : null; break;
+      default: return `\${step.${name}.${field}}`; // unknown field → preserve literal
+    }
+    if (raw === null || raw === undefined) return `\${step.${name}.${field}}`;
+    return shellEscape(raw);
   });
-  return enrichStep({ ...step, input_ref: interpolated });
+
+  return out;
+}
+
+/**
+ * v1.2.0l.5 NEW: POSIX shell double-quote escape.
+ *
+ * Inside a `"..."` bash string these chars need backslash-escaping so the
+ * expansion cannot break out of the quote or trigger command substitution:
+ *   `"`  → `\"`   (close-quote injection)
+ *   `\`  → `\\`   (existing escape char)
+ *   `$`  → `\$`   (variable interpolation)
+ *   `` ` ``  → `` \` ``   (command substitution)
+ * Newlines are kept as-is — bash double-quoted strings allow literal newlines.
+ */
+function shellEscape(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\$/g, "\\$")
+    .replace(/`/g, "\\`");
 }
 
 function expandTemplate(template: string, vars: Record<string, string>): string {
