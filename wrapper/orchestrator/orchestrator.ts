@@ -251,7 +251,11 @@ export function scoreMacBookWorker(baseScore: number, date: Date = new Date()): 
  * Returns real kernel response if reachable; stub otherwise.
  */
 export async function health(): Promise<HealthResponse> {
-  const url = `${kernelBaseUrl()}/health`;
+  // v1.2.0l FIX: kernel exposes /api/orch/healthz (FastAPI k8s convention,
+  // harness/server.py:225), not /health (REST convention). Wrapper was hitting
+  // 404, falling through to "kernel unreachable, returning stub" log spam —
+  // accumulated 88G of log lines on edge1/2/3 in 36h and filled disk.
+  const url = `${kernelBaseUrl()}/api/orch/healthz`;
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
