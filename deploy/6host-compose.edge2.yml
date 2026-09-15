@@ -36,6 +36,10 @@ services:
       # startWorkerHeartbeatSender() is inert and workers table stays empty.
       WORKER_HEARTBEAT_URL: "http://newvps.fish-harness.ts.net:4000"
       WORKER_HOST: "edge2.fish-harness.ts.net"
+      # v1.2.0l NEW: capability declaration (F24 capability-matched dispatch).
+      # worker.ts:218 autoRegister() parses this and stores in worker_pool.
+      # capabilities_json → LIKE-filtered dispatch (worker_pool.ts:179).
+      WORKER_CAPABILITIES: '["llm","subprocess","http"]'
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
       ORCHESTRATOR_CLASS: "orchestrator"
       DSH_PROFILE: "headless"
