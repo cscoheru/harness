@@ -9,6 +9,7 @@
   },
   "scripts": {
     "tsc": "tsc --noEmit",
+    "tsc:emit": "tsc",
     "check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -18,7 +19,8 @@
     "test:cancel:e2e": "RUN_CANCEL_6HOST=1 vitest run test/integration/cancel_propagation_6host.test.ts",
     "test:dispatch-race:e2e": "RUN_DISPATCH_RACE_CANCEL_E2E=1 vitest run test/integration/dispatch_race_cancel.test.ts",
     "test:coverage": "vitest run --coverage",
-    "build": "tsc"
+    "build:static": "rm -rf build/orchestrator/static && cp -R orchestrator/static build/orchestrator/static",
+    "build": "tsc && npm run build:static"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
