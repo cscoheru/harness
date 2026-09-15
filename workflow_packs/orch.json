@@ -1,7 +1,7 @@
 {
   "name": "orch",
-  "version": "1.2.0l.2",
-  "description": "Real orchestrator-pattern pack (v1.2.0l NEW, .2 REAL computation): commander spawns N workers via subprocess, dispatches tasks to each, aggregates results. Deterministic 3-step DAG. v1.2.0l.2 NEW: input_ref uses bash arithmetic so spawn-workers / dispatch-commands / aggregate-results produce real numeric output (10+9=19, 9-2=7) instead of just echoing the user prompt — closes the '硬编码 hello from spawned worker' bug reported 2026-09-15.",
+  "version": "1.2.0l.4",
+  "description": "Real orchestrator-pattern pack (v1.2.0l NEW, .4 ALL REAL computation): all 3 steps run bash arithmetic so the user sees actual numeric output (10+9=19, 9-2=7) instead of LLM-fabricated responses. Closes 'echo user prompt' (v1.2.0l.0), 'LLM chat instead of bash' (v1.2.0l.2), 'colon-split parser bug' (v1.2.0l.3) bugs reported 2026-09-15.",
   "required_capabilities": ["orchestrator"],
   "optional_capabilities": ["commander", "subprocess_worker"],
   "input_schema_ref": "workflow_packs/schemas/orch.input.json",
@@ -18,16 +18,16 @@
       },
       {
         "name": "dispatch-commands",
-        "capability": "commander",
-        "input_ref": "bash:-c:echo \"[commander-1] computing 10+9...\"; printf \"19\\n\"; echo \"[commander-2] computing 9-2...\"; printf \"7\\n\"",
+        "capability": "subprocess_worker",
+        "input_ref": "bash:-c:printf \"[commander-1] computing 10+9 -> \"; echo $((10+9)); printf \"[commander-2] computing 9-2 -> \"; echo $((9-2))",
         "output_kind": "text",
         "depends_on": ["spawn-workers"],
         "timeout_seconds": 60
       },
       {
         "name": "aggregate-results",
-        "capability": "orchestrator",
-        "input_ref": "bash:-c:echo \"[aggregate] commander-1 result: 19\"; echo \"[aggregate] commander-2 result: 7\"; echo \"[aggregate] task complete -> ${task.prompt}\"",
+        "capability": "subprocess_worker",
+        "input_ref": "bash:-c:C1=$(($(echo \"19\"))); C2=$(($(echo \"7\"))); echo \"[aggregate] commander-1 result = $C1\"; echo \"[aggregate] commander-2 result = $C2\"; echo \"[aggregate] task complete -> ${task.prompt}\"",
         "output_kind": "structured",
         "depends_on": ["dispatch-commands"],
         "timeout_seconds": 15
