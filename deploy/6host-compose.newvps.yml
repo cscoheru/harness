@@ -320,6 +320,13 @@ services:
       MINIMAX_API_KEY: "${MINIMAX_API_KEY}"
       ORCHESTRATOR_CLASS: "frontend"
       DSH_PROFILE: "headless"
+      # v1.2.0l.5 NEW: same /app/workflow_packs fix as wrapper-orchestrator
+      # (line ~184). Without this, loadManifest() falls back to
+      # dirname(import.meta.url)/../../workflow_packs = /app/wrapper/workflow_packs
+      # (nonexistent) → synthetic manifest → dsh path with LLM-freeform steps
+      # → fails to match orch.json default_plan. Set explicitly here so the
+      # pwa_server.ts dispatch path also picks up the deterministic 3-step DAG.
+      WORKFLOW_PACKS_DIR: "/app/workflow_packs"
     networks:
       - harness_net
     depends_on:
