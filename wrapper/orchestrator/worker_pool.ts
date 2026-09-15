@@ -100,6 +100,13 @@ export class SqliteWorkerPool implements WorkerPool {
     selectActive: Database.Statement;
     // v1.2.0e.1 NEW (per F41 host dedup): SELECT active worker for a host
     selectActiveByHost: Database.Statement;
+    // v1.2.0l NEW (per F24 capability routing): SELECT active worker filtered
+    // by capability JSON tag membership. `capabilities_json LIKE '%"capability":%'`
+    // matches when the JSON object declares the requested tag (e.g.
+    // `{"capability":"subprocess"}` matches capability="subprocess"). Order is
+    // last_heartbeat_at ASC + registered_at ASC + worker_id ASC (same
+    // round-robin discipline as selectActive) so 3+ workers don't tie.
+    selectActiveByCapability: Database.Statement;
     updateHeartbeat: Database.Statement;
     updateDrain: Database.Statement;
     updateStatus: Database.Statement;
@@ -161,6 +168,21 @@ export class SqliteWorkerPool implements WorkerPool {
         `SELECT worker_id FROM workers
           WHERE host = ? AND status = 'active'
           ORDER BY last_heartbeat_at DESC
+          LIMIT 1`,
+      ),
+      // v1.2.0l NEW: SELECT active worker filtered by capability tag. The
+      // LIKE pattern matches when the JSON contains `"<capability>":` (with
+      // surrounding JSON quoting). Search uses LIKE instead of JSON1 because
+      // SQLite was built without SQLITE_ENABLE_JSON (per §2.7 v1.2.0b audit
+      // — node:sqlite via better-sqlite3 ships with JSON1 but we keep the
+      // LIKE-based path portable to plain SQLite).
+      selectActiveByCapability: this.db.prepare(
+        `SELECT worker_id, host, capabilities_json, status,
+                last_heartbeat_at, registered_at, drained_at
+           FROM workers
+          WHERE status = 'active'
+            AND capabilities_json LIKE ?
+          ORDER BY last_heartbeat_at ASC, registered_at ASC, worker_id ASC
           LIMIT 1`,
       ),
       updateHeartbeat: this.db.prepare(
@@ -309,9 +331,58 @@ export class SqliteWorkerPool implements WorkerPool {
     return row?.worker_id;
   }
 
-  async dispatch(task_id: string): Promise<DispatchResult> {
+  async dispatch(task_id: string, capability?: string): Promise<DispatchResult> {
     if (!task_id || typeof task_id !== "string") {
       throw new Error("worker_pool.dispatch: task_id must be non-empty string");
+    }
+
+    // v1.2.0l NEW (per F24 capability routing): when a capability tag is
+    // supplied, filter active workers to those whose capabilities_json
+    // declares that tag. Falls back to any-active when no capability match
+    // exists so existing single-class deployments keep working.
+    if (typeof capability === "string" && capability.length > 0) {
+      // LIKE pattern: match JSON object with the tag as a key. We accept
+      // either the bare key `"subprocess":` (capability={"subprocess":...})
+      // or the array form `"subprocess":[` (capability=["subprocess",...]).
+      // Both patterns are checked in a single LIKE with two wildcards.
+      const pattern = `%"${capability}"%`;
+      const capRow = this.stmts.selectActiveByCapability.get(pattern) as
+        | {
+            worker_id: string;
+            host: string;
+            capabilities_json: string;
+            status: string;
+            last_heartbeat_at: number;
+            registered_at: number;
+            drained_at: number | null;
+          }
+        | undefined;
+      if (capRow) {
+        // v1.2.0l: round-robin across matching workers. The
+        // ORDER BY last_heartbeat_at ASC clause picks the worker with the
+        // OLDEST heartbeat first; after we return, the caller is expected to
+        // invoke heartbeat() on the chosen worker (which all callers do via
+        // the post-dispatch worker.heartbeat() contract) so subsequent
+        // dispatches naturally cycle through the matching pool. We also
+        // bump the heartbeat here as a defense-in-depth measure for callers
+        // that skip the post-dispatch heartbeat. Uses the monotonic
+        // unixNowMillis() (not raw Date.now()) so the bump always sorts the
+        // chosen worker to the back of the round-robin queue.
+        this.stmts.updateHeartbeat.run(unixNowMillis(), capRow.worker_id);
+        return {
+          worker_id: capRow.worker_id,
+          strategy: "capability_match",
+          task_id,
+          dispatched_at: new Date().toISOString(),
+        };
+      }
+      // No capability match — log + fall through to round-robin any-active.
+      // This preserves graceful degradation: an orchestrator that asks for
+      // a "subprocess" capability can still route to a worker registered
+      // with a different capability set when no dedicated match exists.
+      console.warn(
+        `[worker_pool] dispatch(${task_id}) — no active worker matches capability='${capability}'; falling back to round_robin any-active`,
+      );
     }
 
     const row = this.stmts.selectActive.get() as

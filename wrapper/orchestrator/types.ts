@@ -140,6 +140,11 @@ export interface WorkerPool {
   /** v1.2.0e.1 NEW: find existing active worker for a host (host dedup helper). */
   findActiveByHost(host: string): string | undefined;
   dispatch(task_id: string): Promise<DispatchResult>;
+  /** v1.2.0l NEW: capability-aware dispatch. When `capability` is provided,
+   *  only workers whose capabilities_json declares a matching tag are
+   *  candidates (round-robin among matches). Falls back to any-active worker
+   *  when no capability match exists. */
+  dispatch(task_id: string, capability?: string): Promise<DispatchResult>;
   heartbeat(worker_id: string): Promise<string>;
   drain(worker_id: string): Promise<string>;
   reap_stale(now_iso: string, threshold_seconds?: number): Promise<number>;
@@ -263,7 +268,7 @@ export interface ArtifactStore {
 
 // ─── Execution driver ────────────────────────────────────────────────────────
 
-export type DriverKind = "codex_sdk" | "codex_app_server" | "codex_exec";
+export type DriverKind = "codex_sdk" | "codex_app_server" | "codex_exec" | "subprocess";
 
 export type DriverEventKind =
   | "driver.handle" // v1.2.0j+.12+ D12 NEW: yields RunHandle so orchestrator can call workerModule.interrupt() — 0 callers before this cycle per L46 audit
@@ -335,6 +340,11 @@ export interface PackManifest {
   optional_capabilities: readonly string[];
   input_schema_ref: string;
   output_kind: string;
+  /** v1.2.0l NEW: optional deterministic step DAG used when dsh plan generation
+   *  is unavailable. When present, heuristicPlan() emits these steps directly
+   *  instead of a synthetic 1-step plan. Lets ops ship a multi-step pack
+   *  without depending on LLM-freeform output. */
+  default_plan?: PackPlan;
 }
 
 export interface PackStep {
@@ -473,6 +483,28 @@ export interface StatusResponse {
   result?: string;
   error?: string;
   wallMs?: number;
+  /** v1.2.0l NEW: per-step status for DAG visualization. Read from
+   *  commander._stepTracker (in-memory); SSE pushes live updates. */
+  steps?: PlanStepStatus[];
+  /** v1.2.0l NEW: distinct hosts the task touched. Useful for verifying
+   *  cross-host routing in PWA DAG. */
+  hosts?: string[];
+}
+
+/** v1.2.0l NEW: per-step status snapshot for PWA. Augments PlanStep with
+ *  execution context (worker_id, host, stdout buffer, wallMs) that the
+ *  in-memory tracker accumulates as the step runs. */
+export interface PlanStepStatus {
+  name: string;
+  capability: string;
+  status: TaskStatus;
+  worker_id: string | null;
+  host: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  stdout: string;
+  error: string | null;
+  wallMs: number | null;
 }
 
 // ─── v1.2.0d NEW: Queue backpressure types (per D8 + F26) ──────────────────

@@ -162,6 +162,7 @@ const handleStatusTest: RouteHandler = (_req, res) => {
 registerApiRoute('get', '/api/v1/status/test', handleStatusTest);
 
 // GET /api/v1/status/:task_id — query task status (in-memory store + kernel fallback)
+// v1.2.0l NEW: response now carries `steps[]` + `hosts[]` for PWA DAG viewer.
 const handleStatusById: RouteHandler = async (req, res) => {
   try {
     const taskId = req.params['task_id'] as string | undefined;
@@ -180,6 +181,70 @@ const handleStatusById: RouteHandler = async (req, res) => {
   }
 };
 registerApiRoute('get', '/api/v1/status/:task_id', handleStatusById);
+
+// GET /api/v1/status/:task_id/stream — v1.2.0l NEW: Server-Sent Events stream
+// of per-step status updates for a single task. PWA opens an EventSource on
+// this URL after dispatching; the server pushes `step_update` events as
+// commander._stepTracker is mutated and a final `task_completed` event when
+// dispatch() returns. Backed by the module-scoped EventEmitter in
+// commander.ts (_getStepEventEmitter).
+const handleStatusStream: RouteHandler = async (req, res) => {
+  const taskId = req.params['task_id'] as string | undefined;
+  if (!taskId) {
+    res.status(400).json({ status: 'error', error: 'task_id required' });
+    return;
+  }
+  // SSE preamble
+  res.set({
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no", // disable nginx buffering for live stream
+  });
+  res.flushHeaders?.();
+
+  // Subscribe to per-task events from commander._getStepEventEmitter()
+  const { _getStepEventEmitter } = await import('./orchestrator/commander.js');
+  const emitter = _getStepEventEmitter();
+  const channel = `task:${taskId}`;
+
+  const send = (event: string, data: Record<string, unknown>): void => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  // Heartbeat to keep proxies from closing idle connections.
+  const heartbeat = setInterval(() => {
+    res.write(": heartbeat\n\n");
+  }, 15000);
+
+  // Initial snapshot so the client has the current state on connect.
+  const initial = await orchestrator.getTaskStatus(taskId);
+  send("snapshot", {
+    status: initial.status,
+    steps: initial.steps ?? [],
+    hosts: initial.hosts ?? [],
+    ts: new Date().toISOString(),
+  });
+
+  const onUpdate = (payload: Record<string, unknown>) => {
+    send(payload["kind"] === "task_completed" ? "task_completed" : "step_update", payload);
+    if (payload["kind"] === "task_completed") {
+      // Close the stream after terminal event so the EventSource can reconnect.
+      clearInterval(heartbeat);
+      emitter.off(channel, onUpdate);
+      res.end();
+    }
+  };
+  emitter.on(channel, onUpdate);
+
+  // Close handling
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    emitter.off(channel, onUpdate);
+  });
+};
+registerApiRoute('get', '/api/v1/status/:task_id/stream', handleStatusStream);
 
 // POST /api/v1/tasks/:task_id/cancel — v1.2.0j+.9+ NEW per §6 forward scope (d):
 // Wire orchestrator.cancel() to HTTP layer. Triggers F3+ chain: SQLite markCancelled

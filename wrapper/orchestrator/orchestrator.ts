@@ -20,7 +20,9 @@
 import type {
   OrchestrationResult,
   PlanPlan,
+  PlanStepStatus,
   Task,
+  TaskStatus,
   HealthResponse,
   DriverEvent,
   RunHandle,
@@ -42,6 +44,33 @@ import {
   workerCount,
   startMetricsSampling,
 } from "./metrics.js";
+import { SpawnDshDriver, SubprocessDshDriver } from "./execution_driver.js";
+import type { ExecutionDriver } from "./types.js";
+import {
+  appendStepStdout,
+  emitStepUpdate,
+  setStepHost,
+  getStepStatuses,
+} from "./commander.js";
+
+// ─── Driver registry (v1.2.0l NEW: capability → ExecutionDriver) ─────────────
+// Maps a step's declared capability to the ExecutionDriver implementation
+// that runs it. Keeps the dispatch loop in orchestrator.dispatch() driver-
+// agnostic — future drivers (e.g. "docker_exec" for sandboxed subprocess,
+// "http" for forwarding to a remote API) drop in by extending this map.
+//
+// Capability routing rules:
+//   - "subprocess*" → SubprocessDshDriver (real child_process.spawn)
+//   - anything else → SpawnDshDriver (LLM via routedDsh/minimaxInvoke, existing path)
+//
+// Return type is a constructor that produces an ExecutionDriver (rather
+// than the SpawnDshDriver concrete class) so SubprocessDshDriver can be
+// returned without TypeScript balking about constructor signature mismatch.
+
+function pickDriverForCapability(capability: string): new () => ExecutionDriver {
+  if (capability.startsWith("subprocess")) return SubprocessDshDriver as unknown as new () => ExecutionDriver;
+  return SpawnDshDriver as unknown as new () => ExecutionDriver;
+}
 
 // ─── Config ────────────────────────────────────────────────────────────────────
 
@@ -366,11 +395,18 @@ export async function dispatch(
   }
 
   // ── v1.2.0a: Dispatch each planned step (stub worker; v1.2.0b real) ──────
+  // v1.2.0l: capability → driver_kind dispatch + per-step stdout streaming
+  // pushed to commander.appendStepStdout() for SSE-driven PWA DAG viewer.
+  let realStepCount = 0;
   if (planPlan && planPlan.steps.length > 0) {
     for (const step of planPlan.steps) {
       try {
-        const dispatchRes = await commander.dispatchStep(taskId, step.name);
-        console.log(`[orchestrator] dispatchStep ${step.name} → worker=${dispatchRes.worker_id}`);
+        // v1.2.0l: pass step capability to dispatchStep so worker_pool
+        // routes to a capability-matching worker (per F24). Existing single-
+        // capability deploys keep working because worker_pool falls back
+        // to any-active when no match exists.
+        const dispatchRes = await commander.dispatchStep(taskId, step.name, step.capability);
+        console.log(`[orchestrator] dispatchStep ${step.name} (cap=${step.capability}) → worker=${dispatchRes.worker_id}`);
 
         // v1.2.0k.6 NEW: look up the worker's host from worker_pool to route
         // the execution to that specific host. worker_id came from
@@ -382,9 +418,18 @@ export async function dispatch(
           const workerInfo = getDefaultWorkerPool().getWorker(dispatchRes.worker_id);
           if (workerInfo?.host) {
             hostHint = workerInfo.host;
+            // v1.2.0l: tag the step tracker with the host so PWA can render
+            // which physical machine ran each step. Best-effort — if no
+            // step is tracked, silently no-op.
+            setStepHost(taskId, step.name, hostHint);
             console.log(`[orchestrator] routing step ${step.name} to host=${hostHint}`);
           }
         }
+
+        // v1.2.0l: pick the driver for this step based on its capability.
+        // "subprocess" capabilities get real child_process.spawn; everything
+        // else falls through to the LLM path (routedDsh + minimaxInvoke).
+        const DriverClass = pickDriverForCapability(step.capability);
 
         // v1.2.0b: actually run the step on the claimed worker via
         // ExecutionDriver. Worker.run() yields a DriverEvent stream; we
@@ -392,13 +437,19 @@ export async function dispatch(
         // (running → completed/failed) so aggregateResults() below sees
         // the correct per-step status.
         const attemptId = `atp-${taskId}-${step.name}`;
-        const runRequest = {
+        // v1.2.0l: for subprocess driver, surface step.name + capability as
+        // runRequest metadata so SubprocessDshDriver knows what to spawn.
+        // Orchestrator doesn't know the actual command — workflow_pack
+        // steps can declare `command` + `args` in metadata, which orchestrator
+        // passes through. Today orch.json doesn't declare these; steps fall
+        // back to a default echo (see Step 1.8 below for PWA-side injection).
+        const runRequest: import("./types.js").RunRequest = {
           attempt_id: attemptId,
           task_id: taskId,
           workflow_pack: task.workflow_pack,
           workflow_version: task.workflow_version,
           input_blob_id: task.input_blob_id,
-          capability_profile: workerModule.capability(),
+          capability_profile: new DriverClass().capability(),
           lease_token: `lease-${taskId}`,
           fence_version: 1,
           metadata: {
@@ -406,6 +457,14 @@ export async function dispatch(
             // v1.2.0k.6 NEW: host_hint from worker_pool so execution routes
             // to the same host that owns the worker (cross-host orchestration)
             host_hint: hostHint,
+            // v1.2.0l NEW: capability from plan step so driver_kind dispatch
+            // inside SubprocessDshDriver + SpawnDshDriver can branch.
+            step_capability: step.capability,
+            // Subprocess driver needs command + args. Pass through from
+            // step.input_ref when it parses as "echo:hello world" syntax
+            // (PWA-side path); otherwise leave undefined so driver errors
+            // loudly instead of silently defaulting to a dangerous command.
+            ...parseStepSubprocessInput(step),
           },
           // v1.2.0j+.6+ (F3+): cascade cancel signal into driver run loop.
           // When orchestrator.cancel() calls cancelCtrl.abort(), this signal
@@ -414,7 +473,7 @@ export async function dispatch(
           signal: cancelCtrl.signal,
         };
         let lastEvent: DriverEvent | null = null;
-        for await (const ev of workerModule.run(runRequest)) {
+        for await (const ev of new DriverClass().run(runRequest)) {
           // v1.2.0j+.12+ D12 NEW: capture handle on first event of stream.
           // toRunHandle() (execution_driver.ts:342) produces the public shape;
           // ev.payload["handle"] is the RunHandle captured for interrupt().
@@ -422,12 +481,26 @@ export async function dispatch(
             _activeHandles.set(taskId, ev.payload["handle"] as RunHandle);
           }
           lastEvent = ev;
+          // v1.2.0l: forward driver.output_chunk to commander tracker so
+          // SSE → PWA can stream stdout live. Without this, the PWA only
+          // sees the full stdout once the step completes (driver.finished).
+          if (ev.kind === "driver.output_chunk") {
+            const chunk = String(ev.payload?.["chunk"] ?? "");
+            if (chunk.length > 0) {
+              appendStepStdout(taskId, step.name, chunk);
+            }
+          }
           if (ev.kind === "driver.failed") {
             commander._recordStepFailure(
               taskId,
               step.name,
               String(ev.payload?.error ?? "driver.failed"),
             );
+            emitStepUpdate(taskId, step.name, "step_update", {
+              status: "failed",
+              host: hostHint ?? null,
+              error: String(ev.payload?.error ?? "driver.failed"),
+            });
             break;
           }
           if (ev.kind === "driver.interrupted") {
@@ -436,6 +509,11 @@ export async function dispatch(
               step.name,
               `interrupted: ${String(ev.payload?.reason ?? "unknown")}`,
             );
+            emitStepUpdate(taskId, step.name, "step_update", {
+              status: "failed",
+              host: hostHint ?? null,
+              error: `interrupted: ${String(ev.payload?.reason ?? "unknown")}`,
+            });
             break;
           }
         }
@@ -449,29 +527,60 @@ export async function dispatch(
             exit_code: Number(lastEvent.payload?.exit_code ?? 0),
             wall_ms: Number(lastEvent.payload?.wall_ms ?? 0),
           });
+          emitStepUpdate(taskId, step.name, "step_update", {
+            status: "completed",
+            host: hostHint ?? null,
+            wall_ms: Number(lastEvent.payload?.wall_ms ?? 0),
+          });
+          realStepCount += 1;
         }
       } catch (err) {
         console.warn(`[orchestrator] dispatchStep ${step.name} failed: ${err}`);
+        emitStepUpdate(taskId, step.name, "step_update", {
+          status: "failed",
+          error: String(err),
+        });
       }
     }
   }
 
   // ── Backward-compat: kernel invoke + dsh for real result (PWA / v1.0) ────
+  // v1.2.0l NEW: when real plan steps executed (realStepCount > 0), skip the
+  // backward-compat kernel/dsh double-invoke path. The plan step results are
+  // already in commander._stepTracker + emitted via SSE; running dsh again
+  // would produce a competing stdout (the "Python 脚本" user saw on 2026-09-15
+  // was exactly this — fallback ran after a no-op plan and produced an
+  // LLM-freeform chat answer). When plan had 0 real steps (heuristic 0-match
+  // case or all failed), keep the fallback path so PWA still gets an answer.
   let dshResult: DshResponse;
-  try {
-    // Attempt kernel HTTP invoke (async fire for v1.0 compat).
-    // v1.2.0k.3 P0: kernelInvoke now requires tenantId; dispatch has
-    // no per-request tenant context, so use a sentinel. The wrapper
-    // never lists kernel tasks for this sentinel tenant (X-Tenant-ID
-    // from real HTTP callers routes through handleListTasks → kernel).
-    const kernelRes = await kernelInvoke(prompt, modelClass, "wrapper-default");
-    console.log(`[orchestrator] kernel invoke OK task_id=${kernelRes.task_id} trace=${kernelRes.trace_id ?? "n/a"}`);
-    // Also run dsh synchronously to return a real result to PWA
-    dshResult = await runDsh(prompt, modelClass);
-  } catch {
-    // Kernel unreachable — invoke dsh directly
-    console.log(`[orchestrator] dispatch(${taskId}) — using direct dsh fallback`);
-    dshResult = await runDsh(prompt, modelClass);
+  if (realStepCount === 0) {
+    try {
+      const kernelRes = await kernelInvoke(prompt, modelClass, "wrapper-default");
+      console.log(`[orchestrator] kernel invoke OK task_id=${kernelRes.task_id} trace=${kernelRes.trace_id ?? "n/a"}`);
+      dshResult = await runDsh(prompt, modelClass);
+    } catch {
+      console.log(`[orchestrator] dispatch(${taskId}) — using direct dsh fallback`);
+      dshResult = await runDsh(prompt, modelClass);
+    }
+  } else {
+    // Build a synthetic DshResponse from aggregated plan stdout so the rest
+    // of the pipeline (safeMarkCompleted + response shape) doesn't need to
+    // branch on "ran plan vs ran dsh". Concatenate step stdout with
+    // structured headers so PWA can still see which step produced which line.
+    const stepStatuses = commander.getStepStatuses(taskId);
+    const aggregatedStdout = stepStatuses
+      .map((s) => `[${s.name} @ ${s.host ?? "unknown"}]\n${s.stdout}`)
+      .join("\n\n");
+    dshResult = {
+      stdout: aggregatedStdout,
+      stderr: "",
+      exitCode: 0,
+      wallMs: stepStatuses.reduce((acc, s) => acc + (s.wallMs ?? 0), 0),
+      traceId: `plan-${taskId}`,
+      tokenUsage: undefined,
+      denialReason: undefined,
+    };
+    console.log(`[orchestrator] dispatch(${taskId}) — using plan-aggregated stdout (realStepCount=${realStepCount})`);
   }
 
   // Update task state based on dsh result — F2 persistence via SQLite store.
@@ -548,6 +657,13 @@ export async function dispatch(
   // ── v1.2.0d F26: reclaim SQLite pending → in-memory hot path ──────────────
   reclaimAndUpdateMetrics();
 
+  // v1.2.0l NEW: surface per-step status + distinct hosts in the dispatch
+  // response so /api/pwa/status (poll) and /api/pwa/stream (SSE) can drive
+  // the PWA DAG viewer. Computed from commander._stepTracker at terminal.
+  const stepStatuses = getStepStatuses(taskId);
+  const distinctHosts = Array.from(new Set(stepStatuses.map((s) => s.host).filter((h): h is string => typeof h === "string")));
+  emitTerminalTaskEvent(taskId, finalEntry?.status ?? "failed", dshResult.wallMs);
+
   return {
     task_id: taskId,
     status: finalEntry?.status ?? "failed",
@@ -557,6 +673,9 @@ export async function dispatch(
       trace_id: `dsh-${taskId}`,
       plan_steps: planStepsCount,
       plan_source: (planPlan?.plan_metadata['source'] as string) ?? "none",
+      // v1.2.0l NEW: parallel dual view data
+      steps: stepStatuses,
+      hosts: distinctHosts,
     },
     error: finalEntry?.error ?? null,
   };
@@ -616,11 +735,26 @@ export async function getTaskStatus(taskId: string): Promise<{
   status: "pending" | "dispatched" | "running" | "completed" | "failed" | "cancelled";
   result?: string;
   error?: string;
+  steps?: PlanStepStatus[];
+  hosts?: string[];
 }> {
+  // v1.2.0l NEW: per-step status from in-memory tracker is the authoritative
+  // source for steps/hosts during the active task lifetime. SQLite/Kernel
+  // fallback below only carries the task-level status + result, not the
+  // per-step breakdown. This is fine because:
+  //   - Active tasks (status pending/running): in-memory tracker has the steps
+  //   - Terminal tasks (status completed/failed/cancelled): step statuses
+  //     have already been written to commander._stepResult/_recordStepFailure,
+  //     so the tracker still has them until the task is evicted.
+  // Future v1.2.0m+ scope: persist step statuses to SQLite so they survive
+  // server restart; today an in-process restart loses per-step detail.
+  const stepStatuses = getStepStatuses(taskId);
+  const distinctHosts = Array.from(new Set(stepStatuses.map((s) => s.host).filter((h): h is string => typeof h === "string")));
+
   // Try kernel status endpoint first
   const kernelStatus_ = await kernelStatus(taskId);
   if (kernelStatus_) {
-    return kernelStatus_;
+    return { ...kernelStatus_, steps: stepStatuses, hosts: distinctHosts };
   }
 
   // Fall back to SQLite-backed task store (F2 — survives process restart)
@@ -640,6 +774,8 @@ export async function getTaskStatus(taskId: string): Promise<{
       status: entry.status,
       result: resultStr,
       error: entry.error ?? undefined,
+      steps: stepStatuses,
+      hosts: distinctHosts,
     };
   }
 
@@ -647,6 +783,8 @@ export async function getTaskStatus(taskId: string): Promise<{
     task_id: taskId,
     status: "failed",
     error: "task not found",
+    steps: stepStatuses,
+    hosts: distinctHosts,
   };
 }
 
@@ -762,4 +900,44 @@ export function createTask(params: {
     // Attach prompt to metadata for extractPrompt()
     ...({ metadata: { prompt: params.prompt } } as unknown as Partial<Task>),
   } as Task;
+}
+
+// ─── v1.2.0l NEW: subprocess metadata pass-through helper ────────────────────
+
+/**
+ * Parse a PlanStep's input_ref to extract a subprocess command + args.
+ *
+ * Supported syntax (lightweight to keep orch.json free-form friendly):
+ *   "echo:hello world" → { command: "echo", args: ["hello world"] }
+ *   "/bin/sh:-c:echo hello" → { command: "/bin/sh", args: ["-c", "echo hello"] }
+ *   "echo" (no colon) → { command: "echo", args: [] }
+ *
+ * When input_ref doesn't parse as a command, returns no command/args — the
+ * SubprocessDshDriver errors loudly ("command required") instead of spawning
+ * a dangerous default. This is the safe failure mode.
+ */
+function parseStepSubprocessInput(step: { input_ref: string }): {
+  command?: string;
+  args?: string[];
+} {
+  const inputRef = step.input_ref ?? "";
+  if (!inputRef.includes(":")) {
+    // Single token — treat as bare command, no args.
+    return inputRef.length > 0 ? { command: inputRef, args: [] } : {};
+  }
+  const parts = inputRef.split(":");
+  const [command, ...rest] = parts;
+  return { command, args: rest };
+}
+
+// ─── v1.2.0l NEW: terminal event emission for SSE ─────────────────────────────
+
+/**
+ * Emit a terminal task event so SSE clients (PWA DAG viewer) know the task is
+ * done. Called at the end of dispatch() so /api/pwa/stream/:task_id emits a
+ * `task_completed` or `task_failed` event in addition to the per-step events
+ * already emitted during the plan loop.
+ */
+function emitTerminalTaskEvent(taskId: string, status: TaskStatus, wallMs: number): void {
+  emitStepUpdate(taskId, "", "task_completed", { status, wallMs });
 }

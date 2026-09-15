@@ -26,6 +26,7 @@ import type {
   OrchestrationResult,
   PlanPlan,
   PlanStep,
+  PlanStepStatus,
   Task,
   TaskStatus,
 } from "./types.js";
@@ -35,6 +36,7 @@ import {
   getDefaultWorkerPool,
   NoActiveWorkerError,
 } from "./worker_pool.js";
+import { EventEmitter } from "node:events";
 
 // ─── Config ────────────────────────────────────────────────────────────────────
 
@@ -105,19 +107,22 @@ export async function planStep(task: Task): Promise<PlanPlan> {
 export async function dispatchStep(
   taskId: string,
   stepName: string,
+  capability?: string,
 ): Promise<{ step: string; status: TaskStatus; worker_id: string; dispatched_at: string }> {
   const steps = getSteps(taskId);
   const step = steps?.find((s) => s.name === stepName);
 
-  // Claim a worker via WorkerPool (per ADR 0007 round-robin dispatch).
-  // If step.worker_id was set upstream (e.g. by orchestrator override),
-  // use that; otherwise ask the pool.
+  // v1.2.0l NEW (per F24 capability routing): pass the step's declared
+  // capability down to worker_pool.dispatch() so a step tagged
+  // capability="subprocess" lands on a worker that registered the
+  // subprocess capability. Falls back to any-active worker when no
+  // capability match exists (see worker_pool.ts:320-359 dispatch()).
   let workerId: string;
   try {
     if (step?.worker_id) {
       workerId = step.worker_id;
     } else {
-      const poolResult = await getDefaultWorkerPool().dispatch(taskId);
+      const poolResult = await getDefaultWorkerPool().dispatch(taskId, capability);
       workerId = poolResult.worker_id;
     }
   } catch (err) {
@@ -142,7 +147,7 @@ export async function dispatchStep(
     started_at: dispatchedAt,
   });
 
-  console.log(`[commander] dispatchStep(${taskId}, ${stepName}) — dispatched to ${workerId}`);
+  console.log(`[commander] dispatchStep(${taskId}, ${stepName}${capability ? ` capability=${capability}` : ""}) — dispatched to ${workerId}`);
 
   return {
     step: stepName,
@@ -247,6 +252,101 @@ export function _recordStepFailure(taskId: string, stepName: string, error: stri
     finished_at: new Date().toISOString(),
     error,
   });
+}
+
+// ─── v1.2.0l NEW: per-step status snapshot for PWA DAG + SSE ────────────────
+
+/**
+ * Return the per-step status snapshot for a task. Used by
+ * (a) GET /api/pwa/status/:task_id to render the DAG view, and
+ * (b) SSE event payloads so the frontend can update node status icons live.
+ *
+ * Includes host, stdout buffer, and wallMs accumulated during execution so
+ * the PWA can show "worker_id @ host took Xs and produced this stdout" without
+ * re-fetching kernel/DB state on every render.
+ */
+export function getStepStatuses(taskId: string): PlanStepStatus[] {
+  const steps = _stepTracker.get(taskId);
+  if (!steps) return [];
+  return steps.map((s) => {
+    const result = (s.result ?? {}) as Record<string, unknown>;
+    const wallMs = typeof result["wall_ms"] === "number" ? (result["wall_ms"] as number) : null;
+    const stdout = typeof result["stdout"] === "string" ? (result["stdout"] as string) : "";
+    // host comes from a side-channel patch via setStepHost(); PlanStep doesn't
+    // carry it natively to avoid bloating the persisted step shape.
+    const host = (s as unknown as { _host?: string })._host ?? null;
+    return {
+      name: s.name,
+      capability: s.capability,
+      status: s.status,
+      worker_id: s.worker_id,
+      host,
+      started_at: s.started_at,
+      finished_at: s.finished_at,
+      stdout,
+      error: s.error,
+      wallMs,
+    };
+  });
+}
+
+/**
+ * Side-channel helper: tag a step with the host that ran it. Called by
+ * orchestrator.dispatch() after worker_pool lookup. Avoids extending the
+ * public PlanStep type (which is loaded from JSON manifest files) with a
+ * host field that no manifest would populate.
+ */
+export function setStepHost(taskId: string, stepName: string, host: string): boolean {
+  const steps = _stepTracker.get(taskId);
+  if (!steps) return false;
+  const idx = steps.findIndex((s) => s.name === stepName);
+  if (idx < 0) return false;
+  (steps[idx] as unknown as { _host?: string })._host = host;
+  return true;
+}
+
+/**
+ * Append a stdout chunk to a step's accumulated stdout buffer. Emits an
+ * internal "step_update" event via the SSE event bus (see server.ts) so the
+ * PWA can stream stdout live without polling.
+ *
+ * Bounded at ~256KB per step to keep in-memory tracker bounded; older chunks
+ * are silently dropped beyond the cap (PWA reads full stdout from /api/pwa/status
+ * final result once the step completes).
+ */
+const STEP_STDOUT_CAP = 256 * 1024;
+export function appendStepStdout(taskId: string, stepName: string, chunk: string): boolean {
+  const steps = _stepTracker.get(taskId);
+  if (!steps) return false;
+  const idx = steps.findIndex((s) => s.name === stepName);
+  if (idx < 0) return false;
+  const existing = steps[idx]!.result as Record<string, unknown> | null;
+  const prevStdout = typeof existing?.["stdout"] === "string" ? (existing["stdout"] as string) : "";
+  const merged = (prevStdout + chunk).slice(-STEP_STDOUT_CAP);
+  steps[idx] = {
+    ...steps[idx]!,
+    result: { ...(existing ?? {}), stdout: merged },
+  };
+  emitStepUpdate(taskId, stepName, "stdout_chunk", { chunk });
+  return true;
+}
+
+/** Internal SSE event bus — drained by server.ts /api/pwa/stream/:task_id.
+ *  Module-scoped EventEmitter keeps step updates in-process; cross-instance
+ *  fanout via Redis pub/sub is deferred to v1.2.0m+. */
+const _stepEvents = new EventEmitter();
+
+export function _getStepEventEmitter(): EventEmitter {
+  return _stepEvents;
+}
+
+export function emitStepUpdate(
+  taskId: string,
+  stepName: string,
+  kind: string,
+  data: Record<string, unknown>,
+): void {
+  _stepEvents.emit(`task:${taskId}`, { step: stepName, kind, ...data, ts: new Date().toISOString() });
 }
 
 /**

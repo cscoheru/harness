@@ -251,6 +251,24 @@ function enrichStep(step: PackStep): PlanStep {
 }
 
 function heuristicPlan(task: Task, manifest: PackManifest): PlanPlan {
+  // v1.2.0l NEW (per F24 deterministic pack): if the pack manifest declares a
+  // default_plan.steps array, emit those steps directly (deterministic,
+  // LLM-freeform-free) instead of a synthetic 1-step plan. This makes
+  // orch.json a real 3-step DAG (spawn-workers → dispatch-commands →
+  // aggregate-results) regardless of dsh availability, closing the
+  // "freeform 3 step names" gap that user reported on 2026-09-15.
+  if (manifest.default_plan && Array.isArray(manifest.default_plan.steps) && manifest.default_plan.steps.length > 0) {
+    return {
+      steps: manifest.default_plan.steps.map(enrichStep),
+      plan_metadata: {
+        source: 'manifest',
+        manifest_name: manifest.name,
+        manifest_version: manifest.version,
+        deterministic: true,
+        step_count: manifest.default_plan.steps.length,
+      },
+    };
+  }
   const stepName = task.workflow_pack === 'default' ? 'execute-default' : `execute-${task.workflow_pack}`;
   return {
     steps: [{

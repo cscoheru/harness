@@ -1,0 +1,37 @@
+{
+  "name": "orch",
+  "version": "1.2.0l.0",
+  "description": "Real orchestrator-pattern pack (v1.2.0l NEW): commander spawns N workers via subprocess, dispatches tasks to each, aggregates results. Deterministic 3-step DAG — closes the 'LLM-freeform step names' gap reported 2026-09-15.",
+  "required_capabilities": ["orchestrator"],
+  "optional_capabilities": ["commander", "subprocess_worker"],
+  "input_schema_ref": "workflow_packs/schemas/orch.input.json",
+  "output_kind": "structured",
+  "default_plan": {
+    "steps": [
+      {
+        "name": "spawn-workers",
+        "capability": "subprocess_worker",
+        "input_ref": "count",
+        "output_kind": "structured",
+        "depends_on": [],
+        "timeout_seconds": 30
+      },
+      {
+        "name": "dispatch-commands",
+        "capability": "commander",
+        "input_ref": "tasks",
+        "output_kind": "text",
+        "depends_on": ["spawn-workers"],
+        "timeout_seconds": 60
+      },
+      {
+        "name": "aggregate-results",
+        "capability": "orchestrator",
+        "input_ref": "results",
+        "output_kind": "structured",
+        "depends_on": ["dispatch-commands"],
+        "timeout_seconds": 15
+      }
+    ]
+  }
+}

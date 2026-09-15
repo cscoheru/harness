@@ -27,6 +27,7 @@
 
 import { randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
+import { spawn } from "node:child_process";
 import { minimaxInvoke } from "../dsh/minimax_client.js";
 import type {
   DriverCapabilities,
@@ -363,6 +364,272 @@ export class SpawnDshDriver implements ExecutionDriver {
       };
     } finally {
       handleRegistry.delete(handle.cancel_token);
+    }
+  }
+}
+
+// ─── SubprocessDshDriver (v1.2.0l NEW) ───────────────────────────────────────
+
+/**
+ * v1.2.0l NEW: real subprocess execution driver. Closes the "no real spawn
+ * path" gap in execution_driver.ts (v1.2.0d D16 removed spawn). Steps with
+ * capability="subprocess_worker" route here and run an actual child process.
+ *
+ * Security note (R2 hygiene): subprocess spawn is unbounded today. Production
+ * hardening (chroot/nsjail) is deferred to v1.2.0m+. For now, drivers run
+ * with the wrapper process's privileges — ops controls this by limiting what
+ * manifest steps declare (workflow_packs/orch.json gates which steps are
+ * reachable).
+ *
+ * RunRequest.metadata shape for subprocess:
+ *   { command: string, args?: string[], env?: Record<string,string>, cwd?: string }
+ */
+export class SubprocessDshDriver implements ExecutionDriver {
+  /** Map cancel_token → child process for interrupt() to kill. */
+  private static readonly _children = new Map<string, import("node:child_process").ChildProcess>();
+
+  static registerChild(cancelToken: string, child: import("node:child_process").ChildProcess): void {
+    this._children.set(cancelToken, child);
+  }
+
+  static unregisterChild(cancelToken: string): void {
+    this._children.delete(cancelToken);
+  }
+
+  capability(): DriverCapabilities {
+    return {
+      driver_kind: "subprocess",
+      evidence_uri: "spec/capabilities/subprocess_worker.json",
+      max_concurrent_attempts: 4,
+      supports_streaming: true,
+      supports_interrupt: true,
+      supports_heartbeat: true,
+      supports_tool_gateway: false,
+      notes:
+        "v1.2.0l NEW: real subprocess execution via child_process.spawn. " +
+        "RunRequest.metadata.command + args required. No sandboxing (P2 follow-up).",
+    };
+  }
+
+  async *run(request: RunRequest): AsyncIterable<DriverEvent> {
+    const handle = await this.start(request);
+    yield* this.streamEvents(handle, request);
+  }
+
+  async interrupt(handle: RunHandle, reason: string): Promise<void> {
+    const child = SubprocessDshDriver._children.get(handle.cancel_token);
+    if (!child) return;
+    try {
+      child.kill("SIGTERM");
+      console.log(`[SubprocessDshDriver] interrupt(${handle.cancel_token}) — SIGTERM sent (${reason})`);
+    } catch (err) {
+      console.warn(`[SubprocessDshDriver] interrupt(${handle.cancel_token}) kill failed: ${err}`);
+    }
+    void reason;
+  }
+
+  async heartbeat(handle: RunHandle): Promise<void> {
+    const child = SubprocessDshDriver._children.get(handle.cancel_token);
+    if (child && !child.killed) {
+      void child;
+    }
+  }
+
+  private async start(request: RunRequest): Promise<DriverHandle> {
+    const controller = new AbortController();
+    if (request.signal) {
+      request.signal.addEventListener("abort", () => controller.abort(), { once: true });
+    }
+    const cancel_token = `sub-${randomUUID()}`;
+    const driver_kind: DriverKind = "subprocess";
+    return {
+      cancel_token,
+      controller,
+      externalSignal: request.signal,
+      hostHint: request.metadata?.["host_hint"] as string | undefined,
+      child: null,
+      startMs: Date.now(),
+      attempt_id: request.attempt_id,
+      driver_kind,
+      finished: false,
+    };
+  }
+
+  private async *streamEvents(
+    handle: DriverHandle,
+    request: RunRequest,
+  ): AsyncIterable<DriverEvent> {
+    const { attempt_id } = request;
+    const startedMs = Date.now();
+
+    // Pull command/args from request.metadata (set by orchestrator.dispatch)
+    const meta = request.metadata ?? {};
+    const command = typeof meta["command"] === "string" ? (meta["command"] as string) : "";
+    const args = Array.isArray(meta["args"]) ? (meta["args"] as unknown[]).filter((a): a is string => typeof a === "string") : [];
+    const env = (meta["env"] ?? {}) as Record<string, string>;
+    const cwd = typeof meta["cwd"] === "string" ? (meta["cwd"] as string) : process.cwd();
+    const timeoutMs = typeof meta["timeout_seconds"] === "number"
+      ? (meta["timeout_seconds"] as number) * 1000
+      : DEFAULT_TIMEOUT_SECONDS * 1000;
+
+    yield {
+      kind: "driver.handle",
+      attempt_id,
+      payload: { handle: toRunHandle(handle) },
+    };
+    yield {
+      kind: "driver.started",
+      attempt_id,
+      payload: {
+        driver_kind: handle.driver_kind,
+        started_at: new Date(startedMs).toISOString(),
+        model: `subprocess:${command}`,
+        profile: "subprocess",
+      },
+    };
+
+    if (!command) {
+      yield {
+        kind: "driver.failed",
+        attempt_id,
+        payload: {
+          error: "subprocess driver requires request.metadata.command",
+          wall_ms: Date.now() - handle.startMs,
+          source: "subprocess",
+        },
+      };
+      handle.finished = true;
+      return;
+    }
+
+    // Spawn child. detached:false so the child is part of the wrapper process
+    // group; SIGTERM/SIGKILL cascades naturally. shell:false avoids shell
+    // injection via crafted args. (Sandboxing is v1.2.0m+ scope.)
+    let child: import("node:child_process").ChildProcess;
+    try {
+      child = spawn(command, args, {
+        cwd,
+        env: { ...process.env, ...env },
+        shell: false,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (err) {
+      yield {
+        kind: "driver.failed",
+        attempt_id,
+        payload: {
+          error: `spawn failed: ${(err as Error).message}`,
+          wall_ms: Date.now() - handle.startMs,
+          source: "subprocess",
+        },
+      };
+      handle.finished = true;
+      return;
+    }
+    SubprocessDshDriver.registerChild(handle.cancel_token, child);
+
+    // Timeout watchdog
+    const watchdog = setTimeout(() => {
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        // already dead
+      }
+    }, timeoutMs);
+
+    // Cascade abort signal → SIGTERM
+    const onAbort = () => {
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        // already dead
+      }
+    };
+    if (request.signal) {
+      request.signal.addEventListener("abort", onAbort, { once: true });
+    }
+
+    // Buffer stdout/stderr; emit chunks synchronously after exit.
+    // Async generator yields cannot be pushed from inside .on('data') callbacks
+    // (yield is sync-only), so we accumulate here and emit on exit.
+    const stdoutChunks: string[] = [];
+    const stderrChunks: string[] = [];
+    child.stdout?.on("data", (data: Buffer) => stdoutChunks.push(data.toString("utf8")));
+    child.stderr?.on("data", (data: Buffer) => stderrChunks.push(data.toString("utf8")));
+
+    // Wait for exit
+    const exitCode: number | null = await new Promise((resolve) => {
+      child.on("exit", (code) => resolve(code));
+      child.on("error", () => resolve(null));
+    });
+    clearTimeout(watchdog);
+    if (request.signal) {
+      request.signal.removeEventListener("abort", onAbort);
+    }
+    SubprocessDshDriver.unregisterChild(handle.cancel_token);
+    handle.finished = true;
+
+    const stdout = stdoutChunks.join("");
+    const stderr = stderrChunks.join("");
+    const wall_ms = Date.now() - handle.startMs;
+
+    // Emit accumulated stdout in MAX_CHUNK_BYTES slices BEFORE the terminal
+    // event so the SSE stream / PWA see the data. Each chunk emits a
+    // driver.output_chunk event the orchestrator forwards to commander.ts
+    // appendStepStdout() for live PWA rendering.
+    if (stdout.length > 0) {
+      for (let i = 0; i < stdout.length; i += MAX_CHUNK_BYTES) {
+        const piece = stdout.slice(i, i + MAX_CHUNK_BYTES);
+        yield {
+          kind: "driver.output_chunk",
+          attempt_id,
+          payload: {
+            chunk: piece,
+            byte_size: Buffer.byteLength(piece, "utf8"),
+            source: "subprocess",
+          },
+        };
+      }
+    }
+
+    if (handle.controller.signal.aborted || handle.externalSignal?.aborted) {
+      yield {
+        kind: "driver.interrupted",
+        attempt_id,
+        payload: {
+          reason: "abort signal",
+          wall_ms,
+          source: "subprocess",
+        },
+      };
+      return;
+    }
+
+    if (exitCode === 0) {
+      yield {
+        kind: "driver.finished",
+        attempt_id,
+        payload: {
+          exit_code: 0,
+          stdout,
+          stderr,
+          wall_ms,
+          source: "subprocess",
+        },
+      };
+    } else {
+      yield {
+        kind: "driver.failed",
+        attempt_id,
+        payload: {
+          error: stderr || `exit code ${exitCode}`,
+          exit_code: exitCode ?? -1,
+          stdout,
+          stderr,
+          wall_ms,
+          source: "subprocess",
+        },
+      };
     }
   }
 }
