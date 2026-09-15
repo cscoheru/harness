@@ -250,7 +250,18 @@ const handleStatusStream: RouteHandler = async (req, res) => {
   });
 
   const onUpdate = (payload: Record<string, unknown>) => {
-    send(payload["kind"] === "task_completed" ? "task_completed" : "step_update", payload);
+    // v1.2.0m NEW: forward stdout_chunk as its own SSE event name so the
+    // PWA can append live without re-rendering the entire step panel
+    // (which is what happens when stdout_chunk arrives as step_update).
+    // step_update still carries status / host / wallMs for the card meta.
+    const kind = payload["kind"];
+    if (kind === "task_completed") {
+      send("task_completed", payload);
+    } else if (kind === "stdout_chunk") {
+      send("stdout_chunk", payload);
+    } else {
+      send("step_update", payload);
+    }
     if (payload["kind"] === "task_completed") {
       // Close the stream after terminal event so the EventSource can reconnect.
       clearInterval(heartbeat);

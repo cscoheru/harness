@@ -129,23 +129,25 @@
 
     .dag-node rect {
       stroke: var(--border);
-      stroke-width: 2;
+      stroke-width: 3;
       fill: var(--surface);
     }
 
+    /* v1.2.0m NEW: host-tinted card backgrounds. The base fill (above) and
+       status-* fills (below) set the background; host-* tints OVERRIDE them
+       so the user sees at a glance which edge ran each step. Status borders
+       (3px) remain visible against the 18% host tint. */
+    .dag-node.host-edge2 rect       { fill: rgba(245, 158, 11, 0.18); }  /* amber  */
+    .dag-node.host-edge3 rect       { fill: rgba(6, 182, 212, 0.18); }   /* cyan   */
+    .dag-node.host-newvps rect      { fill: rgba(236, 72, 153, 0.18); }  /* pink   */
+    .dag-node.host-mac rect         { fill: rgba(168, 85, 247, 0.18); }  /* purple */
+    .dag-node.host-edge1 rect       { fill: rgba(132, 204, 22, 0.18); }  /* lime   */
+    .dag-node.host-unknown rect     { fill: var(--surface); }            /* fallback */
+
     .dag-node.status-pending rect { stroke: var(--pending); }
-    .dag-node.status-running rect {
-      stroke: var(--running);
-      fill: rgba(96, 165, 250, 0.15);
-    }
-    .dag-node.status-completed rect {
-      stroke: var(--success);
-      fill: rgba(74, 222, 128, 0.15);
-    }
-    .dag-node.status-failed rect {
-      stroke: var(--error);
-      fill: rgba(248, 113, 113, 0.15);
-    }
+    .dag-node.status-running rect { stroke: var(--running); }
+    .dag-node.status-completed rect { stroke: var(--success); }
+    .dag-node.status-failed rect { stroke: var(--error); }
 
     .dag-node text {
       fill: var(--text);
@@ -285,6 +287,17 @@
       cancelled: "⊘",
     };
 
+    // v1.2.0m NEW: derive a CSS class from a step's host FQDN so the DAG
+    // card gets a host-distinctive background tint. The full FQDN like
+    // "edge2.fish-harness.ts.net" becomes "host-edge2" (matches the
+    // .dag-node.host-edge2 CSS rules above). Falls back to "host-unknown"
+    // for hosts without a registered tint.
+    function hostClass(host) {
+      if (!host || typeof host !== "string") return "host-unknown";
+      const label = host.split(".")[0];
+      return `host-${label}`;
+    }
+
     // ─── DOM refs ──────────────────────────────────────────────────────────
     const $dagSvg = document.getElementById("dag-svg");
     const $dagContainer = document.getElementById("dag-container");
@@ -346,7 +359,9 @@
         g.setNode(step.name, {
           label: () => {
             const node = document.createElementNS("http://www.w3.org/2000/svg", "g");
-            node.setAttribute("class", `dag-node status-${step.status}`);
+            // v1.2.0m NEW: include host class so CSS tints the rect background.
+            // Combined classes: dag-node + status-<status> + host-<label>.
+            node.setAttribute("class", `dag-node status-${step.status} ${hostClass(step.host)}`);
             node.setAttribute("data-step", step.name);
 
             const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
@@ -421,11 +436,16 @@
       state.dagreRender = render;
     }
 
-    function setNodeClass(stepName, status) {
+    function setNodeClass(stepName, status, host) {
       if (!state.dagreSvg) return;
+      // v1.2.0m FIX: preserve host-* class when updating status. Without
+      // this the host tint disappears the moment the first step_update
+      // arrives (because the previous implementation set only "dag-node
+      // status-<status>", stripping the host class added at render time).
+      const h = host ?? state.steps.find((s) => s.name === stepName)?.host ?? null;
       state.dagreSvg
         .selectAll(`g.dag-node[data-step="${stepName}"]`)
-        .attr("class", `dag-node status-${status}`);
+        .attr("class", `dag-node status-${status} ${hostClass(h)}`);
       // Update icon text
       const icon = STATUS_ICONS[status] ?? "?";
       state.dagreSvg
@@ -481,12 +501,35 @@
         const step = state.steps.find((s) => s.name === data.step);
         if (step) {
           Object.assign(step, data);
-          setNodeClass(step.name, step.status);
+          setNodeClass(step.name, step.status, data.host ?? step.host);
           if (state.selectedStep === step.name) {
             selectStep(step.name); // refresh right panel
           }
         }
         updateStatusBadge();
+      });
+
+      // v1.2.0m NEW: live stdout streaming. Server emits "stdout_chunk"
+      // via emitStepUpdate(kind="stdout_chunk", { chunk }) and SSE forwards
+      // it as a step_update event with kind="stdout_chunk". Append the
+      // chunk to the right panel only when the matching step is selected,
+      // so we don't fight DOM updates for non-selected cards.
+      es.addEventListener("stdout_chunk", (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          const step = state.steps.find((s) => s.name === data.step);
+          if (step) {
+            // Mirror server-side accumulate (commander.appendStepStdout uses
+            // .slice(-STEP_STDOUT_CAP)). Keep PWA buffer bounded the same way.
+            const STEP_STDOUT_CAP = 256 * 1024;
+            step.stdout = ((step.stdout ?? "") + String(data.chunk ?? "")).slice(-STEP_STDOUT_CAP);
+            if (state.selectedStep === step.name) {
+              $stepStdout.textContent = step.stdout;
+            }
+          }
+        } catch (err) {
+          console.warn("[sse] stdout_chunk parse error", err);
+        }
       });
 
       es.addEventListener("task_completed", (ev) => {
