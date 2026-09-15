@@ -864,7 +864,11 @@ async function kernelListTasks(tenantId: string): Promise<Task[]> {
     }>;
     return tasks.map((t) => ({
       task_id: t.task_id,
-      status: t.status,
+      // v1.2.0l unblock: cast status:string → TaskStatus (kernel HTTP always
+      // emits one of the 5 TaskStatus values; pre-existing v1.2.0k.3 ripple
+      // from c88b0de tenant-isolation work). Runtime unchanged. v1.2.0m+
+      // cleanup: tighten kernel return type to TaskStatus at source.
+      status: t.status as TaskStatus,
       workflow_pack: "web_research",
       workflow_version: "1.0",
       input_blob_id: null,
