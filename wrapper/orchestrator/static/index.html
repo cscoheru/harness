@@ -3,7 +3,23 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Fish Harness — PWA Dispatch</title>
+  <title>Fish Harness — PWA v1.2.0l (Parallel Dual View)</title>
+
+  <!--
+    v1.2.0l NEW: Parallel dual view via dagre-d3.
+    Left panel: DAG tree (steps + status icons + arrows) — automatic layout
+    Right panel: Selected step's live stdout stream (SSE)
+
+    Tech stack: vanilla HTML + dagre@0.8.5 + d3@7.8.5 + dagre-d3@0.6.4
+    (no build step, no React). CDN scripts pin specific versions to dodge
+    R8 (jsdelivr outage) — fallback path: drop the 3 vendored files into
+    wrapper/orchestrator/static/vendor/ and switch src to local.
+  -->
+
+  <script src="https://cdn.jsdelivr.net/npm/d3@7.8.5/dist/d3.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/dagre-d3@0.6.4/dist/dagre-d3.min.js" defer></script>
+
   <style>
     :root {
       --bg: #0f172a;
@@ -15,273 +31,534 @@
       --success: #4ade80;
       --error: #f87171;
       --warn: #fbbf24;
+      --running: #60a5fa;
+      --pending: #94a3b8;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body { height: 100%; overflow: hidden; }
 
     body {
       font-family: system-ui, -apple-system, sans-serif;
       background: var(--bg);
       color: var(--text);
-      min-height: 100vh;
       display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      flex: 0 0 auto;
+      padding: 0.75rem 1rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 0.75rem;
       align-items: center;
-      justify-content: center;
+    }
+
+    header h1 {
+      font-size: 1.1rem;
+      color: var(--accent);
+      margin-right: 1rem;
+    }
+
+    header select, header input, header textarea, header button {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 0.85rem;
+      padding: 0.4rem 0.6rem;
+    }
+
+    header button.primary {
+      background: var(--accent);
+      color: var(--bg);
+      border-color: var(--accent);
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    header .prompt-input {
+      flex: 1 1 auto;
+      min-width: 200px;
+    }
+
+    main {
+      flex: 1 1 auto;
+      display: grid;
+      grid-template-columns: 40% 60%;
+      min-height: 0;
+    }
+
+    .panel {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      border-right: 1px solid var(--border);
+    }
+
+    .panel:last-child { border-right: none; }
+
+    .panel-header {
+      flex: 0 0 auto;
+      padding: 0.5rem 1rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      font-size: 0.85rem;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .panel-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: auto;
       padding: 1rem;
     }
 
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 2rem;
+    /* DAG SVG container */
+    #dag-svg {
       width: 100%;
-      max-width: 520px;
+      height: 100%;
+      background: var(--bg);
     }
 
-    h1 {
-      font-size: 1.25rem;
-      font-weight: 600;
-      margin-bottom: 0.25rem;
-      color: var(--accent);
+    .dag-node rect {
+      stroke: var(--border);
+      stroke-width: 2;
+      fill: var(--surface);
     }
 
-    .subtitle {
-      font-size: 0.8rem;
+    .dag-node.status-pending rect { stroke: var(--pending); }
+    .dag-node.status-running rect {
+      stroke: var(--running);
+      fill: rgba(96, 165, 250, 0.15);
+    }
+    .dag-node.status-completed rect {
+      stroke: var(--success);
+      fill: rgba(74, 222, 128, 0.15);
+    }
+    .dag-node.status-failed rect {
+      stroke: var(--error);
+      fill: rgba(248, 113, 113, 0.15);
+    }
+
+    .dag-node text {
+      fill: var(--text);
+      font-size: 12px;
+      font-family: system-ui, sans-serif;
+    }
+
+    .dag-node text.status-icon {
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .dag-edge path {
+      stroke: var(--muted);
+      stroke-width: 2;
+      fill: none;
+    }
+
+    /* Stdout panel */
+    .stdout-meta {
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 0.75rem;
       color: var(--muted);
-      margin-bottom: 1.5rem;
+      margin-bottom: 0.5rem;
     }
 
-    label {
-      display: block;
-      font-size: 0.85rem;
-      color: var(--muted);
-      margin-bottom: 0.4rem;
-    }
-
-    select {
-      width: 100%;
-      padding: 0.6rem 0.75rem;
+    .stdout-meta .pill {
+      display: inline-block;
+      padding: 0.1rem 0.4rem;
       background: var(--bg);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 4px;
+      margin-right: 0.4rem;
       color: var(--text);
-      font-size: 0.9rem;
-      margin-bottom: 1rem;
-      appearance: none;
     }
 
-    textarea {
-      width: 100%;
-      min-height: 120px;
-      padding: 0.75rem;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      color: var(--text);
-      font-size: 0.9rem;
-      resize: vertical;
-      font-family: inherit;
-    }
-
-    textarea:focus {
-      outline: 2px solid var(--accent);
-      border-color: var(--accent);
-    }
-
-    button {
-      width: 100%;
-      padding: 0.75rem;
-      background: var(--accent);
-      color: #0f172a;
-      border: none;
-      border-radius: 8px;
-      font-size: 0.95rem;
-      font-weight: 600;
-      cursor: pointer;
-      margin-top: 1rem;
-      transition: opacity 0.15s;
-    }
-
-    button:hover { opacity: 0.85; }
-    button:disabled { opacity: 0.4; cursor: not-allowed; }
-
-    #taskId {
-      margin-top: 1rem;
-      font-size: 0.8rem;
-      color: var(--muted);
-      word-break: break-all;
-    }
-
-    #statusBox {
-      margin-top: 1rem;
-      padding: 0.75rem;
-      border-radius: 8px;
+    .stdout-body {
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
       font-size: 0.85rem;
-      display: none;
-    }
-
-    #statusBox.pending  { display: block; background: #1e293b; border: 1px solid var(--border); }
-    #statusBox.running  { display: block; background: #1c2a1c; border: 1px solid #4ade80; color: var(--success); }
-    #statusBox.completed { display: block; background: #0f2a1c; border: 1px solid #4ade80; }
-    #statusBox.failed   { display: block; background: #2a1c1c; border: 1px solid var(--error); color: var(--error); }
-
-    #resultBox {
-      margin-top: 0.75rem;
-      padding: 0.75rem;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      font-size: 0.8rem;
+      line-height: 1.5;
       white-space: pre-wrap;
       word-break: break-all;
-      display: none;
-      max-height: 300px;
-      overflow-y: auto;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem;
+      max-height: calc(100vh - 220px);
+      overflow: auto;
     }
 
-    .spinner {
-      display: inline-block;
-      width: 14px;
-      height: 14px;
-      border: 2px solid #0f172a;
-      border-top-color: transparent;
-      border-radius: 50%;
-      animation: spin 0.6s linear infinite;
-      vertical-align: middle;
-      margin-right: 0.4rem;
+    .empty-state {
+      color: var(--muted);
+      font-size: 0.85rem;
+      padding: 2rem;
+      text-align: center;
     }
 
-    @keyframes spin { to { transform: rotate(360deg); } }
+    /* Toast for errors */
+    .toast {
+      position: fixed;
+      top: 60px;
+      right: 1rem;
+      background: var(--error);
+      color: var(--bg);
+      padding: 0.6rem 1rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      z-index: 999;
+      max-width: 320px;
+    }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1>Fish Harness Dispatch</h1>
-    <p class="subtitle">iPhone 文字派工 — 24h 内完成</p>
-
-    <label for="classSelect">能力档位</label>
-    <select id="classSelect">
-      <option value="orch">Orch — 调研分析</option>
-      <option value="commander">Commander — 改代码</option>
-      <option value="worker">Worker — 摘要执行</option>
+  <header>
+    <h1>Fish Harness</h1>
+    <select id="workflow-pack">
+      <option value="orch">orch — Real 3-layer orchestration</option>
+      <option value="default">default</option>
     </select>
+    <input
+      id="prompt-input"
+      class="prompt-input"
+      type="text"
+      placeholder='e.g. "启动 2 个 worker 并发出 hello 指令"'
+      value="启动 2 个 worker 并发出 hello 指令"
+    />
+    <button class="primary" id="dispatch-btn">Dispatch</button>
+    <span id="task-id" style="color: var(--muted); font-size: 0.75rem;"></span>
+  </header>
 
-    <label for="promptInput">任务描述（中文 / 英文均可）</label>
-    <textarea id="promptInput" placeholder="调研 React 19 新特性，或：帮我找 xxx bug 的根因…"></textarea>
+  <main>
+    <section class="panel">
+      <div class="panel-header">
+        <span>DAG</span>
+        <span id="dag-status"></span>
+      </div>
+      <div class="panel-body" id="dag-container">
+        <svg id="dag-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div id="dag-empty" class="empty-state">
+          DAG 会在这里渲染 — dispatch 一个 task 后即可看到步骤拓扑
+        </div>
+      </div>
+    </section>
 
-    <button id="submitBtn" onclick="handleSubmit()">提交任务</button>
-
-    <p id="taskId"></p>
-
-    <div id="statusBox"></div>
-    <div id="resultBox"></div>
-  </div>
+    <section class="panel">
+      <div class="panel-header">
+        <span>Selected Step</span>
+        <span id="step-status"></span>
+      </div>
+      <div class="panel-body">
+        <div id="step-meta" class="stdout-meta">
+          <span class="pill">—</span>  ← 在左边 DAG 里点击节点
+        </div>
+        <pre id="step-stdout" class="stdout-body"></pre>
+      </div>
+    </section>
+  </main>
 
   <script>
-    const API_BASE = window.location.origin;
-    let pollTimer = null;
-    let currentTaskId = null;
+    // ─── State ─────────────────────────────────────────────────────────────
+    const state = {
+      taskId: null,
+      steps: [],            // [{name, capability, status, worker_id, host, stdout, ...}]
+      hosts: [],
+      selectedStep: null,
+      eventSource: null,
+      dagreGraph: null,
+      dagreSvg: null,
+      dagreRender: null,    // dagre-d3 render fn once libs load
+    };
 
-    async function handleSubmit() {
-      const btn = document.getElementById('submitBtn');
-      const prompt = document.getElementById('promptInput').value.trim();
-      const cls = document.getElementById('classSelect').value;
+    const STATUS_ICONS = {
+      pending: "○",
+      running: "⚡",
+      completed: "✓",
+      failed: "✗",
+      cancelled: "⊘",
+    };
 
-      if (!prompt) {
-        showStatus('failed', '请输入任务描述');
+    // ─── DOM refs ──────────────────────────────────────────────────────────
+    const $dagSvg = document.getElementById("dag-svg");
+    const $dagContainer = document.getElementById("dag-container");
+    const $dagEmpty = document.getElementById("dag-empty");
+    const $dagStatus = document.getElementById("dag-status");
+    const $stepMeta = document.getElementById("step-meta");
+    const $stepStdout = document.getElementById("step-stdout");
+    const $stepStatus = document.getElementById("step-status");
+    const $taskId = document.getElementById("task-id");
+    const $dispatchBtn = document.getElementById("dispatch-btn");
+    const $workflowPack = document.getElementById("workflow-pack");
+    const $promptInput = document.getElementById("prompt-input");
+
+    // ─── DAG render via dagre-d3 ───────────────────────────────────────────
+    function waitForLibs() {
+      return new Promise((resolve) => {
+        const check = () => {
+          if (typeof d3 !== "undefined" && typeof dagre !== "undefined" && typeof dagreD3 !== "undefined") {
+            resolve();
+          } else {
+            setTimeout(check, 30);
+          }
+        };
+        check();
+      });
+    }
+
+    async function renderDag() {
+      if (!state.steps.length) {
+        $dagEmpty.style.display = "block";
+        d3.select($dagSvg).selectAll("*").remove();
         return;
       }
+      $dagEmpty.style.display = "none";
+      await waitForLibs();
 
-      btn.disabled = true;
-      btn.textContent = '提交中…';
-      clearInterval(pollTimer);
-      document.getElementById('resultBox').style.display = 'none';
-      document.getElementById('resultBox').textContent = '';
-      document.getElementById('taskId').textContent = '';
+      // Build a fresh dagre graph each render — small DAG (≤10 steps typical)
+      const g = new dagre.graphlib.Graph({ directed: true });
+      g.setGraph({
+        rankdir: "LR",
+        nodesep: 30,
+        ranksep: 60,
+        marginx: 20,
+        marginy: 20,
+      });
+      g.setDefaultEdgeLabel(() => ({}));
+
+      // Map step.name → PlanStep for dependency lookup
+      const stepMap = Object.fromEntries(state.steps.map((s) => [s.name, s]));
+
+      // Nodes
+      state.steps.forEach((step) => {
+        const icon = STATUS_ICONS[step.status] ?? "?";
+        g.setNode(step.name, {
+          label: () => {
+            const node = document.createElementNS("http://www.w3.org/2000/svg", "g");
+            node.setAttribute("class", `dag-node status-${step.status}`);
+            node.setAttribute("data-step", step.name);
+
+            const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            rect.setAttribute("width", "200");
+            rect.setAttribute("height", "56");
+            rect.setAttribute("rx", "6");
+            node.appendChild(rect);
+
+            const iconText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            iconText.setAttribute("class", "status-icon");
+            iconText.setAttribute("x", "12");
+            iconText.setAttribute("y", "22");
+            iconText.textContent = icon;
+            node.appendChild(iconText);
+
+            const nameText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            nameText.setAttribute("x", "32");
+            nameText.setAttribute("y", "22");
+            nameText.textContent = step.name;
+            node.appendChild(nameText);
+
+            const capText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            capText.setAttribute("x", "12");
+            capText.setAttribute("y", "42");
+            capText.setAttribute("fill", "var(--muted)");
+            capText.setAttribute("font-size", "10");
+            capText.textContent = `capability: ${step.capability ?? "—"}`;
+            node.appendChild(capText);
+
+            const hostText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            hostText.setAttribute("x", "12");
+            hostText.setAttribute("y", "54");
+            hostText.setAttribute("fill", "var(--muted)");
+            hostText.setAttribute("font-size", "10");
+            hostText.textContent = `host: ${step.host ?? "—"}`;
+            node.appendChild(hostText);
+
+            // Click → select step
+            node.addEventListener("click", () => selectStep(step.name));
+            return node;
+          },
+          class: `dag-node status-${step.status}`,
+          paddingLeft: 8,
+          paddingRight: 8,
+          paddingTop: 8,
+          paddingBottom: 8,
+          width: 200,
+          height: 56,
+        });
+      });
+
+      // Edges — build from per-step dependency list. PackManifest default_plan
+      // doesn't carry depends_on in status response, so we infer from step
+      // index order (topological) — sufficient for the orch.json 3-step DAG.
+      for (let i = 0; i < state.steps.length - 1; i++) {
+        g.setEdge(state.steps[i].name, state.steps[i + 1].name, { class: "dag-edge" });
+      }
+
+      // Render
+      const render = new dagreD3.render();
+      const svg = d3.select($dagSvg);
+      svg.selectAll("*").remove();
+      svg.attr("viewBox", null);
+      const inner = svg.append("g");
+      render(inner, g);
+      // Size to content
+      const bbox = inner.node().getBBox();
+      svg.attr("viewBox", `${bbox.x - 10} ${bbox.y - 10} ${bbox.width + 20} ${bbox.height + 20}`);
+      svg.attr("preserveAspectRatio", "xMidYMid meet");
+
+      state.dagreGraph = g;
+      state.dagreSvg = svg;
+      state.dagreRender = render;
+    }
+
+    function setNodeClass(stepName, status) {
+      if (!state.dagreSvg) return;
+      state.dagreSvg
+        .selectAll(`g.dag-node[data-step="${stepName}"]`)
+        .attr("class", `dag-node status-${status}`);
+      // Update icon text
+      const icon = STATUS_ICONS[status] ?? "?";
+      state.dagreSvg
+        .selectAll(`g.dag-node[data-step="${stepName}"] text.status-icon`)
+        .text(icon);
+    }
+
+    // ─── Step selection + stdout panel ──────────────────────────────────────
+    function selectStep(stepName) {
+      state.selectedStep = stepName;
+      const step = state.steps.find((s) => s.name === stepName);
+      if (!step) return;
+      $stepMeta.innerHTML = `
+        <span class="pill">${step.name}</span>
+        <span class="pill">capability: ${step.capability ?? "—"}</span>
+        <span class="pill">host: ${step.host ?? "—"}</span>
+        <span class="pill">worker: ${step.worker_id ?? "—"}</span>
+        <span class="pill">status: ${step.status}</span>
+        ${step.wallMs != null ? `<span class="pill">wallMs: ${step.wallMs}</span>` : ""}
+      `;
+      $stepStdout.textContent = step.stdout ?? "";
+      $stepStatus.textContent = `${STATUS_ICONS[step.status] ?? "?"} ${step.status}`;
+    }
+
+    // ─── SSE stream ─────────────────────────────────────────────────────────
+    function openSse(taskId) {
+      if (state.eventSource) {
+        state.eventSource.close();
+      }
+      const es = new EventSource(`/api/v1/status/${encodeURIComponent(taskId)}/stream`);
+      state.eventSource = es;
+
+      es.addEventListener("snapshot", (ev) => {
+        const data = JSON.parse(ev.data);
+        state.steps = data.steps ?? [];
+        state.hosts = data.hosts ?? [];
+        state.taskId = taskId;
+        $taskId.textContent = `task: ${taskId.slice(0, 12)}…`;
+        renderDag();
+        // Auto-select first step if none selected
+        if (!state.selectedStep && state.steps.length > 0) {
+          selectStep(state.steps[0].name);
+        }
+        updateStatusBadge();
+      });
+
+      es.addEventListener("step_update", (ev) => {
+        const data = JSON.parse(ev.data);
+        const step = state.steps.find((s) => s.name === data.step);
+        if (step) {
+          Object.assign(step, data);
+          setNodeClass(step.name, step.status);
+          if (state.selectedStep === step.name) {
+            selectStep(step.name); // refresh right panel
+          }
+        }
+        updateStatusBadge();
+      });
+
+      es.addEventListener("task_completed", (ev) => {
+        const data = JSON.parse(ev.data);
+        updateStatusBadge();
+        es.close();
+        state.eventSource = null;
+      });
+
+      es.onerror = () => {
+        // Browser will auto-reconnect; just log
+        console.warn("[sse] connection error");
+      };
+    }
+
+    function updateStatusBadge() {
+      const total = state.steps.length;
+      const completed = state.steps.filter((s) => s.status === "completed").length;
+      const failed = state.steps.filter((s) => s.status === "failed").length;
+      $dagStatus.textContent = `${completed}/${total} done${failed ? ` · ${failed} failed` : ""}`;
+    }
+
+    // ─── Dispatch ──────────────────────────────────────────────────────────
+    async function dispatchTask() {
+      const prompt = $promptInput.value.trim();
+      if (!prompt) return;
+      const pack = $workflowPack.value;
+
+      $dispatchBtn.disabled = true;
+      $dispatchBtn.textContent = "Dispatching…";
 
       try {
-        const res = await fetch(`${API_BASE}/api/pwa/dispatch`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, class: cls }),
+        const res = await fetch("/api/v1/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt, workflowPack: pack }),
         });
-
-        const data = await res.json();
         if (!res.ok) {
-          showStatus('failed', `错误: ${data.error ?? res.statusText}`);
-          btn.disabled = false;
-          btn.textContent = '提交任务';
+          const err = await res.json().catch(() => ({ error: res.statusText }));
+          toast(`Dispatch failed: ${err.error ?? res.statusText}`);
           return;
         }
-
-        currentTaskId = data.task_id;
-        document.getElementById('taskId').textContent = `任务 ID: ${currentTaskId}`;
-        showStatus('pending', '任务已提交，等待调度…');
-        pollStatus(currentTaskId);
+        const data = await res.json();
+        state.taskId = data.task_id;
+        $taskId.textContent = `task: ${data.task_id.slice(0, 12)}…`;
+        // Reset DAG
+        state.steps = [];
+        state.selectedStep = null;
+        $stepMeta.innerHTML = '<span class="pill">—</span>  ← 等 DAG 渲染';
+        $stepStdout.textContent = "";
+        renderDag();
+        // Open SSE
+        openSse(data.task_id);
       } catch (err) {
-        showStatus('failed', `网络错误: ${err.message}`);
+        toast(`Dispatch exception: ${err.message ?? err}`);
       } finally {
-        btn.disabled = false;
-        btn.textContent = '提交任务';
+        $dispatchBtn.disabled = false;
+        $dispatchBtn.textContent = "Dispatch";
       }
     }
 
-    async function pollStatus(taskId) {
-      pollTimer = setInterval(async () => {
-        try {
-          const res = await fetch(`${API_BASE}/api/pwa/status/${encodeURIComponent(taskId)}`);
-          if (!res.ok) return;
-
-          const data = await res.json();
-          showStatus(data.status, statusLabel(data.status));
-
-          if (data.status === 'completed') {
-            clearInterval(pollTimer);
-            showResult(data.result, data.wallMs);
-          } else if (data.status === 'failed') {
-            clearInterval(pollTimer);
-            showResult(null, null, data.error);
-          }
-        } catch {
-          // ignore poll errors
-        }
-      }, 3000);
+    function toast(msg) {
+      const el = document.createElement("div");
+      el.className = "toast";
+      el.textContent = msg;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 4000);
     }
 
-    function showStatus(status, label) {
-      const box = document.getElementById('statusBox');
-      box.className = status;
-      box.textContent = status === 'pending' || status === 'running'
-        ? '⏳ ' + label
-        : label;
-    }
+    $dispatchBtn.addEventListener("click", dispatchTask);
+    $promptInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") dispatchTask();
+    });
 
-    function showResult(result, wallMs, error) {
-      const box = document.getElementById('resultBox');
-      box.style.display = 'block';
-      // Prefer explicit error param; fall back to result text if it looks like an error
-      const displayError = error || (result && result.startsWith('\n') ? result.trim() : null);
-      if (displayError) {
-        box.style.color = 'var(--error)';
-        box.textContent = `执行失败: ${displayError}`;
-      } else {
-        box.style.color = 'var(--text)';
-        const ms = wallMs ? ` (耗时 ${(wallMs / 1000).toFixed(1)}s)` : '';
-        box.textContent = result
-          ? `[完成]${ms}\n${result.slice(0, 2000)}${result.length > 2000 ? '\n…(截断)' : ''}`
-          : `[完成]${ms}\n(无文本输出)`;
-      }
-    }
-
-    function statusLabel(s) {
-      return {
-        pending: '任务已提交',
-        running: '执行中…',
-        completed: '✅ 完成',
-        failed: '❌ 失败',
-        cancelled: '已取消',
-      }[s] ?? s;
+    // Initial load: check if there's already an active task via ?task_id=
+    const urlParams = new URLSearchParams(location.search);
+    const initialTask = urlParams.get("task_id");
+    if (initialTask) {
+      state.taskId = initialTask;
+      openSse(initialTask);
     }
   </script>
 </body>
