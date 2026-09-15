@@ -47,6 +47,8 @@ services:
       ORCHESTRATOR_CLASS: "orchestrator"
       DSH_PROFILE: "headless"
       EDGE_REGION: "east-1"
+      # v1.2.0l unblock: explicit PACKS_DIR override (same fix as newvps).
+      WORKFLOW_PACKS_DIR: "/app/workflow_packs"
     networks:
       - harness_net
     ports:
