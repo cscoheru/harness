@@ -471,6 +471,16 @@ export class SubprocessDshDriver implements ExecutionDriver {
     const timeoutMs = typeof meta["timeout_seconds"] === "number"
       ? (meta["timeout_seconds"] as number) * 1000
       : DEFAULT_TIMEOUT_SECONDS * 1000;
+    // v1.2.0l.2 DEBUG: dump what subprocess driver actually receives so we can
+    // see why bash sees only the user prompt instead of my orch.json echo.
+    // Write to /tmp/subprocess_debug.log (not console.log) so we don't lose
+    // it to docker log buffering. TODO: remove once root cause is identified.
+    try {
+      const { appendFileSync } = await import("node:fs");
+      appendFileSync("/tmp/subprocess_debug.log", `${new Date().toISOString()} attempt_id=${attempt_id} command=${JSON.stringify(command)} args=${JSON.stringify(args)}\n`);
+    } catch {
+      // best-effort
+    }
 
     yield {
       kind: "driver.handle",
