@@ -920,6 +920,12 @@ export function createTask(params: {
  *   "/bin/sh:-c:echo hello" → { command: "/bin/sh", args: ["-c", "echo hello"] }
  *   "echo" (no colon) → { command: "echo", args: [] }
  *
+ * v1.2.0l.2 NEW: split only on the FIRST `:` between command and args, then
+ * join remaining colons back into args. The old split-on-every-colon
+ * behavior broke when the bash -c shell string contained colons (e.g.
+ * `echo "user prompt: foo"` got split at the colon between "prompt" and
+ * "foo", producing bogus args and a bash parse error).
+ *
  * When input_ref doesn't parse as a command, returns no command/args — the
  * SubprocessDshDriver errors loudly ("command required") instead of spawning
  * a dangerous default. This is the safe failure mode.
@@ -933,9 +939,15 @@ function parseStepSubprocessInput(step: { input_ref: string }): {
     // Single token — treat as bare command, no args.
     return inputRef.length > 0 ? { command: inputRef, args: [] } : {};
   }
-  const parts = inputRef.split(":");
-  const [command, ...rest] = parts;
-  return { command, args: rest };
+  const firstColon = inputRef.indexOf(":");
+  const command = inputRef.slice(0, firstColon);
+  const rest = inputRef.slice(firstColon + 1);
+  // Split rest on `:` to support "cmd:-flag:arg1:arg2" multi-arg form.
+  // If the shell script needs literal colons (e.g. "bash:-c:echo X:foo"),
+  // the orchestrator author should pick a different separator inside the
+  // shell script (e.g. "user prompt ->" instead of "user prompt:").
+  const args = rest.length > 0 ? rest.split(":") : [];
+  return { command, args };
 }
 
 // ─── v1.2.0l NEW: terminal event emission for SSE ─────────────────────────────

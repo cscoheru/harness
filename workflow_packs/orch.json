@@ -11,7 +11,7 @@
       {
         "name": "spawn-workers",
         "capability": "subprocess_worker",
-        "input_ref": "bash:-c:echo \"[spawn-workers] 2 workers spawned at $(date +%s)\"; echo \"user prompt: ${task.prompt}\"",
+        "input_ref": "bash:-c:echo \"[spawn-workers] 2 workers spawned at $(date +%s)\"; echo \"user prompt -> ${task.prompt}\"",
         "output_kind": "structured",
         "depends_on": [],
         "timeout_seconds": 30
@@ -27,7 +27,7 @@
       {
         "name": "aggregate-results",
         "capability": "orchestrator",
-        "input_ref": "bash:-c:echo \"[aggregate] commander-1 result: 19\"; echo \"[aggregate] commander-2 result: 7\"; echo \"[aggregate] task complete: ${task.prompt}\"",
+        "input_ref": "bash:-c:echo \"[aggregate] commander-1 result: 19\"; echo \"[aggregate] commander-2 result: 7\"; echo \"[aggregate] task complete -> ${task.prompt}\"",
         "output_kind": "structured",
         "depends_on": ["dispatch-commands"],
         "timeout_seconds": 15
