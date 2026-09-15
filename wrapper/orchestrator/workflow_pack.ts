@@ -291,7 +291,7 @@ function enrichStepWithTask(step: PackStep, task: Task): PlanStep {
  *        `"` or `; rm -rf /` cannot break out of the quote context
  *
  * Closes the v1.2.0l.4 "aggregate-results hardcodes 19/7" bug: orch authors
- * now write `${step.dispatch-commands.stdout}` instead of `echo "19"`.
+ * now write `${step::dispatch-commands::stdout}` instead of `echo "19"`.
  */
 function expandStepTemplate(inputRef: string, task: Task): string {
   const taskVars: Record<string, string> = {
@@ -302,9 +302,14 @@ function expandStepTemplate(inputRef: string, task: Task): string {
   // Phase 1: resolve ${task.*} via simple dict lookup (v1.2.0l.1 behavior).
   let out = inputRef.replace(/\$\{([a-zA-Z0-9_.]+)\}/g, (_m, key: string) => taskVars[key] ?? `\${${key}}`);
 
-  // Phase 2: resolve ${step.<name>.<field>} by reading commander._stepTracker.
+  // Phase 2: resolve ${step.<name>::<field>} by reading commander._stepTracker.
   // We only touch the pattern if it's present — leaves every other var literal.
-  if (!/\$\{step\.[a-zA-Z0-9_-]+\.[a-zA-Z_]+\}/.test(out)) {
+  //
+  // Note: separator is `::` not `.` because bash interprets `.` inside ${...}
+  // as a parameter-modifier prefix (e.g. ${var:-default}, ${var/old/new}) and
+  // rejects the substitution with "bad substitution". The colon-double is
+  // unambiguous to bash while still reading clearly to humans.
+  if (!/\$\{step::[a-zA-Z0-9_-]+::[a-zA-Z_]+\}/.test(out)) {
     return out;
   }
   const steps = commander.getStepStatuses(task.task_id);
@@ -321,13 +326,13 @@ function expandStepTemplate(inputRef: string, task: Task): string {
     });
   }
 
-  out = out.replace(/\$\{step\.([a-zA-Z0-9_-]+)\.([a-zA-Z_]+)\}/g, (_m, name: string, field: string) => {
+  out = out.replace(/\$\{step::([a-zA-Z0-9_-]+)::([a-zA-Z_]+)\}/g, (_m, name: string, field: string) => {
     const step = stepByName.get(name);
-    if (!step) return `\${step.${name}.${field}}`; // unknown step → preserve literal
+    if (!step) return `\${step::${name}::${field}}`; // unknown step → preserve literal
     // Only resolve fields whose backing step is already completed; otherwise
     // bash would see an empty value and silently produce wrong results.
     if (step.status !== "completed" && step.status !== "failed") {
-      return `\${step.${name}.${field}}`;
+      return `\${step::${name}::${field}}`;
     }
     let raw: string | null;
     switch (field) {
@@ -335,9 +340,9 @@ function expandStepTemplate(inputRef: string, task: Task): string {
       case "host": raw = step.host; break;
       case "wallMs": raw = step.wallMs != null ? String(step.wallMs) : null; break;
       case "exit_code": raw = step.exit_code != null ? String(step.exit_code) : null; break;
-      default: return `\${step.${name}.${field}}`; // unknown field → preserve literal
+      default: return `\${step::${name}::${field}}`; // unknown field → preserve literal
     }
-    if (raw === null || raw === undefined) return `\${step.${name}.${field}}`;
+    if (raw === null || raw === undefined) return `\${step::${name}::${field}}`;
     return shellEscape(raw);
   });
 

@@ -1,13 +1,15 @@
 /**
  * T-V1.2.0L.5-QA-1: WorkflowPack upstream stdout injection tests (v1.2.0l.5 NEW).
  *
- * Validates that v1.2.0l.5's ${step.<name>.<field>} template-var mechanism
- * works correctly inside step.input_ref, with POSIX shell-escape safety:
+ * Validates that v1.2.0l.5's ${step::<name>::<field>} template-var mechanism
+ * works correctly inside step.input_ref, with POSIX shell-escape safety.
+ * (Separator is `::` not `.` because bash interprets `.` inside `${...}`
+ * as a parameter-modifier prefix and rejects it with "bad substitution".)
  *
- *   T1: ${step.<name>.stdout} resolves to that step's stdout (no escape needed)
- *   T2: ${step.<name>.stdout} with `"` / `; rm -rf /` in value → escaped safely
- *   T3: ${step.<unknown-step>.stdout} leaves literal in place
- *   T4: ${step.<not-yet-completed>.stdout} leaves literal in place
+ *   T1: ${step::<name>::stdout} resolves to that step's stdout (no escape needed)
+ *   T2: ${step::<name>::stdout} with `"` / `$HOME` / `` ` `` / `\` → escaped safely
+ *   T3: ${step::<unknown-step>::stdout} leaves literal in place
+ *   T4: ${step::<not-yet-completed>::stdout} leaves literal in place
  *   T5: ${task.prompt} still works (regression — v1.2.0l.1 contract preserved)
  *
  * Mechanism (per v1.2.0l.5 plan §1.1):
@@ -126,7 +128,7 @@ const fakeTask = {
 };
 
 describe("workflow_pack upstream stdout injection (v1.2.0l.5)", () => {
-  it("T1: ${step.<name>.stdout} resolves to that step's stdout (no escape needed)", async () => {
+  it("T1: ${step::<name>::stdout} resolves to that step's stdout (no escape needed)", async () => {
     const { plan } = await setupTest({
       manifest: {
         ...fakeManifest,
@@ -134,7 +136,7 @@ describe("workflow_pack upstream stdout injection (v1.2.0l.5)", () => {
           steps: [
             {
               ...fakeManifest.default_plan.steps[0],
-              input_ref: 'bash:-c:echo "got: ${step.producer.stdout}"',
+              input_ref: 'bash:-c:echo "got: ${step::producer::stdout}"',
             },
           ],
         },
@@ -159,7 +161,7 @@ describe("workflow_pack upstream stdout injection (v1.2.0l.5)", () => {
     expect(step!.input_ref).toContain("-> 7");
   });
 
-  it("T2: ${step.<name>.stdout} escapes `\"`, `$`, `` ` ``, `\\` for bash double-quote safety", async () => {
+  it("T2: ${step::<name>::stdout} escapes `\"`, `$`, `` ` ``, `\\` for bash double-quote safety", async () => {
     const { plan } = await setupTest({
       manifest: {
         ...fakeManifest,
@@ -167,7 +169,7 @@ describe("workflow_pack upstream stdout injection (v1.2.0l.5)", () => {
           steps: [
             {
               ...fakeManifest.default_plan.steps[0],
-              input_ref: 'bash:-c:echo "raw: ${step.producer.stdout}"',
+              input_ref: 'bash:-c:echo "raw: ${step::producer::stdout}"',
             },
           ],
         },
@@ -197,7 +199,7 @@ describe("workflow_pack upstream stdout injection (v1.2.0l.5)", () => {
     expect(step!.input_ref).not.toMatch(/(?<!\\)"; rm -rf/);
   });
 
-  it("T3: ${step.<unknown-step>.stdout} leaves literal in place", async () => {
+  it("T3: ${step::<unknown-step>::stdout} leaves literal in place", async () => {
     const { plan } = await setupTest({
       manifest: {
         ...fakeManifest,
@@ -205,7 +207,7 @@ describe("workflow_pack upstream stdout injection (v1.2.0l.5)", () => {
           steps: [
             {
               ...fakeManifest.default_plan.steps[0],
-              input_ref: 'bash:-c:echo "got: ${step.nonexistent.stdout}"',
+              input_ref: 'bash:-c:echo "got: ${step::nonexistent::stdout}"',
             },
           ],
         },
@@ -223,12 +225,12 @@ describe("workflow_pack upstream stdout injection (v1.2.0l.5)", () => {
     const result = await plan(fakeTask);
     const step = result.steps.find((s) => s.name === "consume");
     expect(step).toBeDefined();
-    // Literal preserved so bash sees ${step.nonexistent.stdout} verbatim.
-    expect(step!.input_ref).toContain("${step.nonexistent.stdout}");
+    // Literal preserved so bash sees ${step::nonexistent::stdout} verbatim.
+    expect(step!.input_ref).toContain("${step::nonexistent::stdout}");
     expect(step!.input_ref).not.toContain("real value");
   });
 
-  it("T4: ${step.<name-not-yet-completed>.stdout} leaves literal in place", async () => {
+  it("T4: ${step::<name-not-yet-completed>::stdout} leaves literal in place", async () => {
     const { plan } = await setupTest({
       manifest: {
         ...fakeManifest,
@@ -236,7 +238,7 @@ describe("workflow_pack upstream stdout injection (v1.2.0l.5)", () => {
           steps: [
             {
               ...fakeManifest.default_plan.steps[0],
-              input_ref: 'bash:-c:echo "got: ${step.producer.stdout}"',
+              input_ref: 'bash:-c:echo "got: ${step::producer::stdout}"',
             },
           ],
         },
@@ -254,7 +256,7 @@ describe("workflow_pack upstream stdout injection (v1.2.0l.5)", () => {
     const result = await plan(fakeTask);
     const step = result.steps.find((s) => s.name === "consume");
     expect(step).toBeDefined();
-    expect(step!.input_ref).toContain("${step.producer.stdout}");
+    expect(step!.input_ref).toContain("${step::producer::stdout}");
   });
 
   it("T5: ${task.prompt} still resolves (v1.2.0l.1 regression)", async () => {
