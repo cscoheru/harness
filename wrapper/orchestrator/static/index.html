@@ -338,6 +338,11 @@
       // Nodes
       state.steps.forEach((step) => {
         const icon = STATUS_ICONS[step.status] ?? "?";
+        // v1.2.0l.2 FIX: don't set `class:` here — dagre-d3 applies class to BOTH
+        // the wrapper <g> it creates AND our inner label <g>, which makes
+        // selectAll('.dag-node') match 2 elements per step (the "6 nodes for
+        // 3 steps" bug observed 2026-09-15). Class is set on the inner <g>
+        // by setAttribute below; outer wrapper is untagged.
         g.setNode(step.name, {
           label: () => {
             const node = document.createElementNS("http://www.w3.org/2000/svg", "g");
@@ -383,7 +388,6 @@
             node.addEventListener("click", () => selectStep(step.name));
             return node;
           },
-          class: `dag-node status-${step.status}`,
           paddingLeft: 8,
           paddingRight: 8,
           paddingTop: 8,
@@ -461,9 +465,13 @@
         state.taskId = taskId;
         $taskId.textContent = `task: ${taskId.slice(0, 12)}…`;
         renderDag();
-        // Auto-select first step if none selected
+        // Auto-select the step that surfaces the most info on snapshot — for
+        // orch.json, dispatch-commands shows both commander outputs (19, 7).
         if (!state.selectedStep && state.steps.length > 0) {
-          selectStep(state.steps[0].name);
+          const preferred = state.steps.find((s) => s.name === "dispatch-commands") ??
+            state.steps.find((s) => s.name === "aggregate-results") ??
+            state.steps[0];
+          selectStep(preferred.name);
         }
         updateStatusBadge();
       });

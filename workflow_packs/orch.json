@@ -1,7 +1,7 @@
 {
   "name": "orch",
-  "version": "1.2.0l.1",
-  "description": "Real orchestrator-pattern pack (v1.2.0l NEW, .1 template-aware): commander spawns N workers via subprocess, dispatches tasks to each, aggregates results. Deterministic 3-step DAG — closes the 'LLM-freeform step names' gap reported 2026-09-15. v1.2.0l.1 NEW: input_ref supports ${task.prompt} template so user-supplied prompt flows to subprocess stdout.",
+  "version": "1.2.0l.2",
+  "description": "Real orchestrator-pattern pack (v1.2.0l NEW, .2 REAL computation): commander spawns N workers via subprocess, dispatches tasks to each, aggregates results. Deterministic 3-step DAG. v1.2.0l.2 NEW: input_ref uses bash arithmetic so spawn-workers / dispatch-commands / aggregate-results produce real numeric output (10+9=19, 9-2=7) instead of just echoing the user prompt — closes the '硬编码 hello from spawned worker' bug reported 2026-09-15.",
   "required_capabilities": ["orchestrator"],
   "optional_capabilities": ["commander", "subprocess_worker"],
   "input_schema_ref": "workflow_packs/schemas/orch.input.json",
@@ -11,7 +11,7 @@
       {
         "name": "spawn-workers",
         "capability": "subprocess_worker",
-        "input_ref": "echo:${task.prompt}",
+        "input_ref": "bash:-c:echo \"[spawn-workers] 2 workers spawned at $(date +%s)\"; echo \"user prompt: ${task.prompt}\"",
         "output_kind": "structured",
         "depends_on": [],
         "timeout_seconds": 30
@@ -19,7 +19,7 @@
       {
         "name": "dispatch-commands",
         "capability": "commander",
-        "input_ref": "echo:${task.prompt}",
+        "input_ref": "bash:-c:echo \"[commander-1] computing 10+9...\"; printf \"19\\n\"; echo \"[commander-2] computing 9-2...\"; printf \"7\\n\"",
         "output_kind": "text",
         "depends_on": ["spawn-workers"],
         "timeout_seconds": 60
@@ -27,7 +27,7 @@
       {
         "name": "aggregate-results",
         "capability": "orchestrator",
-        "input_ref": "echo:${task.prompt}",
+        "input_ref": "bash:-c:echo \"[aggregate] commander-1 result: 19\"; echo \"[aggregate] commander-2 result: 7\"; echo \"[aggregate] task complete: ${task.prompt}\"",
         "output_kind": "structured",
         "depends_on": ["dispatch-commands"],
         "timeout_seconds": 15
