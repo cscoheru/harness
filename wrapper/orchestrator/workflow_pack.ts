@@ -120,6 +120,16 @@ function syntheticManifest(name: string): PackManifest {
 export async function plan(task: Task): Promise<PlanPlan> {
   const manifest = loadManifest(task.workflow_pack);
 
+  // v1.2.0l NEW: when manifest declares a default_plan, use it directly —
+  // closes the "dsh freeforms step names" gap that prompted the user-visible
+  // "Python 脚本 in UI" bug on 2026-09-15. A deterministic 3-step DAG from
+  // orch.json must beat an LLM-generated 2-step freeform plan. We only skip
+  // dsh when default_plan is non-empty; otherwise fall through to the
+  // existing dsh path. (plan_metadata.source = "manifest" downstream.)
+  if (manifest.default_plan && Array.isArray(manifest.default_plan.steps) && manifest.default_plan.steps.length > 0) {
+    return heuristicPlan(task, manifest);
+  }
+
   // v1.2.0k.4 LLM swap (DeepSeek → MiniMax M3): without MINIMAX_API_KEY the
   // dsh call cannot succeed — short-circuit to the heuristic plan instead of
   // burning a 60s spawn+timeout first. This is what makes unit tests
