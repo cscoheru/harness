@@ -5,6 +5,13 @@
  *   POST /api/pwa/dispatch   — receive PWA form → dispatch task
  *   GET  /api/pwa/status/:task_id — poll task status
  *   GET  /health             — liveness probe
+ *   ALL  /api/v1/*           — reverse proxy to wrapper-orch (port 4000)
+ *
+ * Why /api/v1/* proxy: harness.3strategy.cc routes through Tailscale Funnel
+ * to wrapper-frontend (:4002). The PWA's JS hits relative paths
+ * /api/v1/tasks + /api/v1/status/:id/stream which only exist on
+ * wrapper-orch (:4000). Without this proxy, EventSource 404s into the
+ * SPA fallback (returns index.html) → DAG renders empty.
  *
  * Does NOT hardcode DEEPSEEK_API_KEY — injected via process.env at runtime.
  * Does NOT lock to a specific model — uses class field from DispatchRequest.
@@ -21,11 +28,83 @@ const __filename = fileURLToPath(import.meta.url);
 const STATIC_DIR = path.join(__dirname, "static");
 const PORT = parseInt(process.env["PWA_PORT"] ?? "3000", 10);
 
+// ─── /api/v1/* reverse proxy target ──────────────────────────────────────────
+// Default to the standard wrapper-orchestrator port in the newvps compose
+// network. Override via env to point at any other reachable wrapper host.
+// PWA hits /api/v1/{tasks,status/:id,status/:id/stream,...} — proxy the whole
+// prefix verbatim so server.ts (the canonical endpoint owner) handles them.
+const ORCH_PROXY_URL = (process.env["PWA_ORCH_PROXY_URL"] ?? "http://wrapper-orchestrator:4000").replace(/\/$/, "");
+
 // ─── App setup ────────────────────────────────────────────────────────────────
 
 const app = express();
 
 app.use(express.json());
+
+// ─── /api/v1/* reverse proxy → wrapper-orchestrator ─────────────────────────
+// Native fetch proxy (no extra dep). Streams SSE correctly via
+// getReader() passthrough. Strips PWA_PORT-specific Origin so wrapper-orch
+// doesn't see cross-origin from PWA and reject.
+//
+// Implementation note: the prefix is rewritten verbatim — PWA's
+// /api/v1/tasks → wrapper-orch's /api/v1/tasks (server.ts:175 line). We
+// preserve method + headers (minus hop-by-hop) + body so SSE long-polls
+// stream through unmodified.
+app.all("/api/v1/*path", async (req: Request, res: Response) => {
+  const targetUrl = `${ORCH_PROXY_URL}${req.originalUrl}`;
+  const headers: Record<string, string> = {};
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (typeof v === "string") {
+      // hop-by-hop per RFC 7230 §6.1; also strip Origin/Host so wrapper-orch
+      // trusts the request as internal rather than treating it cross-origin
+      if (
+        k.toLowerCase() === "host" ||
+        k.toLowerCase() === "connection" ||
+        k.toLowerCase() === "origin" ||
+        k.toLowerCase() === "content-length"
+      ) {
+        continue;
+      }
+      headers[k] = v;
+    }
+  }
+  try {
+    const upstream = await fetch(targetUrl, {
+      method: req.method,
+      headers,
+      body: ["GET", "HEAD"].includes(req.method) ? undefined : JSON.stringify(req.body ?? {}),
+    });
+    res.status(upstream.status);
+    upstream.headers.forEach((v, k) => {
+      // hop-by-hop response headers we must not forward
+      if (
+        k.toLowerCase() !== "connection" &&
+        k.toLowerCase() !== "transfer-encoding" &&
+        k.toLowerCase() !== "content-encoding"
+      ) {
+        res.setHeader(k, v);
+      }
+    });
+    if (!upstream.body) {
+      res.end();
+      return;
+    }
+    const reader = upstream.body.getReader();
+    const pump = async (): Promise<void> => {
+      const { done, value } = await reader.read();
+      if (done) {
+        res.end();
+        return;
+      }
+      res.write(Buffer.from(value));
+      return pump();
+    };
+    await pump();
+  } catch (err) {
+    console.error(`[pwa_server] proxy → ${targetUrl} failed: ${err}`);
+    res.status(502).json({ error: "upstream unreachable", detail: String(err) });
+  }
+});
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 

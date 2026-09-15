@@ -260,6 +260,24 @@ function enrichStep(step: PackStep): PlanStep {
   };
 }
 
+// v1.2.0l.1 NEW: enrichStepWithTask expands ${task.prompt} / ${task.task_id}
+// / ${task.workflow_pack} template variables inside step.input_ref so
+// orch.json can reference the user-supplied prompt instead of being a
+// static literal. Closes the "spawn-workers always says hello from
+// spawned worker" hardcoded-output bug reported 2026-09-15.
+function enrichStepWithTask(step: PackStep, task: Task): PlanStep {
+  const interpolated = expandTemplate(step.input_ref, {
+    'task.prompt': extractPrompt(task),
+    'task.task_id': task.task_id,
+    'task.workflow_pack': task.workflow_pack,
+  });
+  return enrichStep({ ...step, input_ref: interpolated });
+}
+
+function expandTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\$\{([a-zA-Z0-9_.]+)\}/g, (_m, key: string) => vars[key] ?? `\${${key}}`);
+}
+
 function heuristicPlan(task: Task, manifest: PackManifest): PlanPlan {
   // v1.2.0l NEW (per F24 deterministic pack): if the pack manifest declares a
   // default_plan.steps array, emit those steps directly (deterministic,
@@ -269,7 +287,7 @@ function heuristicPlan(task: Task, manifest: PackManifest): PlanPlan {
   // "freeform 3 step names" gap that user reported on 2026-09-15.
   if (manifest.default_plan && Array.isArray(manifest.default_plan.steps) && manifest.default_plan.steps.length > 0) {
     return {
-      steps: manifest.default_plan.steps.map(enrichStep),
+      steps: manifest.default_plan.steps.map((step) => enrichStepWithTask(step, task)),
       plan_metadata: {
         source: 'manifest',
         manifest_name: manifest.name,
