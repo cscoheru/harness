@@ -11,7 +11,7 @@
       {
         "name": "spawn-workers",
         "capability": "subprocess_worker",
-        "input_ref": "count",
+        "input_ref": "echo:hello from spawned worker",
         "output_kind": "structured",
         "depends_on": [],
         "timeout_seconds": 30
@@ -19,7 +19,7 @@
       {
         "name": "dispatch-commands",
         "capability": "commander",
-        "input_ref": "tasks",
+        "input_ref": "echo:dispatching hello commands to workers",
         "output_kind": "text",
         "depends_on": ["spawn-workers"],
         "timeout_seconds": 60
@@ -27,7 +27,7 @@
       {
         "name": "aggregate-results",
         "capability": "orchestrator",
-        "input_ref": "results",
+        "input_ref": "echo:aggregated 2 worker responses",
         "output_kind": "structured",
         "depends_on": ["dispatch-commands"],
         "timeout_seconds": 15
