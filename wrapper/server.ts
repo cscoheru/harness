@@ -119,6 +119,28 @@ app.get('/health', async (_req, res) => {
   }
 });
 
+// v1.2.0m NEW: GET /api/orch/healthz — proxy the same kernel health probe as
+// /health, but under the FastAPI k8s-style path so edge hosts (which only
+// reach newvps via wrapper-orchestrator :4000) can probe kernel HTTP without
+// needing direct 4091 access (host port 4091 is intentionally not exposed;
+// kernel-http lives inside deploy_harness_net for blast-radius isolation).
+// Edge wrappers set HARNESS_RUNTIME_URL=http://newvps.fish-harness.ts.net:4000
+// and orchestrator.health() in turn fetches http://localhost:<wrapper>/api/orch/healthz
+// — but wait, that's a recursion risk. Re-derive URL from req so the proxy
+// targets its OWN origin (kernel-http is sibling, not self): the edge sees the
+// wrapper, the wrapper probes kernel via the configured kernelBaseUrl() chain.
+// Here we just re-emit orchestrator.health() result, which internally calls
+// kernelBaseUrl() — on newvps that resolves to fish-harness-kernel-http:4091
+// (docker DNS) so no recursion.
+app.get('/api/orch/healthz', async (_req, res) => {
+  try {
+    const h: HealthResponse = await orchestrator.health();
+    res.json(h);
+  } catch (err) {
+    res.status(500).json({ status: 'error', version: 'unknown', error: String(err) });
+  }
+});
+
 // POST /api/v1/tasks — accept task, dispatch through orchestrator
 const handlePostTasks: RouteHandler = async (req, res) => {
   try {

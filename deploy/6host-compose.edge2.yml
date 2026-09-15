@@ -28,6 +28,12 @@ services:
     env_file:
       - env/edge-host.env.example
     environment:
+      # v1.2.0m NEW: HARNESS_RUNTIME_URL → newvps wrapper-orchestrator :4000
+      # (same rationale as edge1 — see that file for full note). Edge hosts
+      # cannot reach newvps kernel-http container directly (host :4091 not
+      # exposed); wrapper-orchestrator exposes /api/orch/healthz as proxy
+      # so edge probes succeed without exposing kernel internally.
+      HARNESS_RUNTIME_URL: "http://newvps.fish-harness.ts.net:4000"
       HARNESS_API_URL: "http://newvps.fish-harness.ts.net:4000"
       WRAPPER_PORT: "4001"
       WORKER_ID: "${WORKER_ID:-edge2-wrapper}"
@@ -40,7 +46,7 @@ services:
       # worker.ts:218 autoRegister() parses this and stores in worker_pool.
       # capabilities_json → LIKE-filtered dispatch (worker_pool.ts:179).
       WORKER_CAPABILITIES: '["llm","subprocess","http"]'
-      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
+      MINIMAX_API_KEY: "${MINIMAX_API_KEY}"
       ORCHESTRATOR_CLASS: "orchestrator"
       DSH_PROFILE: "headless"
       EDGE_REGION: "west-1"

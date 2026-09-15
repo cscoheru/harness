@@ -30,6 +30,16 @@ services:
     env_file:
       - env/edge-host.env.example
     environment:
+      # v1.2.0m NEW: HARNESS_RUNTIME_URL must point at a URL edge containers
+      # can reach. Edge hosts cannot reach newvps's kernel-http container
+      # directly (host :4091 is intentionally not exposed; kernel-http lives
+      # only inside deploy_harness_net for blast-radius isolation). The
+      # wrapper-orchestrator (newvps :4000) exposes /api/orch/healthz as a
+      # proxy (wrapper/server.ts) so the wrapper does the kernel-http:4091
+      # fetch from inside newvps's docker DNS and re-emits the result. The
+      # previous default `http://localhost:4001` made edge wrappers spam
+      # "kernel unreachable, returning stub" every 30s on each /health probe.
+      HARNESS_RUNTIME_URL: "http://newvps.fish-harness.ts.net:4000"
       # Cross-host routing: MagicDNS name (no pinned IP; hygiene §4.5)
       HARNESS_API_URL: "http://newvps.fish-harness.ts.net:4000"
       WRAPPER_PORT: "4001"
@@ -43,7 +53,7 @@ services:
       # worker.ts:218 autoRegister() parses this and stores in worker_pool.
       # capabilities_json → LIKE-filtered dispatch (worker_pool.ts:179).
       WORKER_CAPABILITIES: '["llm","subprocess","http"]'
-      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
+      MINIMAX_API_KEY: "${MINIMAX_API_KEY}"
       ORCHESTRATOR_CLASS: "orchestrator"
       DSH_PROFILE: "headless"
       EDGE_REGION: "east-1"
