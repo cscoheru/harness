@@ -322,7 +322,8 @@ Cline 一审 (2026-09-16, M1 pre-implementation scope) 找 1 major + 4 minor + 2
 | **R2** (major) | ✅ FIXED (本 commit v1.2 §2 B + §2 I + §3 #3 codify include-failed, 引 v1.2.0l.5 upstream_injection.test.ts:20 先例) |
 | **R3** (major) | ✅ FIXED (本 commit v1.2 §3 #8 + §4 命令改正确 git 语法 — `--no-pager` 置于 `diff` 子命令前, 不是子命令后) |
 | **R4** (minor) | ✅ FIXED (closure v1.2 更正"实施未揭新 finding" → 二审 3 major + 1 minor + 1 info; 一审 CONDITIONAL 不再升格为 PASS, 等 Cline 三审) |
-| **总计** | **11/11 findings 显式处置** (per v0.6 #4 硬约束, 无漏计) |
+| **R5** (info) | ✅ ANNOTATED (closure v1.2 §Cline 二审 trail 段含 R5 处置; git trail 计数 11 commits + 2 tags 正确) |
+| **总计** | **12/12 findings 显式处置** (per v0.6 #4 硬约束, 无漏计) |
 
 **v0.6 硬约束升级 (per R3 教训)**: 任何 commit message 或 doc 中的 cat-file 实证命令**必须可原样复制粘贴运行**。具体: 全局选项 (`--no-pager`, `-c`, etc.) 置于子命令 (`diff`, `log`, `show`) 之前, 不是之后。L8 grep 命中须逐条列源 (行号 + 上下文), 不允许只报计数 0 (R3 教训: 自检 "0" 可能是失败命令的空洞输出)。
 

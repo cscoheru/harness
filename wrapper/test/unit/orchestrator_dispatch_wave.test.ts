@@ -1,17 +1,23 @@
 /**
  * orchestrator_dispatch_wave.test.ts — Unit tests for v1.2.0n M1
- * depends_on topological wave execution (per audit-scope v1.1 §2 A/D).
+ * depends_on topological wave execution (per audit-scope v1.2 §2 A + §3 #4).
  *
- * Coverage (5 tests):
+ * Coverage (7 tests):
  *   T1 — 3-step DAG (current real-world orch.json shape) → 1 wave, all
  *        steps run; realStepCount = 3
  *   T2 — fan-out DAG (A → B+C → D, 4 steps) → 3 waves; B+C run in
  *        same wave via Promise.all (verify 2 dispatchSpy calls within
  *        100ms — per Cline implementation note "测试须造 fan-out DAG")
  *   T3 — cyclic depends_on (A→B→A) → throws CyclicDependsOnError
- *        (per audit-scope v1.1 §2 D)
- *   T4 — error propagation: B fails → D skipped (per audit-scope v1.1 §2 I;
- *        mark upstream-failed)
+ *        (per audit-scope v1.2 §3 #4)
+ *   T3b — unknown depends_on reference → throws "depends on unknown step"
+ *   T4 — M1.0 wave error NOT blocking downstream: B fails (mockWorkerRun
+ *        mockImplementationOnce → driver.failed) → D (depends on B) is
+ *        STILL dispatched (M1.0 行为). M1.1 candidate: skip-dependents.
+ *        (per audit-scope v1.2 §2 A — fix-forward per Cline 二审 R1)
+ *   T4b — topologicalWaves still produces 3 waves for chain DAG
+ *        regardless of error propagation (wave computation is structural,
+ *        not error-aware)
  *   T5 — empty plan (heuristic 1-step) → realStepCount = 0
  *
  * Pattern: vi.spyOn commander.planStep + dispatchStep + _recordStepResult;
