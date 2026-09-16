@@ -173,6 +173,11 @@ services:
       WORKER_ID: "${WORKER_ID:-wrapper-orchestrator}"
       MINIMAX_API_KEY: "${MINIMAX_API_KEY}"
       ORCHESTRATOR_CLASS: "orchestrator"
+      # v1.2.0n M0.1 NEW: heartbeat self-registration → wrapper-frontend's
+      # local worker_pool so PWA "active workers" badge populates. See
+      # pwa_server.ts:42-127 for the local handler + Option C double-write.
+      WORKER_HEARTBEAT_URL: "http://wrapper-frontend:4002"
+      WORKER_HOST: "wrapper-orchestrator"
       DSH_PROFILE: "headless"
       # v1.2.0l unblock: explicit PACKS_DIR override. The default
       # `dirname(import.meta.url)/../../workflow_packs` resolves to
@@ -227,6 +232,11 @@ services:
       WORKER_ID: "${WORKER_ID:-wrapper-commander}"
       MINIMAX_API_KEY: "${MINIMAX_API_KEY}"
       ORCHESTRATOR_CLASS: "commander"
+      # v1.2.0n M0.1 NEW: heartbeat self-registration → wrapper-frontend (see
+      # pwa_server.ts:42-127). Option C double-write also forwards to
+      # wrapper-orchestrator's persistent pool.
+      WORKER_HEARTBEAT_URL: "http://wrapper-frontend:4002"
+      WORKER_HOST: "wrapper-commander"
       DSH_PROFILE: "headless"
     networks:
       - harness_net
@@ -273,6 +283,9 @@ services:
       WORKER_ID: "wrapper-commander-2"
       MINIMAX_API_KEY: "${MINIMAX_API_KEY}"
       ORCHESTRATOR_CLASS: "commander"
+      # v1.2.0n M0.1 NEW: same as wrapper-commander — heartbeat to frontend.
+      WORKER_HEARTBEAT_URL: "http://wrapper-frontend:4002"
+      WORKER_HOST: "wrapper-commander-2"
       DSH_PROFILE: "headless"
     networks:
       - harness_net
@@ -310,6 +323,13 @@ services:
     working_dir: /app/wrapper
     volumes:
       - ..:/app:ro
+      # v1.2.0n M0.1 NEW: persist wrapper-frontend's local worker_pool
+      # (populated by /api/v1/worker/heartbeat short-circuit at
+      # pwa_server.ts:42-127). Shared with wrapper-orchestrator's
+      # `orch_pool` volume so both processes see the same SQLite WAL file
+      # — Option C double-write keeps both pools populated; the persistent
+      # volume ensures worker registrations survive container recreate.
+      - orch_pool:/data
     env_file:
       - env/newvps.env.example
     environment:

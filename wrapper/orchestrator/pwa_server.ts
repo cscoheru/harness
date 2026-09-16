@@ -41,6 +41,132 @@ const app = express();
 
 app.use(express.json());
 
+// ─── /api/v1/worker/heartbeat — LOCAL short-circuit (v1.2.0n M0.1) ──────────
+// wrapper-frontend (PWA host, :4002) accepts heartbeat POSTs locally and
+// populates its OWN in-process SqliteWorkerPool. This was the missing half
+// of the worker-pool auto-registration chain — wrapper-orch's pool was
+// registered, but wrapper-frontend dispatched tasks via its OWN (empty)
+// pool. Now both populate; orchestrator's pool stays the source of truth
+// (persistent SQLite via orch_pool volume), wrapper-frontend's pool feeds
+// the PWA "active workers" UI badge.
+//
+// MUST be registered BEFORE /api/v1/* proxy below — Express matches in
+// registration order, and the wildcard would otherwise forward heartbeat
+// to wrapper-orch (which is fine, but the PWA UI wouldn't see the local
+// worker). Option C (per M0 design audit): double-write — also forward
+// to wrapper-orch so its pool also stays populated; if forwarding fails,
+// the local registration still succeeds (degraded mode).
+app.post("/api/v1/worker/heartbeat", async (req: Request, res: Response) => {
+  try {
+    const body = (req.body ?? {}) as {
+      worker_id?: string;
+      host?: string;
+      capabilities_json?: string;
+    };
+
+    // Schema validation (mirrors server.ts:340-348 F6 injection guard)
+    const allowedKeys = new Set(["worker_id", "host", "capabilities_json"]);
+    const extraKeys = Object.keys(body).filter((k) => !allowedKeys.has(k));
+    if (extraKeys.length > 0) {
+      res.status(400).json({
+        status: "error",
+        error: `unexpected fields: ${extraKeys.join(", ")}`,
+      });
+      return;
+    }
+
+    const workerModule = await import("./worker.js");
+    const workerPoolModule = await import("./worker_pool.js");
+    const worker_pool = workerPoolModule.getDefaultWorkerPool();
+
+    let resultBody: Record<string, unknown>;
+    if (typeof body.worker_id === "string" && body.worker_id.length > 0) {
+      // Subsequent heartbeat
+      try {
+        const lastHeartbeatAt = await worker_pool.heartbeat(body.worker_id);
+        const workerInfo = worker_pool.getWorker(body.worker_id);
+        resultBody = {
+          status: "ok",
+          worker_id: body.worker_id,
+          last_heartbeat_at: lastHeartbeatAt,
+          worker_status: workerInfo?.status ?? "unknown",
+        };
+      } catch (err) {
+        if (err instanceof workerPoolModule.WorkerNotFoundError) {
+          res.status(404).json({
+            status: "error",
+            error: `worker_id '${body.worker_id}' not found — register first via host + capabilities_json`,
+          });
+          return;
+        }
+        if (err instanceof workerPoolModule.WorkerNotActiveError) {
+          res.status(409).json({
+            status: "error",
+            error: `worker_id '${body.worker_id}' is not active (status='${err.current_status}')`,
+          });
+          return;
+        }
+        throw err;
+      }
+    } else {
+      // First-call register path
+      if (!body.host || typeof body.host !== "string") {
+        res.status(400).json({
+          status: "error",
+          error: "host required for first-call register path",
+        });
+        return;
+      }
+      if (!body.capabilities_json || typeof body.capabilities_json !== "string") {
+        res.status(400).json({
+          status: "error",
+          error: "capabilities_json required for first-call register path",
+        });
+        return;
+      }
+      if (body.capabilities_json.length > 10240) {
+        res.status(413).json({
+          status: "error",
+          error: `capabilities_json too large (${body.capabilities_json.length} > 10240 bytes)`,
+        });
+        return;
+      }
+
+      const worker_id = await workerModule.register(body.host, body.capabilities_json);
+      const lastHeartbeatAt = await worker_pool.heartbeat(worker_id);
+      resultBody = {
+        status: "ok",
+        worker_id,
+        last_heartbeat_at: lastHeartbeatAt,
+        worker_status: "active",
+      };
+    }
+
+    // Option C double-write: forward same payload to wrapper-orchestrator so
+    // its persistent SQLite pool also populates. Best-effort — if upstream
+    // is unreachable we still respond 200 with the local result. PWA UI
+    // shows local pool; orchestrator dispatches use orchestrator's pool.
+    try {
+      void fetch(`${ORCH_PROXY_URL}/api/v1/worker/heartbeat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(req.body ?? {}),
+      }).catch((err) => {
+        // Don't fail the response — just log. Orchestrator pool will catch up
+        // on the worker's next heartbeat (10s default interval).
+        console.warn(`[pwa_server] heartbeat double-write → ${ORCH_PROXY_URL} failed: ${err}`);
+      });
+    } catch (err) {
+      console.warn(`[pwa_server] heartbeat double-write dispatch error: ${err}`);
+    }
+
+    res.json(resultBody);
+  } catch (err) {
+    console.error(`[pwa_server] heartbeat error: ${err}`);
+    res.status(500).json({ status: "error", error: String(err) });
+  }
+});
+
 // ─── /api/v1/* reverse proxy → wrapper-orchestrator ─────────────────────────
 // Native fetch proxy (no extra dep). Streams SSE correctly via
 // getReader() passthrough. Strips PWA_PORT-specific Origin so wrapper-orch
@@ -50,6 +176,9 @@ app.use(express.json());
 // /api/v1/tasks → wrapper-orch's /api/v1/tasks (server.ts:175 line). We
 // preserve method + headers (minus hop-by-hop) + body so SSE long-polls
 // stream through unmodified.
+//
+// v1.2.0n M0.1: heartbeat is intercepted ABOVE — this proxy covers the
+// rest of /api/v1/* (tasks, status/:id, status/:id/stream, etc.).
 app.all("/api/v1/*path", async (req: Request, res: Response) => {
   const targetUrl = `${ORCH_PROXY_URL}${req.originalUrl}`;
   const headers: Record<string, string> = {};
