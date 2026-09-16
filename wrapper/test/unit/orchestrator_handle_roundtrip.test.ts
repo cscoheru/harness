@@ -38,26 +38,49 @@ vi.mock("../../dsh/minimax_client.js", () => ({
   })),
 }));
 
-// Mock worker module to control the event stream shape (T1).
-// Other tests re-mock this with custom event streams.
-const mockWorkerRun = vi.fn();
-vi.mock("../../orchestrator/worker.js", () => ({
-  ...vi.importActual("../../orchestrator/worker.js"),
-  run: (...args: unknown[]) => mockWorkerRun(...args),
-  interrupt: vi.fn(async () => undefined),
-  capability: vi.fn(() => ({
-    driver_kind: "codex_exec",
-    evidence_uri: "spec/capabilities/worker.json",
-    max_concurrent_attempts: 1,
-    supports_streaming: true,
-    supports_interrupt: true,
-    supports_heartbeat: true,
-    supports_tool_gateway: false,
-  })),
+// M0.3 fix: orchestrator.ts:480 constructs `new DriverClass()` and calls
+// `.run(runRequest)` — not `workerModule.run()`. The previous vi.mock on
+// `worker.js` did NOT intercept this path (SpawnDshDriver kept running
+// its real streamDeepseekInvoke → routedDsh → LLM path). Replace the
+// entire `execution_driver.js` module so `SpawnDshDriver` is a stub
+// yielding whatever mockWorkerRun() emits. vi.hoisted() exposes
+// mockWorkerRun / mockWorkerInterrupt to the vi.mock factory (vitest
+// hoists vi.mock to the top of the file before imports run, so plain
+// `const mockWorkerRun = vi.fn()` would be undefined inside the factory).
+const { mockWorkerRun, mockWorkerInterrupt } = vi.hoisted(() => ({
+  mockWorkerRun: vi.fn(),
+  mockWorkerInterrupt: vi.fn(async () => undefined),
 }));
 
+vi.mock("../../orchestrator/execution_driver.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../orchestrator/execution_driver.js")
+  >();
+  class MockSpawnDshDriver {
+    capability() {
+      return {
+        driver_kind: "codex_exec" as const,
+        evidence_uri: "spec/capabilities/worker.json",
+        max_concurrent_attempts: 1,
+        supports_streaming: true,
+        supports_interrupt: true,
+        supports_heartbeat: true,
+        supports_tool_gateway: false,
+      };
+    }
+    async *run(request: unknown) {
+      // Delegate to mockWorkerRun so each test can swap event streams
+      // via `mockWorkerRun.mockImplementation(async function*() {...})`.
+      yield* mockWorkerRun(request);
+    }
+    async interrupt(handle: unknown, reason: string) {
+      return mockWorkerInterrupt(handle, reason);
+    }
+  }
+  return { ...actual, SpawnDshDriver: MockSpawnDshDriver };
+});
+
 import { dispatch, cancel } from "../../orchestrator/orchestrator.js";
-import * as workerModule from "../../orchestrator/worker.js";
 import * as taskStoreModule from "../../orchestrator/task_store.js";
 import * as queueStoreModule from "../../orchestrator/queue_store.js";
 import * as workerPoolModule from "../../orchestrator/worker_pool.js";
@@ -244,12 +267,14 @@ describe("T2-T5: orchestrator captures + cleans up handle on terminal events", (
       };
     });
 
-    const interruptSpy = vi.spyOn(workerModule, "interrupt");
+    // M0.3 fix: was vi.spyOn(workerModule, "interrupt") — removed; the
+    // mock class's interrupt() now delegates to mockWorkerInterrupt (vi.hoisted),
+    // so we assert against mockWorkerInterrupt directly below.
 
     await dispatch(makeTask(taskId));
 
     // interruptByTaskId was called with the captured handle + reason derived from terminal event
-    expect(interruptSpy).toHaveBeenCalledWith(
+    expect(mockWorkerInterrupt).toHaveBeenCalledWith(
       expect.objectContaining({ cancel_token: handle.cancel_token }),
       expect.stringMatching(/step complete: driver\.finished/),
     );
@@ -271,13 +296,15 @@ describe("T2-T5: orchestrator captures + cleans up handle on terminal events", (
       };
     });
 
-    const interruptSpy = vi.spyOn(workerModule, "interrupt");
+    // M0.3 fix: was vi.spyOn(workerModule, "interrupt") — removed; the
+    // mock class's interrupt() now delegates to mockWorkerInterrupt (vi.hoisted),
+    // so we assert against mockWorkerInterrupt directly below.
 
     await dispatch(makeTask(taskId));
 
     // interrupt called exactly once with the captured handle (per-step cleanup)
-    expect(interruptSpy).toHaveBeenCalledTimes(1);
-    expect(interruptSpy).toHaveBeenCalledWith(
+    expect(mockWorkerInterrupt).toHaveBeenCalledTimes(1);
+    expect(mockWorkerInterrupt).toHaveBeenCalledWith(
       expect.objectContaining({ cancel_token: handle.cancel_token }),
       "step complete: driver.finished",
     );
@@ -299,11 +326,13 @@ describe("T2-T5: orchestrator captures + cleans up handle on terminal events", (
       };
     });
 
-    const interruptSpy = vi.spyOn(workerModule, "interrupt");
+    // M0.3 fix: was vi.spyOn(workerModule, "interrupt") — removed; the
+    // mock class's interrupt() now delegates to mockWorkerInterrupt (vi.hoisted),
+    // so we assert against mockWorkerInterrupt directly below.
 
     await dispatch(makeTask(taskId));
 
-    expect(interruptSpy).toHaveBeenCalledWith(
+    expect(mockWorkerInterrupt).toHaveBeenCalledWith(
       expect.objectContaining({ cancel_token: handle.cancel_token }),
       "step complete: driver.interrupted",
     );
@@ -325,11 +354,13 @@ describe("T2-T5: orchestrator captures + cleans up handle on terminal events", (
       };
     });
 
-    const interruptSpy = vi.spyOn(workerModule, "interrupt");
+    // M0.3 fix: was vi.spyOn(workerModule, "interrupt") — removed; the
+    // mock class's interrupt() now delegates to mockWorkerInterrupt (vi.hoisted),
+    // so we assert against mockWorkerInterrupt directly below.
 
     await dispatch(makeTask(taskId));
 
-    expect(interruptSpy).toHaveBeenCalledWith(
+    expect(mockWorkerInterrupt).toHaveBeenCalledWith(
       expect.objectContaining({ cancel_token: handle.cancel_token }),
       "step complete: driver.failed",
     );
@@ -385,7 +416,9 @@ describe("T6: cancel() calls interrupt on captured handle", () => {
       };
     });
 
-    const interruptSpy = vi.spyOn(workerModule, "interrupt");
+    // M0.3 fix: was vi.spyOn(workerModule, "interrupt") — removed; the
+    // mock class's interrupt() now delegates to mockWorkerInterrupt (vi.hoisted),
+    // so we assert against mockWorkerInterrupt directly below.
 
     // Start dispatch in background — it will be in the for-await loop after handle capture
     const dispatchPromise = dispatch(makeTask(taskId));
@@ -402,7 +435,7 @@ describe("T6: cancel() calls interrupt on captured handle", () => {
     await dispatchPromise;
 
     // cancel() must have invoked interrupt with the captured handle + reason "cancelled by user"
-    expect(interruptSpy).toHaveBeenCalledWith(
+    expect(mockWorkerInterrupt).toHaveBeenCalledWith(
       expect.objectContaining({ cancel_token: handle.cancel_token }),
       "cancelled by user",
     );
@@ -458,12 +491,14 @@ describe("T7: dispatch end cleanup is idempotent (no-op if no handle)", () => {
       error: null,
     });
 
-    const interruptSpy = vi.spyOn(workerModule, "interrupt");
+    // M0.3 fix: was vi.spyOn(workerModule, "interrupt") — removed; the
+    // mock class's interrupt() now delegates to mockWorkerInterrupt (vi.hoisted),
+    // so we assert against mockWorkerInterrupt directly below.
 
     // Should not throw — interruptByTaskId is no-op when _activeHandles is empty
     await expect(dispatch(makeTask(taskId))).resolves.toBeDefined();
 
     // workerModule.interrupt() was NOT called (no handle captured)
-    expect(interruptSpy).not.toHaveBeenCalled();
+    expect(mockWorkerInterrupt).not.toHaveBeenCalled();
   });
 });
