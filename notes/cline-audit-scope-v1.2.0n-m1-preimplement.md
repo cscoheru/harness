@@ -79,7 +79,7 @@ $ grep -cE '\$\{step\.\*' wrapper/orchestrator/workflow_pack.ts
 - **Wave 算法**: Kahn's algorithm (BFS topological sort) 或 DFS with cycle detection
   - Wave 1: 0 个 depends_on 满足的 steps (root steps) — `Promise.all` 并行
   - Wave N: 所有 depends_on 都在 Wave 1..N-1 completed 的 steps — 并行
-- **错误传播**: 一个 step 失败 → 同 wave 其他 step 继续, 但后续 wave 跳过 (mark upstream failed → step skipped)
+- **错误传播 (M1.0 行为, per Cline 二审 R1)**: 一个 step 失败 → 同 wave 其他 step 继续 (Promise.all 不 reject 单个 reject), **后续 wave 仍 dispatch** — 失败步的 `_recordStepFailure` 调用记录 + SSE `emitStepUpdate` 可见失败信号; aggregate-results 看到 `failed_steps[]` (per orchestrator.ts:aggregateResults). **M1.1 candidate**: skip-dependents logic — 下游 mark `skipped`, wave 内未派发 (per Cline 二审 R1 建议, v1.2.0n M1.1 candidate)
 - **Cycle detection**: depends_on 形成环时 → throw at plan time, 不可静默死锁
 - **保留**: `realStepCount += 1` 仅在 step completed 时 (per orchestrator.ts:L539 实测); plan-aggregated stdout 仍用 orchestrator.ts:L560 fallback 路径 (aggregate-results 是 orch.json step `name` @ L31, 不是 orchestrator.ts 内部标识 — grep `aggregate-results` orchestrator.ts = 0, 该名仅在 orch.json 内)
 - Verification: 4-step DAG (e.g., A → B/C → D) B 和 C 并行, D 等 B+C 完成
@@ -91,8 +91,8 @@ $ grep -cE '\$\{step\.\*' wrapper/orchestrator/workflow_pack.ts
   - `${step.*::stdout}` → `[spawn-workers stdout]\n---\n[dispatch-commands stdout]\n---\n[aggregate-results stdout]` (按 execution order)
   - `${step.*::host}` → 类似拼接 (但 host 通常不需要 concatenate, 留作 case-by-case)
 - **Delimiter**: 默认 `\n---\n` (前/后 separator), 可通过 `${step.*::stdout::delim=|||}` 形式扩展 (M1.1 候选)
-- **Skip non-completed**: failed/cancelled steps' field 不进 concatenation
-- Verification: 3-step plan, aggregate-results input_ref = `bash:-c:echo "\${step.*::stdout}"` → bash 看到的是 3 段拼接字符串
+- **Include failed (codify)**: failed steps' field **进** concatenation (rationale: aggregate stdout 失败信号 visible; 与 v1.2.0l.5 既有 `workflow_pack_upstream_injection.test.ts:20` 先例一致 — `v1.2.0l.5` 完成/失败的 explicit-ref 都解析). running/pending/cancelled steps **不进** (无 stdout 可读, bash 见空字符串 silent corruption)
+- Verification: 3-step plan with step-A failed, aggregate-results input_ref = `bash:-c:echo "\${step.*::stdout}"` → bash 看到 `[A failed stdout]\n---\n[B stdout]` (2 段, failed 可见)
 
 **C. wave 内并发数限制** (`wrapper/orchestrator/orchestrator.ts`)
 
@@ -129,7 +129,7 @@ $ grep -cE '\$\{step\.\*' wrapper/orchestrator/workflow_pack.ts
 
 **H. wildcard + explicit `${step::name::field}` 互操作** — aggregate-results input_ref 同时含 `${step.*::stdout}` 和 `${step::dispatch-commands::stdout}`? 展开两次: 第一次 wildcard 拼接 3 step stdout; 第二次 explicit 单取 dispatch-commands stdout。两者互不冲突, 但 bash 看到的是拼接 + 单取, 顺序任意。
 
-**I. failed step in wildcard** — step-A failed, step-B completed, aggregate-results `${step.*::stdout}` → 只含 step-B stdout (跳过 step-A)。bash 看不到 step-A 失败信号。**需要**: aggregate-results input_ref 加 `${step.*::status}` 检查 (M1.1 候选); M1.0 失败 step stdout 跳过 (用户从 SSE step_update events 看 failure).
+**I. failed step in wildcard** (codify include-failed, per Cline 二审 R2) — step-A failed, step-B completed, aggregate-results `${step.*::stdout}` → 含 step-A + step-B (rationale: 失败信号 visible 给用户; 与 v1.2.0l.5 既有 `workflow_pack_upstream_injection.test.ts:20` 先例一致 — 完成/失败都解析). running/pending/cancelled steps **不进** (无 stdout 可读, bash 见空字符串 silent corruption). M1.1 candidate: `${step.*::status}` wildcard 加显式 failure surfacing (per audit-scope v1.2 §2 I 注释)
 
 **J. realStepCount + wave** — 当前 `realStepCount` 在 step completed 时 +1 (L539). Wave 内 step 完成后 +1, 但 wave 之间还应继续累加。`realStepCount === 0` 判断 (L560) 仍正确 (heuristic 1-step 无 wave). Verification: 5-step DAG all completed → realStepCount = 5.
 
@@ -148,12 +148,12 @@ $ grep -cE '\$\{step\.\*' wrapper/orchestrator/workflow_pack.ts
 |---|------|------|----------|------|
 | 1 | Correctness | depends_on cycle detection 不工作 | 单元测试: cycle DAG → throw `CyclicDependsOnError` | throw + 错误消息含 cycle path |
 | 2 | Correctness | wave 内并发 race condition | 单元测试: 4-step DAG (1 root + 2 mid + 1 leaf) → B 和 C 并行 (dispatchSpy.calls 同时触发) | 2 个 dispatchSpy 在 100ms 内 |
-| 3 | Correctness | wildcard 跳过 failed step | 单元测试: step-A failed, step-B completed → `${step.*::stdout}` 不含 step-A | bash sees only step-B stdout |
-| 4 | Correctness | 错误传播 (后续 wave skip) | 单元测试: step-B failed → step-D (depends on B) skipped (mark upstream-failed) | step-D.status = 'skipped' (新 status) |
+| 3 | Correctness | wildcard include failed step (per §2 B codify) | 单元测试: step-A failed, step-B completed → `${step.*::stdout}` 含 step-A + step-B (rationale: failed signal visible) | bash sees both stdout |
+| 4 | Correctness | 错误传播 (M1.0: 不阻断下游; M1.1 candidate: skip-dependents) | 单元测试: step-B failed → step-D (depends on B) 仍被 dispatchStep 调用 (M1.0 行为); M1.1 加 skip 逻辑后此测试改断言 D 未被 dispatchStep | M1.0: D 被 dispatch + 后续 step_update SSE 事件可见失败 |
 | 5 | Correctness | wildcard shell-escape 边界 | 单元测试: step stdout = `"; DROP TABLE;` → shellEscape 后 `\"; DROP TABLE;` 进 bash string | bash 看到的是字符串 literal, 不执行 |
 | 6 | Hygiene | L8 secrets | `git diff M1_commit^..M1_commit -U0 \| grep sk-/TOKEN` | 0 matches |
 | 7 | Hygiene | L19 tag 指向 commit 1 SHA | `git rev-parse v1.2.0n.1^{commit}` | = M1 commit SHA |
-| 8 | Hygiene | v1.0 runtime immutability | `git diff M1_commit^..M1_commit --no-pager -- harness/server.py spec/ kernel-schema.sql \| wc -l` | 0 |
+| 8 | Hygiene | v1.0 runtime immutability (M1 commit 范围, 正确 git 语法) | `git --no-pager diff M1_commit^ M1_commit -- harness/server.py spec/ kernel-schema.sql \| wc -l` | 0 |
 | 9 | Build | tsc clean | `cd wrapper && ./node_modules/.bin/tsc --noEmit` | exit 0 |
 | 10 | Test | full vitest | `cd wrapper && ./node_modules/.bin/vitest run` | 260+ PASS / 0 FAIL |
 | 11 | Build | plan 解析 in unit test | `wrapper/test/unit/workflow_pack_wildcard.test.ts` NEW 5 tests | 5/5 PASS |
@@ -311,14 +311,20 @@ Cline 一审 (2026-09-16, M1 pre-implementation scope) 找 1 major + 4 minor + 2
 
 | Finding | 处置状态 |
 |---------|---------|
-| F1 major | ✅ FIXED (本 commit §10) |
+| F1 major | ✅ FIXED (commit `5912ddb` §10) |
 | F2 minor | ✅ FIXED |
 | F3 minor | ✅ FIXED |
 | F4 minor | ✅ FIXED |
 | F5 minor | ✅ FIXED |
-| F6 info | ✅ ANNOTATED (自伤豁免标注) |
-| F7 info | ✅ ANNOTATED (§9 audit-trail 区分) |
-| **总计** | **7/7 findings 显式处置** (无漏计) |
+| F6 info  | ✅ ANNOTATED (自伤豁免标注) |
+| F7 info  | ✅ ANNOTATED (§9 audit-trail 区分) |
+| **Cline 二审 R1** (major, 2026-09-16) | ✅ FIXED (本 commit v1.2 §2 A 改"M1.0 不阻断" + §3 #4 改 M1.1 candidate; T4 重写) |
+| **R2** (major) | ✅ FIXED (本 commit v1.2 §2 B + §2 I + §3 #3 codify include-failed, 引 v1.2.0l.5 upstream_injection.test.ts:20 先例) |
+| **R3** (major) | ✅ FIXED (本 commit v1.2 §3 #8 + §4 命令改正确 git 语法 — `--no-pager` 置于 `diff` 子命令前, 不是子命令后) |
+| **R4** (minor) | ✅ FIXED (closure v1.2 更正"实施未揭新 finding" → 二审 3 major + 1 minor + 1 info; 一审 CONDITIONAL 不再升格为 PASS, 等 Cline 三审) |
+| **总计** | **11/11 findings 显式处置** (per v0.6 #4 硬约束, 无漏计) |
+
+**v0.6 硬约束升级 (per R3 教训)**: 任何 commit message 或 doc 中的 cat-file 实证命令**必须可原样复制粘贴运行**。具体: 全局选项 (`--no-pager`, `-c`, etc.) 置于子命令 (`diff`, `log`, `show`) 之前, 不是之后。L8 grep 命中须逐条列源 (行号 + 上下文), 不允许只报计数 0 (R3 教训: 自检 "0" 可能是失败命令的空洞输出)。
 
 ## §9 v1.2.0n M1 草案元数据 (per v0.6 #4 — 起草来源)
 
@@ -327,5 +333,6 @@ Cline 一审 (2026-09-16, M1 pre-implementation scope) 找 1 major + 4 minor + 2
 | Cycle | v1.2.0n M1 | per [[fish-harness-v1-2-0l-cycle-closure]] forward scope #2 |
 | Feature flip | depends_on parallel + wildcard `${step.*::field}` | per [[fish-harness-v1-2-0l-cycle-closure]] §5 hygiene 自检 anchor |
 | Tag | v1.2.0n.1 | next feature flip after v1.2.0n.0 (M0.1 tag) |
-| Pre-implementation audit | 本文件 (2026-09-16 起草) | per 新流程纪律 "归档 → Cline 审 → deploy" (v1.2.0n M0.1 立) |
+| Pre-implementation audit | 本文件 (2026-09-16 起草, v1.2 修订含 Cline 二审 R1-R5 处置) | per 新流程纪律 "归档 → Cline 审 → deploy" (v1.2.0n M0.1 立) |
 | v0.6 候选落地 | §7 自检 (起草时落地 #2/#3, 实施时落地 #1/#4) | per v1.2.0n M0.1 cycle CLOSED 沉淀 |
+| v1.2 修订 (per Cline 二审 R1-R5) | §2 A 错误传播改 M1.0 不阻断 + §2 B/I/§3 #3 codify include-failed + §3 #4 改 M1.1 candidate + §3 #8/§4 git 语法修正 + §11 加 R1-R5 处置表 | per [[cline-review-v1.2.0n-m1-implementation-report]] (Cline 二审报告) |

@@ -55,6 +55,14 @@ vi.mock("../../orchestrator/execution_driver.js", async (importOriginal) => {
   const actual = await importOriginal<
     typeof import("../../orchestrator/execution_driver.js")
   >();
+  // Default mockWorkerRun: emit successful 3-event run (handle/started/finished).
+  // Tests can override per-call with mockImplementationOnce to inject failure
+  // (T4) or custom event streams.
+  mockWorkerRun.mockImplementation(async function* () {
+    yield { kind: "driver.handle", attempt_id: "atp-default", payload: { handle: { driver_kind: "codex_exec", attempt_id: "atp-default", cancel_token: "drv-default" } } };
+    yield { kind: "driver.started", attempt_id: "atp-default", payload: {} };
+    yield { kind: "driver.finished", attempt_id: "atp-default", payload: { exit_code: 0, stdout: "ok", wall_ms: 10 } };
+  });
   class MockSpawnDshDriver {
     capability() {
       return {
@@ -68,12 +76,9 @@ vi.mock("../../orchestrator/execution_driver.js", async (importOriginal) => {
       };
     }
     async *run(_request: unknown) {
-      // Default: emit a successful run event sequence.
-      // Tests can override via mockWorkerRun.mockImplementation.
-      const ev1 = { kind: "driver.handle", attempt_id: "atp-default", payload: { handle: { driver_kind: "codex_exec", attempt_id: "atp-default", cancel_token: "drv-default" } } };
-      const ev2 = { kind: "driver.started", attempt_id: "atp-default", payload: {} };
-      const ev3 = { kind: "driver.finished", attempt_id: "atp-default", payload: { exit_code: 0, stdout: "ok", wall_ms: 10 } };
-      yield ev1; yield ev2; yield ev3;
+      // Delegate to mockWorkerRun so tests can override event streams
+      // per-call (e.g., T4 uses mockImplementationOnce to emit driver.failed).
+      yield* mockWorkerRun(_request);
     }
     async interrupt(handle: unknown, reason: string) {
       return mockWorkerInterrupt(handle, reason);
@@ -150,7 +155,11 @@ function makeTask(taskId: string): Task {
 function makeStep(name: string, dependsOn: string[] = []) {
   return {
     name,
-    capability: "subprocess_worker",
+    // Use "worker" (not "subprocess_worker") so pickDriverForCapability
+    // returns MockSpawnDshDriver (LLM path, mocked here) instead of real
+    // SubprocessDshDriver (which would try to spawn a subprocess and fail
+    // with ENOENT → "exit code null" error message — see execution_driver.ts:563-565).
+    capability: "worker",
     input_ref: "default",
     output_kind: "text",
     depends_on: dependsOn,
@@ -242,10 +251,12 @@ describe("T2: fan-out DAG (A → B+C → D) → 3 waves, B+C parallel", () => {
       plan_metadata: { source: "fanout-test" },
     });
     const dispatchTimes: Array<{ name: string; t: number }> = [];
+    const dispatchOrder: string[] = [];
     const t0 = Date.now();
     vi.spyOn(commanderModule, "dispatchStep").mockImplementation(async (tid, stepName) => {
       const t = Date.now() - t0;
       dispatchTimes.push({ name: stepName, t });
+      dispatchOrder.push(stepName);
       // B and C deliberately suspend for 50ms to verify parallelism
       if (stepName === "step-B" || stepName === "step-C") {
         await new Promise((r) => setTimeout(r, 50));
@@ -272,6 +283,7 @@ describe("T2: fan-out DAG (A → B+C → D) → 3 waves, B+C parallel", () => {
     expect(commanderModule.dispatchStep).toHaveBeenCalledTimes(4);
 
     // T2.2: B and C start within 100ms of each other (parallel in same wave)
+    const aStart = dispatchTimes.find((d) => d.name === "step-A")?.t ?? -1;
     const bStart = dispatchTimes.find((d) => d.name === "step-B")?.t ?? -1;
     const cStart = dispatchTimes.find((d) => d.name === "step-C")?.t ?? -1;
     expect(Math.abs(bStart - cStart)).toBeLessThan(100);
@@ -282,11 +294,18 @@ describe("T2: fan-out DAG (A → B+C → D) → 3 waves, B+C parallel", () => {
     const cEnd = cStart + 50; // C's 50ms suspension
     expect(dStart).toBeGreaterThanOrEqual(Math.max(bEnd, cEnd) - 5); // 5ms tolerance
 
-    // T2.4: Order: A first, then B+C, then D (topological order)
-    const aStart = dispatchTimes.find((d) => d.name === "step-A")?.t ?? -1;
-    expect(aStart).toBeLessThan(bStart);
-    expect(aStart).toBeLessThan(cStart);
-    expect(Math.max(bStart, cStart)).toBeLessThan(dStart);
+    // T2.4: Order — A first (wave 1), then B+C (wave 2, parallel), then D (wave 3).
+    // Use dispatchOrder for deterministic ordering (timing can tie at ms
+    // granularity for steps in same wave).
+    expect(dispatchOrder[0]).toBe("step-A");
+    expect(dispatchOrder.slice(1, 3).sort()).toEqual(["step-B", "step-C"]);
+    expect(dispatchOrder[3]).toBe("step-D");
+    // T2.5: Timing — relax to <= for same-wave steps (timing ties
+    // possible at ms granularity when Promise.all schedules concurrently).
+    // dStart already declared at L289 (T2.3); reuse here.
+    expect(aStart).toBeLessThanOrEqual(bStart);
+    expect(aStart).toBeLessThanOrEqual(cStart);
+    expect(Math.max(bStart, cStart)).toBeLessThanOrEqual(dStart);
   });
 });
 
@@ -327,47 +346,87 @@ describe("T3: cyclic depends_on → throws CyclicDependsOnError", () => {
   });
 });
 
-// ─── T4: error propagation — B fails → D skipped ────────────────────────
-describe("T4: error propagation — B fails → D skipped", () => {
-  it("marks downstream D as skipped when upstream B fails (per §2 I)", async () => {
-    // This is verified at the wave dispatch level — promise.all rejects
-    // on first failure, D's dispatch attempt is skipped. We verify
-    // via topologicalWaves not throwing + dispatchStep count.
-    // Full runtime error-propagation is verified in integration tests.
-    const taskId = `t4-errprop-${Date.now()}`;
+// ─── T4: M1.0 wave error NOT blocking downstream ─────────────────
+// Per Cline 二审 R1 fix-forward: M1.0 wave loop catches errors per-step
+// but does NOT skip downstream wave (no skip-dependents logic yet —
+// that's v1.2.0n M1.1 candidate). T4 verifies the current M1.0 behavior:
+// B fails, D is STILL dispatched (wave loop continues through).
+// Title previously claimed "D skipped" — that was an audit-scope
+// unfulfilled promise; this rewrite aligns test title with actual M1.0
+// behavior. v1.2.0n M1.1 will add skip-dependents and flip T4's
+// assertion (D not dispatched).
+describe("T4: M1.0 wave error NOT blocking downstream (M1.1: skip-dependents)", () => {
+  it("B fails → D (depends on B) is STILL dispatched (M1.0 behavior)", async () => {
+    const taskId = `t4-not-blocking-${Date.now()}`;
     vi.spyOn(commanderModule, "planStep").mockResolvedValue({
       steps: [
         makeStep("step-A"),
         makeStep("step-B", ["step-A"]),
         makeStep("step-D", ["step-B"]),
       ],
-      plan_metadata: { source: "errprop-test" },
+      plan_metadata: { source: "not-blocking-test" },
     });
-    vi.spyOn(commanderModule, "dispatchStep").mockResolvedValue({
-      step: "default",
-      worker_id: "wrk-mock",
-      status: "dispatched",
-      dispatched_at: new Date().toISOString(),
-    });
+
+    // Track dispatchStep call order + mockWorkerRun per-step events.
+    // step-A succeeds (default MockSpawnDshDriver).
+    // step-B fails (override → driver.failed event).
+    // step-D succeeds (default MockSpawnDshDriver — verifies it's STILL
+    // dispatched despite B failing).
+    const dispatchOrder: string[] = [];
+    vi.spyOn(commanderModule, "dispatchStep").mockImplementation(
+      async (tid: string, stepName: string) => {
+        dispatchOrder.push(stepName);
+        if (stepName === "step-B") {
+          // Override MockSpawnDshDriver to emit driver.failed for step-B.
+          mockWorkerRun.mockImplementationOnce(async function* () {
+            yield { kind: "driver.handle", attempt_id: "atp-B", payload: { handle: { driver_kind: "codex_exec", attempt_id: "atp-B", cancel_token: "drv-B" } } };
+            yield { kind: "driver.started", attempt_id: "atp-B", payload: {} };
+            yield { kind: "driver.failed", attempt_id: "atp-B", payload: { error: "simulated B failure" } };
+          });
+        }
+        return {
+          step: stepName,
+          worker_id: `wrk-${stepName}`,
+          status: "dispatched",
+          dispatched_at: new Date().toISOString(),
+        };
+      },
+    );
     vi.spyOn(commanderModule, "_recordStepResult").mockReturnValue();
     vi.spyOn(commanderModule, "_recordStepFailure").mockReturnValue();
     vi.spyOn(commanderModule, "aggregateResults").mockResolvedValue({
       task_id: "mock",
       status: "completed",
-      output: { steps: {}, completed_steps: [], pending_steps: [], failed_steps: [] },
+      output: { steps: {}, completed_steps: [], pending_steps: [], failed_steps: ["step-B"] },
       error: null,
     });
 
-    // Verify topologicalWaves produces 3 separate waves (A | B | D)
+    await orchestratorModule.dispatch(makeTask(taskId));
+
+    // M1.0 behavior: B fails → D is STILL dispatched (no skip logic).
+    // Wave loop catches B's error per-step, then continues to next wave.
+    expect(dispatchOrder).toEqual(["step-A", "step-B", "step-D"]);
+    // AggregateResults shows B failed but task completed (per M0.1 backward-compat).
+    expect(commanderModule._recordStepFailure).toHaveBeenCalledWith(
+      taskId,
+      "step-B",
+      expect.stringContaining("simulated B failure"),
+    );
+  });
+
+  it("topologicalWaves still produces 3 waves for chain DAG (A|B|D)", () => {
+    // Sanity check that topologicalWaves partition a 3-step chain into 3 waves
+    // regardless of error propagation (wave computation is structural, not
+    // error-aware).
     const waves = orchestratorModule.topologicalWaves([
       makeStep("step-A"),
       makeStep("step-B", ["step-A"]),
       makeStep("step-D", ["step-B"]),
     ]);
     expect(waves.length).toBe(3);
-    expect(waves[0]).toEqual([expect.objectContaining({ name: "step-A" })]);
-    expect(waves[1]).toEqual([expect.objectContaining({ name: "step-B" })]);
-    expect(waves[2]).toEqual([expect.objectContaining({ name: "step-D" })]);
+    expect(waves[0].map((s) => s.name)).toEqual(["step-A"]);
+    expect(waves[1].map((s) => s.name)).toEqual(["step-B"]);
+    expect(waves[2].map((s) => s.name)).toEqual(["step-D"]);
   });
 });
 
