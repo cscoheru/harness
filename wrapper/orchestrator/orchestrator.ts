@@ -20,6 +20,7 @@
 import type {
   OrchestrationResult,
   PlanPlan,
+  PlanStep,
   PlanStepStatus,
   Task,
   TaskStatus,
@@ -401,150 +402,29 @@ export async function dispatch(
   // ── v1.2.0a: Dispatch each planned step (stub worker; v1.2.0b real) ──────
   // v1.2.0l: capability → driver_kind dispatch + per-step stdout streaming
   // pushed to commander.appendStepStdout() for SSE-driven PWA DAG viewer.
+  // ── v1.2.0n M1 NEW: depends_on topological wave execution ─────────────
+  // Per audit-scope v1.1 §2 A — replaces L406 sequential for-await with
+  // wave-based parallel dispatch (Kahn's algorithm). Same-wave steps
+  // run via Promise.all; waves run sequentially; cycle in depends_on
+  // throws CyclicDependsOnError at plan time (per §2 D).
   let realStepCount = 0;
   if (planPlan && planPlan.steps.length > 0) {
-    for (const step of planPlan.steps) {
-      try {
-        // v1.2.0l: pass step capability to dispatchStep so worker_pool
-        // routes to a capability-matching worker (per F24). Existing single-
-        // capability deploys keep working because worker_pool falls back
-        // to any-active when no match exists.
-        const dispatchRes = await commander.dispatchStep(taskId, step.name, step.capability);
-        console.log(`[orchestrator] dispatchStep ${step.name} (cap=${step.capability}) → worker=${dispatchRes.worker_id}`);
-
-        // v1.2.0k.6 NEW: look up the worker's host from worker_pool to route
-        // the execution to that specific host. worker_id came from
-        // commander.dispatchStep() which called getDefaultWorkerPool().dispatch().
-        // If no worker registered yet (fresh boot), workerInfo is null and
-        // runDsh falls back to newvps primary via getCapableHosts.
-        let hostHint: string | undefined;
-        if (dispatchRes.worker_id) {
-          const workerInfo = getDefaultWorkerPool().getWorker(dispatchRes.worker_id);
-          if (workerInfo?.host) {
-            hostHint = workerInfo.host;
-            // v1.2.0l: tag the step tracker with the host so PWA can render
-            // which physical machine ran each step. Best-effort — if no
-            // step is tracked, silently no-op.
-            setStepHost(taskId, step.name, hostHint);
-            console.log(`[orchestrator] routing step ${step.name} to host=${hostHint}`);
-          }
-        }
-
-        // v1.2.0l: pick the driver for this step based on its capability.
-        // "subprocess" capabilities get real child_process.spawn; everything
-        // else falls through to the LLM path (routedDsh + minimaxInvoke).
-        const DriverClass = pickDriverForCapability(step.capability);
-
-        // v1.2.0b: actually run the step on the claimed worker via
-        // ExecutionDriver. Worker.run() yields a DriverEvent stream; we
-        // consume it inline to drive the in-memory step tracker state
-        // (running → completed/failed) so aggregateResults() below sees
-        // the correct per-step status.
-        const attemptId = `atp-${taskId}-${step.name}`;
-        // v1.2.0l: for subprocess driver, surface step.name + capability as
-        // runRequest metadata so SubprocessDshDriver knows what to spawn.
-        // Orchestrator doesn't know the actual command — workflow_pack
-        // steps can declare `command` + `args` in metadata, which orchestrator
-        // passes through. Today orch.json doesn't declare these; steps fall
-        // back to a default echo (see Step 1.8 below for PWA-side injection).
-        const runRequest: import("./types.js").RunRequest = {
-          attempt_id: attemptId,
-          task_id: taskId,
-          workflow_pack: task.workflow_pack,
-          workflow_version: task.workflow_version,
-          input_blob_id: task.input_blob_id,
-          capability_profile: new DriverClass().capability(),
-          lease_token: `lease-${taskId}`,
-          fence_version: 1,
-          metadata: {
-            prompt: prompt.slice(0, 1024),
-            // v1.2.0k.6 NEW: host_hint from worker_pool so execution routes
-            // to the same host that owns the worker (cross-host orchestration)
-            host_hint: hostHint,
-            // v1.2.0l NEW: capability from plan step so driver_kind dispatch
-            // inside SubprocessDshDriver + SpawnDshDriver can branch.
-            step_capability: step.capability,
-            // Subprocess driver needs command + args. Pass through from
-            // step.input_ref when it parses as "echo:hello world" syntax
-            // (PWA-side path); otherwise leave undefined so driver errors
-            // loudly instead of silently defaulting to a dangerous command.
-            ...parseStepSubprocessInput(step),
-          },
-          // v1.2.0j+.6+ (F3+): cascade cancel signal into driver run loop.
-          // When orchestrator.cancel() calls cancelCtrl.abort(), this signal
-          // fires, execution_driver.start() adopts it via addEventListener,
-          // and the in-flight deepseekInvoke fetch is interrupted.
-          signal: cancelCtrl.signal,
-        };
-        let lastEvent: DriverEvent | null = null;
-        for await (const ev of new DriverClass().run(runRequest)) {
-          // v1.2.0j+.12+ D12 NEW: capture handle on first event of stream.
-          // toRunHandle() (execution_driver.ts:342) produces the public shape;
-          // ev.payload["handle"] is the RunHandle captured for interrupt().
-          if (ev.kind === "driver.handle") {
-            _activeHandles.set(taskId, ev.payload["handle"] as RunHandle);
-          }
-          lastEvent = ev;
-          // v1.2.0l: forward driver.output_chunk to commander tracker so
-          // SSE → PWA can stream stdout live. Without this, the PWA only
-          // sees the full stdout once the step completes (driver.finished).
-          if (ev.kind === "driver.output_chunk") {
-            const chunk = String(ev.payload?.["chunk"] ?? "");
-            if (chunk.length > 0) {
-              appendStepStdout(taskId, step.name, chunk);
-            }
-          }
-          if (ev.kind === "driver.failed") {
-            commander._recordStepFailure(
-              taskId,
-              step.name,
-              String(ev.payload?.error ?? "driver.failed"),
-            );
-            emitStepUpdate(taskId, step.name, "step_update", {
-              status: "failed",
-              host: hostHint ?? null,
-              error: String(ev.payload?.error ?? "driver.failed"),
-            });
-            break;
-          }
-          if (ev.kind === "driver.interrupted") {
-            commander._recordStepFailure(
-              taskId,
-              step.name,
-              `interrupted: ${String(ev.payload?.reason ?? "unknown")}`,
-            );
-            emitStepUpdate(taskId, step.name, "step_update", {
-              status: "failed",
-              host: hostHint ?? null,
-              error: `interrupted: ${String(ev.payload?.reason ?? "unknown")}`,
-            });
-            break;
-          }
-        }
-        // v1.2.0j+.12+ D12 NEW: cleanup captured handle on terminal event.
-        // interruptByTaskId is idempotent — no-op if handle already gone.
-        await interruptByTaskId(taskId, `step complete: ${lastEvent?.kind ?? "unknown"}`);
-        _activeHandles.delete(taskId);
-        if (lastEvent?.kind === "driver.finished") {
-          commander._recordStepResult(taskId, step.name, {
-            stdout: String(lastEvent.payload?.stdout ?? ""),
-            exit_code: Number(lastEvent.payload?.exit_code ?? 0),
-            wall_ms: Number(lastEvent.payload?.wall_ms ?? 0),
-          });
+    const waves = topologicalWaves(planPlan.steps);
+    for (const wave of waves) {
+      let waveCompletedCount = 0;
+      await Promise.all(wave.map(async (step) => {
+        try {
+          const stepCompleted = await dispatchOneStep(taskId, task, prompt, step, cancelCtrl);
+          if (stepCompleted) waveCompletedCount += 1;
+        } catch (err) {
+          console.warn(`[orchestrator] dispatchStep ${step.name} failed: ${err}`);
           emitStepUpdate(taskId, step.name, "step_update", {
-            status: "completed",
-            host: hostHint ?? null,
-            wall_ms: Number(lastEvent.payload?.wall_ms ?? 0),
+            status: "failed",
+            error: String(err),
           });
-          realStepCount += 1;
         }
-      } catch (err) {
-        console.warn(`[orchestrator] dispatchStep ${step.name} failed: ${err}`);
-        emitStepUpdate(taskId, step.name, "step_update", {
-          status: "failed",
-          error: String(err),
-        });
-      }
+      }));
+      realStepCount += waveCompletedCount;
     }
   }
 
@@ -715,6 +595,196 @@ async function runDsh(prompt: string, modelClass: string, hostHint?: string): Pr
       timeoutMs: 120_000,
     });
   }
+}
+
+/**
+ * v1.2.0n M1 NEW: CyclicDependsOnError — thrown by topologicalWaves when
+ * depends_on forms a cycle (per audit-scope v1.1 §2 D).
+ */
+export class CyclicDependsOnError extends Error {
+  constructor(public readonly cycleSteps: string[]) {
+    super(`cyclic depends_on detected: ${cycleSteps.join(" → ")}`);
+    this.name = "CyclicDependsOnError";
+  }
+}
+
+/**
+ * v1.2.0n M1 NEW: Topological wave execution (per audit-scope v1.1 §2 A).
+ * depends_on defines waves via Kahn's algorithm; same-wave steps run in
+ * parallel via promise.all; waves run sequentially. Throws
+ * CyclicDependsOnError on cycle, or Error on unknown depends_on reference.
+ */
+export function topologicalWaves(steps: readonly PlanStep[]): PlanStep[][] {
+  const stepByName = new Map<string, PlanStep>();
+  for (const s of steps) stepByName.set(s.name, s);
+
+  // Validate every depends_on entry references a known step in this plan
+  for (const s of steps) {
+    for (const dep of s.depends_on) {
+      if (!stepByName.has(dep)) {
+        throw new Error(
+          `[orchestrator] step "${s.name}" depends on unknown step "${dep}"`,
+        );
+      }
+    }
+  }
+
+  // Kahn's algorithm: indegree + dependents map
+  const indegree = new Map<string, number>();
+  const dependents = new Map<string, string[]>();
+  for (const s of steps) {
+    indegree.set(s.name, s.depends_on.length);
+    for (const dep of s.depends_on) {
+      const list = dependents.get(dep);
+      if (list) list.push(s.name);
+      else dependents.set(dep, [s.name]);
+    }
+  }
+
+  const waves: PlanStep[][] = [];
+  let currentWave = steps.filter((s) => s.depends_on.length === 0);
+  // Cycle detection: at most |steps| waves (each wave reduces indegree by 1)
+  let safety = steps.length + 1;
+
+  while (currentWave.length > 0 && safety-- > 0) {
+    waves.push(currentWave);
+    const nextWave: PlanStep[] = [];
+    for (const s of currentWave) {
+      for (const dep of dependents.get(s.name) ?? []) {
+        const newInd = (indegree.get(dep) ?? 0) - 1;
+        indegree.set(dep, newInd);
+        if (newInd === 0) {
+          const step = stepByName.get(dep);
+          if (step) nextWave.push(step);
+        }
+      }
+    }
+    currentWave = nextWave;
+  }
+
+  // Cycle detection: if waves don't cover all steps, there's a cycle
+  const totalSteps = waves.reduce((sum, w) => sum + w.length, 0);
+  if (totalSteps !== steps.length) {
+    const remaining = steps
+      .filter((s) => !waves.some((w) => w.some((ws) => ws.name === s.name)))
+      .map((s) => s.name);
+    throw new CyclicDependsOnError(remaining);
+  }
+
+  return waves;
+}
+
+/**
+ * v1.2.0n M1 NEW: Dispatch a single step. Extracted from old sequential
+ * for-await loop (pre-M1 orchestrator.ts:407-540) into a Promise<boolean>
+ * helper so the wave-level promise.all loop can dispatch steps in
+ * parallel. Returns true on driver.finished, false on failed/interrupted.
+ */
+async function dispatchOneStep(
+  taskId: string,
+  task: Task,
+  prompt: string,
+  step: PlanStep,
+  cancelCtrl: AbortController,
+): Promise<boolean> {
+  // 1. v1.2.0l: dispatchStep → worker_pool routes by capability (F24)
+  const dispatchRes = await commander.dispatchStep(taskId, step.name, step.capability);
+  console.log(`[orchestrator] dispatchStep ${step.name} (cap=${step.capability}) → worker=${dispatchRes.worker_id}`);
+
+  // 2. v1.2.0k.6: look up worker's host from worker_pool for routing
+  let hostHint: string | undefined;
+  if (dispatchRes.worker_id) {
+    const workerInfo = getDefaultWorkerPool().getWorker(dispatchRes.worker_id);
+    if (workerInfo?.host) {
+      hostHint = workerInfo.host;
+      setStepHost(taskId, step.name, hostHint);
+      console.log(`[orchestrator] routing step ${step.name} to host=${hostHint}`);
+    }
+  }
+
+  // 3. v1.2.0l: pick driver by capability
+  const DriverClass = pickDriverForCapability(step.capability);
+
+  // 4. Build runRequest with cancel signal cascade (F3+)
+  const attemptId = `atp-${taskId}-${step.name}`;
+  const runRequest: import("./types.js").RunRequest = {
+    attempt_id: attemptId,
+    task_id: taskId,
+    workflow_pack: task.workflow_pack,
+    workflow_version: task.workflow_version,
+    input_blob_id: task.input_blob_id,
+    capability_profile: new DriverClass().capability(),
+    lease_token: `lease-${taskId}`,
+    fence_version: 1,
+    metadata: {
+      prompt: prompt.slice(0, 1024),
+      host_hint: hostHint,
+      step_capability: step.capability,
+      ...parseStepSubprocessInput(step),
+    },
+    signal: cancelCtrl.signal,
+  };
+
+  // 5. Drive ExecutionDriver event stream
+  let lastEvent: DriverEvent | null = null;
+  for await (const ev of new DriverClass().run(runRequest)) {
+    if (ev.kind === "driver.handle") {
+      _activeHandles.set(taskId, ev.payload["handle"] as RunHandle);
+    }
+    lastEvent = ev;
+    if (ev.kind === "driver.output_chunk") {
+      const chunk = String(ev.payload?.["chunk"] ?? "");
+      if (chunk.length > 0) {
+        appendStepStdout(taskId, step.name, chunk);
+      }
+    }
+    if (ev.kind === "driver.failed") {
+      commander._recordStepFailure(
+        taskId,
+        step.name,
+        String(ev.payload?.error ?? "driver.failed"),
+      );
+      emitStepUpdate(taskId, step.name, "step_update", {
+        status: "failed",
+        host: hostHint ?? null,
+        error: String(ev.payload?.error ?? "driver.failed"),
+      });
+      break;
+    }
+    if (ev.kind === "driver.interrupted") {
+      commander._recordStepFailure(
+        taskId,
+        step.name,
+        `interrupted: ${String(ev.payload?.reason ?? "unknown")}`,
+      );
+      emitStepUpdate(taskId, step.name, "step_update", {
+        status: "failed",
+        host: hostHint ?? null,
+        error: `interrupted: ${String(ev.payload?.reason ?? "unknown")}`,
+      });
+      break;
+    }
+  }
+
+  // 6. Cleanup captured handle (idempotent)
+  await interruptByTaskId(taskId, `step complete: ${lastEvent?.kind ?? "unknown"}`);
+  _activeHandles.delete(taskId);
+
+  // 7. Record step result on driver.finished
+  if (lastEvent?.kind === "driver.finished") {
+    commander._recordStepResult(taskId, step.name, {
+      stdout: String(lastEvent.payload?.stdout ?? ""),
+      exit_code: Number(lastEvent.payload?.exit_code ?? 0),
+      wall_ms: Number(lastEvent.payload?.wall_ms ?? 0),
+    });
+    emitStepUpdate(taskId, step.name, "step_update", {
+      status: "completed",
+      host: hostHint ?? null,
+      wall_ms: Number(lastEvent.payload?.wall_ms ?? 0),
+    });
+    return true;
+  }
+  return false;
 }
 
 /**

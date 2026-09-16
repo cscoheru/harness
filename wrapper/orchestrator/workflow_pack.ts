@@ -293,7 +293,7 @@ function enrichStepWithTask(step: PackStep, task: Task): PlanStep {
  * Closes the v1.2.0l.4 "aggregate-results hardcodes 19/7" bug: orch authors
  * now write `${step::dispatch-commands::stdout}` instead of `echo "19"`.
  */
-function expandStepTemplate(inputRef: string, task: Task): string {
+export function expandStepTemplate(inputRef: string, task: Task): string {
   const taskVars: Record<string, string> = {
     'task.prompt': extractPrompt(task),
     'task.task_id': task.task_id,
@@ -302,14 +302,20 @@ function expandStepTemplate(inputRef: string, task: Task): string {
   // Phase 1: resolve ${task.*} via simple dict lookup (v1.2.0l.1 behavior).
   let out = inputRef.replace(/\$\{([a-zA-Z0-9_.]+)\}/g, (_m, key: string) => taskVars[key] ?? `\${${key}}`);
 
-  // Phase 2: resolve ${step.<name>::<field>} by reading commander._stepTracker.
-  // We only touch the pattern if it's present — leaves every other var literal.
+  // Phase 2 + Phase 3 (v1.2.0n M1): resolve ${step::name::field} AND
+  // ${step.*::field} (wildcard) by reading commander._stepTracker. We
+  // check BOTH patterns upfront because phase 1 already transformed
+  // `${step.*::stdout}` (which key not in taskVars) into literal
+  // `${step.*::stdout}` — phase 2's per-name regex won't match that,
+  // but the wildcard regex will.
   //
-  // Note: separator is `::` not `.` because bash interprets `.` inside ${...}
+  // Separator is `::` not `.` because bash interprets `.` inside ${...}
   // as a parameter-modifier prefix (e.g. ${var:-default}, ${var/old/new}) and
   // rejects the substitution with "bad substitution". The colon-double is
   // unambiguous to bash while still reading clearly to humans.
-  if (!/\$\{step::[a-zA-Z0-9_-]+::[a-zA-Z_]+\}/.test(out)) {
+  const PHASE2_RE = /\$\{step::[a-zA-Z0-9_-]+::[a-zA-Z_]+\}/;
+  const WILDCARD_RE = /\$\{step\.\*::([a-zA-Z_]+)\}/;
+  if (!PHASE2_RE.test(out) && !WILDCARD_RE.test(out)) {
     return out;
   }
   const steps = commander.getStepStatuses(task.task_id);
@@ -345,6 +351,39 @@ function expandStepTemplate(inputRef: string, task: Task): string {
     if (raw === null || raw === undefined) return `\${step::${name}::${field}}`;
     return shellEscape(raw);
   });
+
+  // ─── Phase 3 (v1.2.0n M1): wildcard ${step.*::field} ──────────────────
+  // Concatenate all completed (or failed, per audit-scope v1.1 §2 I) steps'
+  // field values with `\n---\n` delimiter. Skips non-terminal steps so
+  // bash doesn't see empty values silently corrupting aggregate results.
+  //
+  // Per audit-scope v1.1 §2 I: failed steps' stdout IS included (the
+  // visible signal in aggregate output helps the user see what failed);
+  // running/pending/cancelled steps are skipped. Future M1.1 candidate:
+  // `${step.*::status}` for explicit failure surfacing.
+  if (WILDCARD_RE.test(out)) {
+    out = out.replace(WILDCARD_RE, (_m, field: string) => {
+      const values: string[] = [];
+      for (const step of steps) {
+        const s = stepByName.get(step.name);
+        if (!s) continue; // unknown step → skip silently (no literal to preserve)
+        if (s.status !== "completed" && s.status !== "failed") continue;
+        let raw: string | null;
+        switch (field) {
+          case "stdout": raw = s.stdout; break;
+          case "host": raw = s.host; break;
+          case "wallMs": raw = s.wallMs != null ? String(s.wallMs) : null; break;
+          case "exit_code":
+            raw = s.exit_code != null ? String(s.exit_code) : null;
+            break;
+          default: raw = null;
+        }
+        if (raw === null || raw === undefined) continue;
+        values.push(shellEscape(raw));
+      }
+      return values.join("\n---\n");
+    });
+  }
 
   return out;
 }
