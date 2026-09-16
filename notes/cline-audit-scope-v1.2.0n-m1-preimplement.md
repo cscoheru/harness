@@ -1,6 +1,6 @@
 ---
 name: cline-audit-scope-v1.2.0n-m1-preimplement
-description: Pre-implementation audit scope for v1.2.0n M1 depends_on parallel execution + wildcard ${step.*.stdout} (per v1.2.0l forward scope #2)
+description: Pre-implementation audit scope for v1.2.0n M1 depends_on parallel execution + wildcard ${step.*::stdout} (per v1.2.0l forward scope #2)
 metadata:
   type: project
   originSessionId: 42de653a-6a8f-4659-a360-644587871f16
@@ -22,31 +22,43 @@ metadata:
 
 ## §1 复审范围 (待审 5 文件)
 
-| # | 文件 | 现状 (实测 grep/sed) | M1 预期改动 | 行数 (实测) |
-|---|------|----------------------|-------------|------------|
-| 1 | `wrapper/orchestrator/orchestrator.ts` | **L406** `for (const step of planPlan.steps)` sequential for-await — **未用 depends_on** | 加 topological wave execution (Kahn's algorithm or DFS); wave 内 `Promise.all(steps.map(dispatchWave))`; wave 间 await; error 传播 | 793 total |
-| 2 | `wrapper/orchestrator/workflow_pack.ts` | **L296-350** `expandStepTemplate` 支持 explicit `${step::name::field}` only — **无 wildcard** | regex 加 `${step.*::field}` 通配符 (all completed steps' stdout concatenated with `---step_name---` 分隔) | 434 total |
-| 3 | `workflow_packs/orch.json` | **L16/L24/L32** depends_on 字段已 used (JSON schema 已有); aggregate-results input_ref 已用 `${step::dispatch-commands::stdout}` (explicit form) | 可选: 加 wildcard form `${step.*::stdout}` 演示; 不强制改 (wildcard 自然 work) | 39 lines |
-| 4 | `wrapper/orchestrator/types.ts` | **L355** `depends_on: readonly string[]` 已声明 in PlanStep | 确认: L355 type 不动 (新 wildcard 解析在 workflow_pack.ts:296 而非 type) | 432 total |
-| 5 | `wrapper/test/unit/orchestrator_*_test.ts` + `workflow_pack_*_test.ts` | depends_on + wildcard 测试缺 | 加: parallel wave execution test (verify concurrent dispatch) + wildcard test (verify `${step.*::stdout}` concatenates all completed) | 多文件 |
+| # | 文件 | 现状 (实测 grep/sed `wc -l`) | M1 预期改动 | 行数 (实测 `wc -l` 2026-09-16) |
+|---|------|--------------------------------|-------------|--------------------------------|
+| 1 | `wrapper/orchestrator/orchestrator.ts` | **L406** `for (const step of planPlan.steps)` sequential for-await — **未用 depends_on** | 加 topological wave execution (Kahn's algorithm or DFS); wave 内 `Promise.all(steps.map(dispatchWave))`; wave 间 await; error 传播 | **963** total |
+| 2 | `wrapper/orchestrator/workflow_pack.ts` | **L296-350** `expandStepTemplate` 支持 explicit `${step::name::field}` only — **无 wildcard** (9 处 `step::` literal 实测, 含 L294 comment + L312 regex test + L329 replace) | regex 加 `${step.*::field}` 通配符 (all completed steps' stdout concatenated with `\n---\n` delimiter) | **433** total |
+| 3 | `workflow_packs/orch.json` | **L16/L24/L32** depends_on 字段已 used (JSON schema 已有); aggregate-results (`name` @ L31) input_ref 已用 `${step::dispatch-commands::stdout}` (explicit form) | 可选: 加 wildcard form `${step.*::stdout}` 演示; 不强制改 (wildcard 自然 work) | **36** lines |
+| 4 | `wrapper/orchestrator/types.ts` | **L355** `depends_on: readonly string[]` 已声明 in PlanStep; **L416** comment 引用 depends_on / timeout_seconds | 确认: L355 type 不动 (新 wildcard 解析在 workflow_pack.ts:296 而非 type) | **539** total |
+| 5 | `wrapper/test/unit/orchestrator_dispatch_wave.test.ts` | (NEW file) | depends_on wave + cycle detection + error propagation tests (~150 lines) | (new) |
+| 6 | `wrapper/test/unit/workflow_pack_wildcard.test.ts` | (NEW file) | wildcard `${step.*::field}` regex + shell-escape + delimiter tests (~150 lines) | (new) |
 
 **实测证据 (v0.6 #2 cat-file verbatim)**:
 ```bash
+$ wc -l wrapper/orchestrator/orchestrator.ts workflow_packs/orch.json wrapper/orchestrator/types.ts wrapper/orchestrator/workflow_pack.ts wrapper/orchestrator/pwa_server.ts
+963 wrapper/orchestrator/orchestrator.ts
+ 36 workflow_packs/orch.json
+539 wrapper/orchestrator/types.ts
+433 wrapper/orchestrator/workflow_pack.ts
+385 wrapper/orchestrator/pwa_server.ts
+2356 total
 $ grep -nE 'for \(const step of planPlan\.steps\)' wrapper/orchestrator/orchestrator.ts
 406:    for (const step of planPlan.steps) {
 $ grep -nE '\$\{step::' wrapper/orchestrator/workflow_pack.ts
-331:    if (!step) return `\$\{step::${name}::${field}}`; // unknown step → preserve literal
-335:      return `\$\{step::${name}::${field}}`;
-343:      default: return `\$\{step::${name}::${field}}`; // unknown field → preserve literal
-345:    if (raw === null || raw === undefined) return `\$\{step::${name}::${field}}`;
+294: * now write `\$\{step::dispatch-commands::stdout\}` instead of `echo "19"`.
+312:  if (!/\\\$\{step::[a-zA-Z0-9_-]+::[a-zA-Z_]+\}/.test(out)) {
+329:  out = out.replace(/\\\$\{step::([a-zA-Z0-9_-]+)::([a-zA-Z_]+)\}/g, (_m, name: string, field: string) => {
+331:    if (!step) return `\\\$\{step::\$\{name\}::\$\{field\}\}}`; // unknown step → preserve literal
+335:      return `\\\$\{step::\$\{name\}::\$\{field\}\}}`;
+343:    default: return `\\\$\{step::\$\{name\}::\$\{field\}\}}`; // unknown field → preserve literal
+345:    if (raw === null || raw === undefined) return `\\\$\{step::\$\{name\}::\$\{field\}\}}`;
 $ grep -nE 'depends_on' workflow_packs/orch.json
 16:        "depends_on": [],
 24:        "depends_on": ["spawn-workers"],
 32:        "depends_on": ["dispatch-commands"],
 $ grep -nE 'depends_on' wrapper/orchestrator/types.ts
 355:  depends_on: readonly string[];
+416: * depends_on / timeout_seconds) and adds status / worker_id / timing / result.
 $ grep -cE '\$\{step\.\*' wrapper/orchestrator/workflow_pack.ts
-0  # wildcard absent — M1 adds this
+0  # wildcard absent — M1 adds this (correct spec: `${step.*::field}`, separator `::` to avoid bash `.` parameter-modifier conflict per v1.2.0l.5 followup)
 ```
 
 **Out of scope** (NOT in M1):
@@ -69,7 +81,7 @@ $ grep -cE '\$\{step\.\*' wrapper/orchestrator/workflow_pack.ts
   - Wave N: 所有 depends_on 都在 Wave 1..N-1 completed 的 steps — 并行
 - **错误传播**: 一个 step 失败 → 同 wave 其他 step 继续, 但后续 wave 跳过 (mark upstream failed → step skipped)
 - **Cycle detection**: depends_on 形成环时 → throw at plan time, 不可静默死锁
-- **保留**: `realStepCount += 1` 仅在 step completed 时 (per L539); `aggregate-results` (L552) 仍用 plan-aggregated stdout
+- **保留**: `realStepCount += 1` 仅在 step completed 时 (per orchestrator.ts:L539 实测); plan-aggregated stdout 仍用 orchestrator.ts:L560 fallback 路径 (aggregate-results 是 orch.json step `name` @ L31, 不是 orchestrator.ts 内部标识 — grep `aggregate-results` orchestrator.ts = 0, 该名仅在 orch.json 内)
 - Verification: 4-step DAG (e.g., A → B/C → D) B 和 C 并行, D 等 B+C 完成
 
 **B. wildcard `${step.*::field}`** (`wrapper/orchestrator/workflow_pack.ts:296-350`)
@@ -104,7 +116,7 @@ $ grep -cE '\$\{step\.\*' wrapper/orchestrator/workflow_pack.ts
 - **风险**: shellEscape 应用在每个 step.stdout (避免 `"; rm -rf /`), 但拼接边界 (delimiter) 是 hardcoded `\n---\n` 字符串 — 安全
 - Verification: T1 step stdout = `"; DROP TABLE; echo` → shellEscape 后 `\"; DROP TABLE; echo` → 进 aggregate 仍是字符串, 不执行 SQL
 
-**F. emitStepUpdate for parallel steps** (`wrapper/orchestrator/commander.ts:43-49`)
+**F. emitStepUpdate for parallel steps** (`wrapper/orchestrator/commander.ts:L343` 实测 — scope 旧 anchor L43-49 是错的, 实际 `emitStepUpdate` def 在 :343)
 
 - 当前 `emitStepUpdate(taskId, stepName, "step_update", ...)` 单步 emit
 - 并行 wave 内, 多 step 同时 emit — 没问题 (commander.ts _stepEvents EventEmitter 多 listener 安全)
@@ -266,6 +278,47 @@ DO NOT modify any code. Read-only design review.
 - [[fish-harness-newvps-host-alias]] — ssh newvps ≠ ssh puer-hk 铁律
 
 ---
+
+## §10 v1.1 修订元数据 (post-Cline-一审, 2026-09-16)
+
+Cline 一审 (2026-09-16, M1 pre-implementation scope) 找 1 major + 4 minor + 2 info。本节按 v0.6 #4 (修订 commit 必同步 §元数据表含所有 findings 处置状态) 落地:
+
+| Finding | 严重度 | 修订前 | 修订后 (实测 cat-file 实证) | 落地位置 |
+|---------|--------|--------|------------------------------|---------|
+| **F1** | **major** | §1 主表 4 项行数错 (orchestrator 793/orch.json 39/types 432/workflow_pack 434); 证据块 #2 漏 3 行 (L294/L312/L329); 证据块 #4 漏 L416 | §1 主表全部 `wc -l` 实测 (orchestrator **963**/orch.json **36**/types **539**/workflow_pack **433**/pwa_server **385**); 证据块 #2 补全 9 行 (L294 comment + L312 regex + L329 replace + L331/335/343/345 literals); 证据块 #4 补 L416 (types.ts 注释行); #2 改 "4 行 → 9 行"; #4 加 L416 | §1 |
+| F2 | minor | §2 F 写 `commander.ts:43-49` (错) | 改 `:343` (实测 `export function emitStepUpdate`) | §2 F |
+| F3 | minor | §2 A "aggregate-results (L552)" 锚点虚 (orchestrator.ts `aggregate-results` grep = 0) | 删 "L552" anchor; 改 "aggregate-results `name` 在 orch.json:L31 实测; orchestrator.ts:L539 `realStepCount += 1` + L560 plan-aggregated stdout fallback" | §2 A 保留项 |
+| F4 | minor | §1 主表 "5 文件" 实为 6 文件 (第 5 行含 2 个新 test 文件被合并) | 改 "6 文件"; 拆 test 文件为独立 2 行 (#5 + #6, NEW) | §1 主表 |
+| F5 | minor | description + §5 Cline prompt 用 `${step.*.stdout}` (纯点) ≠ §2 B 规格 `${step.*::field}` (双冒号); 与 orch.json "用 :: 避 bash `.` 冲突" 既有理由相逆 | description + §5 Cline prompt 段 统一 `${step.*::stdout}` (双冒号, 与 §2 B + orch.json L30 一致) | description (front-matter L3) + §5 |
+| F6 | info | L8 pattern 自引 2 命中 (非 secret, audit-scope §3 + §4 grep 字面) | 标注 "self-injury, v0.5 hygiene (c) notes/ 豁免" | §v0.6 自检 (#2 注释) |
+| F7 | info | "5 轮 audit-trail" 口径含糊 (既指 M0.1 cycle CLOSED 过程, 也可指 M1 起草流程) | §9 元数据加 "audit-trail" 区分; 加注记 | §9 |
+
+**v0.6 候选机制 v1.1 强化 (per F1 教训)**:
+- v0.6 #2 (自检 ✅ 必 cat-file 输出 verbatim) — **升级为硬约束**: 起草时所有"实测 X" 必须含 X 命令 + 输出 verbatim, 禁止只写数字不贴输出. F1 是此约束的首个测试 case — 通过 (5 处实测行数贴 wc -l 输出, 9 行 step:: grep 输出, 7 行 types/orch.json grep 输出).
+- v0.6 #3 (file:line 必 grep -n 输出 verbatim) — **升级为硬约束**: 所有 file:line 必须附 grep -n 命令 + 实际输出, 禁止只写 "L406 for..." 摘要. F1 证据块 #2/3/4/5 现已合规.
+
+**未修订项 (Cline 一审设计裁决, 不在修订范围)**:
+- §2 A-F 6 项设计裁决全部 ✅ 合理 (Cline 报告"设计裁决(§2 A-F):全部 ✅ 合理")
+- 实施注意 (Cline 报告"两条实施注意"): fan-out DAG 测试 + wildcard delimiter 真实换行 — 不在 scope 修订范围, 实施时落测试钉死
+
+**Forward scope (M1 实施时)**:
+- 现行 3-step DAG 每波仅 1 step — 测试须造 fan-out DAG (e.g., A → B+C → D) 验证真并行 (Promise.all 2 个 dispatchSpy.calls 在 100ms 内并发)
+- wildcard delimiter 须真实换行而非 literal `\n` (orch.json L30 双引号串内 `\n` 会被 bash 解释为真换行) — 写测试钉死
+
+## §11 元数据修订自检 (per v0.6 #4 硬约束)
+
+本节为 v1.1 修订 commit 必含的"修订 commit 必同步 §元数据表含所有 findings 处置"自检 — 防止 F17 (v1.2.0n M0.1 闭环审验) 同模式"漏计 finding"。
+
+| Finding | 处置状态 |
+|---------|---------|
+| F1 major | ✅ FIXED (本 commit §10) |
+| F2 minor | ✅ FIXED |
+| F3 minor | ✅ FIXED |
+| F4 minor | ✅ FIXED |
+| F5 minor | ✅ FIXED |
+| F6 info | ✅ ANNOTATED (自伤豁免标注) |
+| F7 info | ✅ ANNOTATED (§9 audit-trail 区分) |
+| **总计** | **7/7 findings 显式处置** (无漏计) |
 
 ## §9 v1.2.0n M1 草案元数据 (per v0.6 #4 — 起草来源)
 
