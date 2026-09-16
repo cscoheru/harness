@@ -117,6 +117,32 @@ pre-existing 相邻注释,1 条为 commit message 卫生项,均不阻塞)。
 ### 处置
 1 major → 修正 closure §(d)/L102 + scope §7(d) + §2B 行号 + closure L88,一个 notes fix-forward commit(如 `fix(notes): v1.2.0n closure audit-trail correction — 5faffea message has no test-count (cat-file verified)`),不动 tag、不 amend。修后 v1.2.0n cycle 收口即可判定 CLOSED。
 
+## §9 v1.4 修订复核 + CLOSED 判定(audit-trail 二审,2026-09-16)
+
+**对象**: `3d8f0ed` fix(notes) closure audit-trail correction(scope 264→285 行 + closure 132→158 行 + report §8 入库 122 行)。tag 仍→5faffea ✓,工作区 clean ✓,notes-only ✓。
+
+**结论: v1.2.0n cycle — ✅ CLOSED**(0 critical / 0 major 残留;2 minor + 2 info 记后 Opportunistic 修,无需专项 commit)。
+
+### F10-F14 修复核验
+| # | 修复 | 实测 |
+|---|------|------|
+| F10 (major) | ✅ FIXED | scope §7(d) 改 ❌ + cat-file 实证;closure (d) M0.1→⚠️ + L102 段替换为真实 cat-file transcript;3d8f0ed message 叙事正确。**34cf5c5 message 确含 "260 PASS / 0 FAIL / 147 SKIP"(L25 baseline 段 + 显式 "实测数 (per v0.5 hard rule (d))" 节)— v1.4 "实测数在 archive commit" 主张为真**。注: 34cf5c5 message L17-19 同时永久嵌有原始伪引文(不可变历史),3d8f0ed 前向纠正是正确处置(不 rewrite) |
+| F11 | ✅ FIXED | §2B build:L135(void fetch)/L148(res.json) 与实测 grep 一致;source:150-157 ✓;§10 溯源表 ✓ |
+| F12 | ✅ FIXED | closure L88 改 commit 级口径 + 注明累计 +392/7 files ✓ |
+| F13 | ✅ FIXED | closure M0.1 表双口径行号(source 42/59/150/182/316 + build 51/135/148/167 + compose 150/179/180/238/239/287/288/332)全部抽查吻合 ✓ |
+| F14 | ◐ PARTIAL | closure Cross-ref 加外部 vault 注记 ✓(注记内容与 scope 一致) |
+
+(d) 行 M0.3a/M0.3b ✅ 现有实据: 49b4de7 "12 of 17" / 41fb6d5 "Full vitest baseline now: 254 PASS / 0 FAIL / 147 SKIP"(message 实测 grep)。
+
+### 残留(不阻塞 CLOSED,下次触碰 notes 时顺带)
+15. **minor** — closure L109 证据块 — 记录 `git log --all --format=%B \| grep -c "260 PASS"` = **8**(# "4 commits × 2"),实测 = **4**(34cf5c5×2 + 165364a×1 + 3d8f0ed×1,3 commits)。承重结论(5faffea=0 / 34cf5c5 含)不受影响,但这是 §10 v0.6 补丁("✅ 必须 cat-file 实证")所防的同一失败模式——记录的命令输出未实跑。
+16. **minor** — closure (d) 行 M0.2 列 — 仍 "⚠️ (Cline finding 1)" 误挂(Finding 1 针对 M0.1/5faffea);4753149 message 实含 "33 stale failures" 实测数,M0.2 应为 ✅。
+17. **info** — closure "三审 trail" 处置行 "落地 4 项 (F10-F12, F14 部分)" 漏计 F13(已修);"报告 §8 节 (122 行新增)" 措辞(§8 增 26 行,122 为文件总数)。
+18. **info** — closure M0.1 表 "test:42-43 beforeAll" — beforeAll 实起 L37(L41-44 为 env 段)。
+
+### CLOSED 依据
+审计链 7 commit(4 code/test: 4753149→49b4de7→41fb6d5→5faffea + 3 notes: 34cf5c5→165364a→3d8f0ed)全绿: tag 锁定 ✓、secrets 0 ✓、runtime 本 commit 零改动 ✓、260/0/147 ✓、deploy 记录内部自洽 ✓、伪引文 major 已 cat-file 实证纠正 ✓、v0.6 机制补丁(archive commit 强制实测数 + 自检须实证)已入 scope §10/closure 流程纪律 ✓。v1.2.0n M0.1 cycle 审计闭环。
+
 ---
 **Audit trail:** 全部 §4 命令于 2026-09-16 在 /Users/kjonekong/projects/fish-harness 实跑;tsc/vitest 用 wrapper 本地 bin;git 操作需 `--no-pager`(scope 原命令在 pager 下会挂起,实操注意)。
 
