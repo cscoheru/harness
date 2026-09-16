@@ -41,6 +41,7 @@ vi.mock('../../dsh/minimax_client.js', () => ({
 }));
 
 import { dispatch, cancel, listTasks } from '../../orchestrator/orchestrator.js';
+import * as orchestratorModule from '../../orchestrator/orchestrator.js';
 import * as taskStoreModule from '../../orchestrator/task_store.js';
 import * as queueStoreModule from '../../orchestrator/queue_store.js';
 import * as workerPoolModule from '../../orchestrator/worker_pool.js';
@@ -76,10 +77,45 @@ describe('orchestrator — F3+ cancel signal integration', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
 
+    // M0.3 fix: v1.2.0k.3 P0 tenant isolation made listTasks() route through
+    // kernelListTasks (kernel HTTP fetch). In test env fetch is unreachable →
+    // kernelListTasks returns []. Spy on listTasks to expose the local
+    // SqliteTaskStore so tests can observe task state persisted by dispatch().
+    const taskStore = taskStoreModule.getDefaultTaskStore();
+    vi.spyOn(orchestratorModule, 'listTasks').mockImplementation(async (_tenantId?: string) =>
+      taskStore.listTasks().map((e) => ({
+        task_id: e.taskId,
+        status: e.status as Task['status'],
+        workflow_pack: e.modelClass,
+        workflow_version: '1.0',
+        input_blob_id: null,
+        created_at: new Date(e.createdAt).toISOString(),
+        updated_at: new Date(e.updatedAt).toISOString(),
+        result_blob_id: null,
+      })),
+    );
+
     // Mock commander functions so dispatch() runs through the orchestrator
     // loop without hitting the real dsh or commander logic.
+    // M0.3 fix: planStep must return ≥1 step so dispatch enters the for-await
+    // loop over workerModule.run(); with 0 steps dispatch short-circuits via
+    // fallback (orchestrator.ts:560-567) and never invokes cancel hooks —
+    // which made 'cancel-after-dispatch' + 'cancel-persist' tests vacuous.
     vi.spyOn(commanderModule, 'planStep').mockResolvedValue({
-      steps: [],
+      steps: [{
+        name: 'execute-default',
+        capability: 'worker',
+        input_ref: 'default',
+        output_kind: 'text',
+        depends_on: [],
+        timeout_seconds: 60,
+        status: 'pending' as const,
+        worker_id: null,
+        started_at: null,
+        finished_at: null,
+        result: null,
+        error: null,
+      }],
       plan_metadata: { source: 'mock' },
     });
     vi.spyOn(commanderModule, 'dispatchStep').mockResolvedValue({

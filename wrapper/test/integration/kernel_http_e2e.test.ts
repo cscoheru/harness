@@ -131,7 +131,7 @@ describe("T1: GET /api/orch/healthz", () => {
     expect(res.ok).toBe(true);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body["status"]).toBe("ok");
-    expect(body["version"]).toBe("1.2.0k");
+    expect(body["version"]).toBe("1.2.0k.3");
     expect(typeof body["kernel_pid"]).toBe("number");
     expect(typeof body["active_tasks"]).toBe("number");
   });
@@ -154,6 +154,10 @@ describe("T2: POST /api/orch/invoke SSE stream", () => {
         prompt: "hello world",
         model_class: "worker",
         host_id: "e2e-host",
+        // M0.3 fix: v1.2.0k.3 P0 tenant isolation — InvokeRequest schema
+        // requires tenant_id (harness/runtime/orch_http.py:64). Without
+        // it, Pydantic returns 422 and invoke fails before SSE stream starts.
+        tenant_id: "e2e-tenant",
       }),
     });
     expect(res.ok).toBe(true);
@@ -183,6 +187,7 @@ describe("T3: driver.handle is FIRST event (L48 hidden_handle_pattern)", () => {
         prompt: "test L48",
         model_class: "worker",
         host_id: "e2e-host",
+        tenant_id: "e2e-tenant",
       }),
     });
     const events = await readSseStream(res);
@@ -215,11 +220,17 @@ describe("T4: GET /api/orch/list", () => {
         prompt: "test list",
         model_class: "worker",
         host_id: "e2e-host",
+        tenant_id: "e2e-tenant",
       }),
     });
     // Wait briefly for task to be recorded
     await sleep(200);
-    const res = await fetch(`${KERNEL_BASE}/api/orch/list`);
+    // M0.3 fix: v1.2.0k.3 P0 tenant isolation — /api/orch/list requires
+    // X-Tenant-ID header (harness/server.py:191-196). Without it the kernel
+    // returns 400 to refuse cross-tenant leakage.
+    const res = await fetch(`${KERNEL_BASE}/api/orch/list`, {
+      headers: { "X-Tenant-ID": "e2e-tenant" },
+    });
     expect(res.ok).toBe(true);
     const tasks = (await res.json()) as Array<{ task_id: string; status: string }>;
     expect(Array.isArray(tasks)).toBe(true);
@@ -245,6 +256,7 @@ describe("T5: GET /api/orch/status/{task_id}", () => {
         prompt: "test status",
         model_class: "worker",
         host_id: "e2e-host",
+        tenant_id: "e2e-tenant",
       }),
     });
     await sleep(200);

@@ -50,13 +50,19 @@ beforeAll(async () => {
   // v1.2.0b: point WorkerPool at a temp file so the server's heartbeat
   // handler can actually instantiate SqliteWorkerPool (production default
   // /data/worker_pool.db is not writable in test env).
+  // M0.3 fix: also set TASK_STORE_DB — v1.2.0l getTaskStatus() resolves via
+  // getDefaultTaskStore() which defaults to /data/task_store.db (read-only in
+  // test env) → throws on first call → handleStatusById catches → 500.
   serverTestDir = mkdtempSync(join(tmpdir(), 'server-unit-test-'));
   process.env['WORKER_POOL_DB'] = join(serverTestDir, 'server-unit.db');
   process.env['QUEUE_STORE_DB'] = join(serverTestDir, 'queue_store.db');
+  process.env['TASK_STORE_DB'] = join(serverTestDir, 'task_store.db');
   const { _resetWorkerPoolForTests } = await import('../../orchestrator/worker_pool.js');
   _resetWorkerPoolForTests();
   const { _resetQueueStoreForTests } = await import('../../orchestrator/queue_store.js');
   _resetQueueStoreForTests();
+  const { _resetTaskStoreForTests } = await import('../../orchestrator/task_store.js');
+  _resetTaskStoreForTests();
 
   server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -71,8 +77,11 @@ afterAll(async () => {
   _resetWorkerPoolForTests();
   const { _resetQueueStoreForTests } = await import('../../orchestrator/queue_store.js');
   _resetQueueStoreForTests();
+  const { _resetTaskStoreForTests } = await import('../../orchestrator/task_store.js');
+  _resetTaskStoreForTests();
   delete process.env['WORKER_POOL_DB'];
   delete process.env['QUEUE_STORE_DB'];
+  delete process.env['TASK_STORE_DB'];
   if (serverTestDir) rmSync(serverTestDir, { recursive: true, force: true });
 });
 

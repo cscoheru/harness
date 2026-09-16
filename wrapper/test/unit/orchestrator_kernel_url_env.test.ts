@@ -67,21 +67,13 @@ let tempDir: string;
 const ORIGINAL_ENV = process.env["HARNESS_RUNTIME_URL"];
 
 function setupCommanderMocks(): void {
+  // M0.3 fix: planStep must return 0 steps so dispatch() enters fallback
+  // (realStepCount === 0 at orchestrator.ts:560-567) → kernelInvoke is
+  // called via fetch. Previously the setup returned 1 step which routed
+  // through the for-await driver loop (orchestrator.ts:480) — kernelInvoke
+  // was never invoked, so fetchSpy at T1/T2/T3 saw 0 calls.
   vi.spyOn(commanderModule, "planStep").mockResolvedValue({
-    steps: [{
-      name: "execute-default",
-      capability: "worker",
-      input_ref: "default",
-      output_kind: "text",
-      depends_on: [],
-      timeout_seconds: 60,
-      status: "pending" as const,
-      worker_id: null,
-      started_at: null,
-      finished_at: null,
-      result: null,
-      error: null,
-    }],
+    steps: [],
     plan_metadata: { source: "kernel-url-env-test" },
   });
   vi.spyOn(commanderModule, "dispatchStep").mockResolvedValue({
