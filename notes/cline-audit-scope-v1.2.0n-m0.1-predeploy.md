@@ -20,18 +20,18 @@ metadata:
 
 5 files, commit `5faffea` (single commit per L19 hygiene, NOT cc-ready flip):
 
-| # | 文件 | 改动 | 行数 | 关键 file:line |
-|---|------|------|------|----------------|
-| 1 | `wrapper/orchestrator/pwa_server.ts` | +129/-0 (heartbeat local handler + Option C double-write) | 357 total | L42-167 (route order critical) |
-| 2 | `wrapper/test/unit/pwa_server.test.ts` | NEW, 195 lines | — | full file (6 tests) |
-| 3 | `deploy/6host-compose.newvps.yml` | +20/-0 (3 wrapper env + frontend volume) | 384 total | L174-178, L227-231, L275-279, L312-316 |
-| 4 | `pyproject.toml` | +1/-1 (version 1.2.0+0.m.0 → 1.2.0+0.n.0) | L7 | L7 |
-| 5 | `harness/__init__.py` | +1/-1 (version 1.2.0m.0 → 1.2.0n.0) | L25 | L25 |
+| # | 文件 | 改动 | 行数 (实测 `wc -l` post-build) | 关键 file:line (实测 `grep -n` post-build) |
+|---|------|------|-------------------------------|----------------------------------------|
+| 1 | `wrapper/orchestrator/pwa_server.ts` | +129/-0 (heartbeat local handler + Option C double-write) | 385 total | source:67-181 handler block; **build/orchestrator/pwa_server.js:51** `app.post(/api/v1/worker/heartbeat)` → **:167** `app.all(/api/v1/*path)` (route order critical) |
+| 2 | `wrapper/test/unit/pwa_server.test.ts` | NEW | 205 lines | full file (6 tests); test:45 process.env['MINIMAX_API_KEY']; test:55 `createServer(app).listen(0)`; test:100-108 fetchSpy default calls-through; test:180-196 T5 URL assertion |
+| 3 | `deploy/6host-compose.newvps.yml` | +20/-0 (3 wrapper env + frontend volume) | 395 total | WORKER_HEARTBEAT_URL ×3 at L179/L238/L287; WORKER_HOST ×3 at L180/L239/L288; `orch_pool:/data` mount at L150 (orchestrator) + L332 (frontend) |
+| 4 | `pyproject.toml` | +1/-1 (version 1.2.0+0.m.0 → 1.2.0+0.n.0) | — | L7 |
+| 5 | `harness/__init__.py` | +1/-1 (version 1.2.0m.0 → 1.2.0n.0) | — | L25 |
 
 **Out of scope** (should NOT be in this commit):
-- `wrapper/orchestrator/server.ts` (canonical heartbeat handler at L327-424 — read-only reference for shape parity)
-- `wrapper/orchestrator/heartbeat_sender.ts` (worker side, no changes)
-- `wrapper/orchestrator/worker_pool.ts` (SqliteWorkerPool — read-only reference)
+- `wrapper/server.ts` (canonical heartbeat handler at L324-425, `registerApiRoute('post', '/api/v1/worker/heartbeat', handleWorkerHeartbeat)` at L425 — read-only reference for shape parity)
+- `wrapper/orchestrator/heartbeat_sender.ts` (worker side, no changes; L81-82 env early-return guard)
+- `wrapper/orchestrator/worker_pool.ts` (SqliteWorkerPool — read-only reference; **F41 host-dedup at L277-297** is the decision缓解 for shared-volume concurrency)
 - `wrapper/orchestrator/worker.ts` (worker.register() helper — read-only reference)
 
 ---
@@ -40,47 +40,50 @@ metadata:
 
 ### 必查项 (A-E)
 
-**A. Express route order** (`wrapper/orchestrator/pwa_server.ts:42-167`)
-- `app.post("/api/v1/worker/heartbeat", ...)` MUST be registered BEFORE `app.all("/api/v1/*path", ...)` (L167)
+**A. Express route order** (build/orchestrator/pwa_server.js L51-L167)
+- `app.post("/api/v1/worker/heartbeat", ...)` MUST be registered BEFORE `app.all("/api/v1/*path", ...)` (build:L167)
 - Express matches in registration order; wildcard proxy would otherwise eat the heartbeat path → local pool never populates → double-write never fires
-- Verification: `grep -nE 'app\.(post|all|use|get)\(' wrapper/orchestrator/pwa_server.ts`
+- Verification: `grep -nE 'app\.(post|all|use)\(' build/orchestrator/pwa_server.js` 期望顺序 use(json)@35 → post(heartbeat)@51 → all(proxy)@167 → post(/api/pwa/dispatch)@228 → static@284
 
-**B. Option C double-write semantics** (`wrapper/orchestrator/pwa_server.ts:130-148`)
-- Fire-and-forget `void fetch(...).catch(...)` swallows ECONNREFUSED → local 200 response still goes out
+**B. Option C double-write semantics** (build/orchestrator/pwa_server.js L145-L161)
+- Fire-and-forget `void fetch(...).catch(...)` swallows ECONNREFUSED → local 200 response still goes out (build:L163 `res.json(resultBody)`)
 - Best-effort: local pool is source for PWA UI badge; orchestrator pool is source for dispatch
-- Verification: T5 spy confirms fetch to `wrapper-orchestrator:4000` is called; pwa_server.test.ts:178-186
+- Verification: T5 spy confirms fetch to `wrapper-orchestrator:4000` is called; pwa_server.test.ts:180-196
 
-**C. Schema validation parity** (`wrapper/orchestrator/pwa_server.ts:54-63`)
-- Mirrors server.ts:340-348 F6 injection guard
+**C. Schema validation parity** (build/orchestrator/pwa_server.js L67-L132 vs canonical `wrapper/server.ts:324-425`)
+- Canonical handler in **`wrapper/server.ts`** (NOT `wrapper/orchestrator/server.ts` — that path does not exist); parity逐条对齐 wrapper/server.ts:340-411 F6 injection guard
 - Rejects: unexpected fields (400), missing host on register (400), missing capabilities_json (400), oversized capabilities_json > 10240 bytes (413)
 - Verification: T1 (empty body → 400), T4 (extra fields → 400), T6 (no host → 400)
 
-**D. SQLite WAL concurrency** (`deploy/6host-compose.newvps.yml:312-316`)
-- BOTH `wrapper-orchestrator` (L150) AND `wrapper-frontend` (L312-316) mount `orch_pool:/data` volume
+**D. SQLite WAL concurrency** (deploy/6host-compose.newvps.yml L150 + L332)
+- BOTH `wrapper-orchestrator` (L150) AND `wrapper-frontend` (L332) mount `orch_pool:/data` volume
 - SQLite WAL file co-located; concurrent writes from both processes
-- Verify pragma: `journal_mode=WAL`, `busy_timeout=5000` (per `task_store.ts:133-136` + `worker_pool.ts`)
+- Verify pragma: `journal_mode=WAL` + `busy_timeout=5000` at worker_pool.ts:132-134 + task_store.ts:133-134
 - Concern: under heavy heartbeat traffic, both processes writing → possible `SQLITE_BUSY` errors
-- Mitigation already in place: WAL mode + busy_timeout
+- **Mitigation #1 (WAL + busy_timeout)**: pragma above
+- **Mitigation #2 (decision — F41 host-dedup)**: `worker_pool.ts:277-297` register() calls `findActiveByHost(host)` first → if existing active row for same host, bumps heartbeat + returns existing `worker_id` (NOT new INSERT). 双写因此**幂等** — 前端本地写与转发到 orchestrator 写落在同一 SQLite WAL 行, 不会堆重复行 (v1.2.0d.4 的 1392 stale rows 教训已修)
+- 残留风险: better-sqlite3 同步写, 锁竞争时最长阻塞事件循环 5s — 3 容器 × 10s 心跳间隔下可忽略
 
-**E. Heartbeat sender env wiring** (`deploy/6host-compose.newvps.yml:174-178, 227-231, 275-279`)
-- 3 newvps wrapper profiles set `WORKER_HEARTBEAT_URL=http://wrapper-frontend:4002` + `WORKER_HOST=<container-name>`
-- `heartbeat_sender.ts:81-82` reads `process.env['WORKER_HEARTBEAT_URL']`; if unset, sender doesn't start
+**E. Heartbeat sender env wiring** (deploy/6host-compose.newvps.yml L179-L180, L238-L239, L287-L288)
+- 3 newvps wrapper profiles set `WORKER_HEARTBEAT_URL=http://wrapper-frontend:4002` + `WORKER_HOST=<container-name>` (orchestrator L179-L180 / commander L238-L239 / commander-2 L287-L288)
+- **`wrapper-frontend` 自身未设** WORKER_HEARTBEAT_URL — 无自心跳回环
+- `wrapper/orchestrator/heartbeat_sender.ts:81-82` reads `process.env['WORKER_HEARTBEAT_URL']`; if unset, sender early-returns (no-op)
 - MUST be set BEFORE `heartbeat_sender.ts` module loads (env-injected at container start per compose `environment:` block — eval order OK)
 
 ### 潜在新 finding (F-H)
 
-**F. fetchSpy isolation in pwa_server.test.ts:96-101**
+**F. fetchSpy isolation in pwa_server.test.ts:100-108**
 - `vi.spyOn(globalThis, "fetch")` uses default calls-through behavior (NOT `mockResolvedValue`)
 - Reason: test's own `postJson` (line 79) uses fetch → if mocked with canned response, status/body assertions break
 - Concern: if test ever adds a 7th case that DOES rely on canned fetch response, it would silently break
-- Verification: T5 line 178-186 inspects `fetchSpy.mock.calls` for URL pattern, not response shape
+- Verification: T5 line 180-196 inspects `fetchSpy.mock.calls` for URL pattern, not response shape
 
-**G. `process.env["PWA_PORT"] = "0"` in test setup** (`pwa_server.test.ts:64`)
+**G. `process.env["PWA_PORT"] = "0"` in test setup** (`pwa_server.test.ts:45`)
 - `parseInt("0")` = 0, but `app.listen(0, ...)` should ephemeral-bind (Node behavior, not Port 0 literal)
 - Concern: if pwa_server.ts uses `parseInt("0")` but `app.listen(PORT, ...)` then PORT=0 → ephemeral bind OK
 - Verify: build/orchestrator/pwa_server.js L301 `app.listen(PORT, () => ...)` — uses PORT not literal 0
 
-**H. `process.env["PWA_ORCH_PROXY_URL"]` default** (`wrapper/orchestrator/pwa_server.ts:32`)
+**H. `process.env["PWA_ORCH_PROXY_URL"]` default** (`wrapper/orchestrator/pwa_server.ts:36`)
 - `?? "http://wrapper-orchestrator:4000"` — defaults to wrapper-orchestrator in newvps compose network
 - Concern: in test env this hostname is unresolvable → fetchSpy records URL but actual fetch would fail (test uses calls-through so it tries real DNS → ECONNREFUSED, which handler `.catch` swallows)
 - Verify: build/orchestrator/pwa_server.js L32 has the `??` fallback
@@ -88,13 +91,13 @@ metadata:
 ### 不应再 FAIL 的项 (I-K)
 
 **(I)** v1.2.0l.5 followup 已修 51 ripple (M0.2 + M0.3) — 不要回滚 M0.2/M0.3 fixes
-- M0.2: `.gitignore /node_modules/` + `vitest.config.ts !build/**` 排除
+- M0.2: `.gitignore /node_modules/` (line 27) + `vitest.config.ts !build/**` 排除 (line 51)
 - M0.3: tenant_id + X-Tenant-ID + KERNEL_VERSION + execution_driver mock + planStep shapes
 
-**(J)** v1.2.0k.3 P0 tenant isolation — production code 在 `server.ts:188-205` (kernel fallback 路径); pwa_server heartbeat 不传 tenant (worker 不是 task-scoped, workers_count + per-driver liveness)
+**(J)** v1.2.0k.3 P0 tenant isolation — production code 在 `wrapper/server.ts:188-205` (handleStatusById kernel fallback 路径); pwa_server heartbeat 不传 tenant (worker 不是 task-scoped, workers_count + per-driver liveness)
 - **不应** 在 `pwa_server.ts` heartbeat handler 加 tenant validation (workers are tenant-agnostic)
 
-**(K)** v1.2.0l.5 WORKFLOW_PACKS_DIR 在 compose L329 — M0.1 不应改动
+**(K)** v1.2.0l.5 WORKFLOW_PACKS_DIR 在 compose — wrapper-orchestrator L187 + wrapper-frontend L349 — M0.1 不应改动
 
 ---
 
@@ -108,7 +111,7 @@ metadata:
 | 4 | Correctness | last_heartbeat_at 类型错 | T3 类型检查 | string 或 number |
 | 5 | Hygiene | L8 secrets | `git diff 5faffea^..5faffea -U0 \| grep sk-/TOKEN` | 0 matches |
 | 6 | Hygiene | L19 tag 指向 | `git rev-parse v1.2.0n.0^{commit}` | = HEAD = 5faffea |
-| 7 | Hygiene | v1.0 runtime 0 diff | `git diff 1.0.0..HEAD -- harness/server.py spec/ \| wc -l` | 0 |
+| 7 | Hygiene | v1.0 runtime immutability (本 commit 范围) | `git diff 5faffea^..5faffea --no-pager -- harness/server.py spec/ \| wc -l` | 0 (本 commit 对 runtime 零改动; 累计 `v1.0.0..HEAD` 另有 +392/7 files 是其他 v1.1+/v1.2+ 周期增量, 不计入本 commit) |
 | 8 | Build | tsc clean | `cd wrapper && ./node_modules/.bin/tsc --noEmit` | exit 0 |
 | 9 | Test | full vitest | `cd wrapper && ./node_modules/.bin/vitest run` | 260 PASS / 0 FAIL |
 | 10 | Compose | YAML valid | `python3 -c "import yaml; yaml.safe_load(...)"` | exit 0 |
@@ -121,6 +124,9 @@ metadata:
 ```bash
 cd /Users/kjonekong/projects/fish-harness
 
+# All git commands use --no-pager to avoid pager hangs in non-TTY contexts
+# (per Cline review §7 audit-trail note)
+
 # 1. Type check (per [[fish-harness-project]] §5.3 — must use local bin)
 cd wrapper && ./node_modules/.bin/tsc --noEmit
 cd ..
@@ -130,20 +136,20 @@ cd wrapper && ./node_modules/.bin/vitest run 2>&1 | tail -10
 cd ..
 
 # 3. L8 secrets (F1 hygiene — pattern strict)
-git diff 5faffea^..5faffea -U0 | grep -E 'sk-[a-zA-Z0-9]{8,}|api[_-]key|SECRET|TOKEN|PASSWORD' || echo "L8 clean ✓"
+git diff 5faffea^..5faffea --no-pager -U0 | grep -E 'sk-[a-zA-Z0-9]{8,}|api[_-]key|SECRET|TOKEN|PASSWORD' || echo "L8 clean ✓"
 
 # 4. L19 tag lock (per F4 — must match HEAD)
 echo "tag commit: $(git rev-parse v1.2.0n.0^{commit})"
 echo "HEAD:       $(git rev-parse HEAD)"
 # 期望两者都是 5faffea9cf59c36b60bff071efdec81eb71b37f5
 
-# 5. v1.0 runtime immutability (per ADR 0010 Decision d)
-git diff 1.0.0..HEAD -- harness/server.py spec/ kernel-schema.sql | wc -l
-# 期望 0
+# 5. v1.0 runtime immutability — 本 commit 范围 (ADR 0010 Decision d)
+git diff 5faffea^..5faffea --no-pager -- harness/server.py spec/ kernel-schema.sql | wc -l
+# 期望 0 (本 commit 对 runtime 零改动; 累计 v1.0.0..HEAD 实测 +392/7 files, 不计入本 commit)
 
-# 6. Express route order (A — most critical)
-grep -nE 'app\.(post|all|use|get)\(' wrapper/orchestrator/pwa_server.ts
-# 期望顺序: use(json) → post(/api/v1/worker/heartbeat) → all(/api/v1/*path) → post(/api/pwa/dispatch) → static
+# 6. Express route order (A — most critical, run on build/ artifact)
+grep -nE 'app\.(post|all|use)\(' wrapper/build/orchestrator/pwa_server.js | head -5
+# 期望顺序: use(json)@35 → post(/api/v1/worker/heartbeat)@51 → all(/api/v1/*path)@167 → post(/api/pwa/dispatch)@228 → static@284
 
 # 7. Compose schema validation
 python3 -c "import yaml; yaml.safe_load(open('deploy/6host-compose.newvps.yml'))" && echo "YAML valid ✓"
@@ -155,7 +161,7 @@ echo "WORKER_HOST:         $(grep -c 'WORKER_HOST' deploy/6host-compose.newvps.y
 
 # 9. heartbeat_sender env contract
 grep -n 'WORKER_HEARTBEAT_URL' wrapper/orchestrator/heartbeat_sender.ts | head -5
-# 期望: process.env['WORKER_HEARTBEAT_URL'] early-return guard
+# 期望: process.env['WORKER_HEARTBEAT_URL'] early-return guard at L81-82
 
 # 10. fetchSpy isolation sanity
 grep -n 'mockResolvedValue\|mockImplementation\|spyOn(globalThis, .fetch.)' wrapper/test/unit/pwa_server.test.ts
@@ -173,9 +179,9 @@ pre-deploy verification.
 Tag: v1.2.0n.0 → commit 5faffea
 Project: /Users/kjonekong/projects/fish-harness
 Files changed (5):
-  1. wrapper/orchestrator/pwa_server.ts (+129) — heartbeat local short-circuit + Option C double-write
-  2. wrapper/test/unit/pwa_server.test.ts (NEW, 195 lines) — 6 tests
-  3. deploy/6host-compose.newvps.yml (+20) — 3 wrapper profile env + frontend volume
+  1. wrapper/orchestrator/pwa_server.ts (+129) — heartbeat local short-circuit + Option C double-write (385 total lines)
+  2. wrapper/test/unit/pwa_server.test.ts (NEW, 205 lines) — 6 tests
+  3. deploy/6host-compose.newvps.yml (+20) — 3 wrapper profile env + frontend volume (395 total lines)
   4. pyproject.toml (+1/-1) — version bump
   5. harness/__init__.py (+1/-1) — version bump
 
@@ -213,15 +219,46 @@ DO NOT modify any files. Read-only review.
 | (a) | 先行起草 | ✅ | 本文件在 commit 5faffea 之前起草（用户要求） |
 | (b) | commit 后立即复审 | ✅ | M0.1 commit 后已跑 tsc + vitest, pwa_server.test.ts 6/6 PASS, full baseline 260 PASS / 0 FAIL / 147 SKIP |
 | (c) | 自引入预演入列 | ✅ | 本文件 grep 字面预计 0（不入 tracked） |
-| (d) | commit message 附实测数 | ✅ | 5faffea commit message 含 "260 PASS / 0 FAIL / 147 SKIP" |
-| (e) | 引用式纪律 | ✅ | §1.5 主表唯一权威源 + §4 命令是单点验证 |
+| (d) | commit message 附实测数 | ✅ | 5faffea commit message 含 "260 PASS / 0 FAIL / 147 SKIP"（v0.5 hard rule (d) 落地） |
+| (e) | 引用式纪律 | ✅ | §1 主表是唯一权威源 + §4 命令是单点验证（修订: §1.5 锚点不存在于本文档结构，已改为 §1 主表） |
 
 ---
 
 ## §8 引用 (cross-ref)
+
+**注**: 下列 wikilink 指向 Claude memory vault (`~/.claude/projects/-Users-kjonekong/memory/`), 不在 repo 内解析。Repo 内 tracked 文档间相互引用用相对路径 (e.g., `../CLAUDE.md`)。
 
 - [[fish-harness-v1-2-0l-cycle-closure]] — M0.1 close the v1.2.0l.5 P0 deferred worker pool gap
 - [[fish-harness-auto-commit-push]] — auto commit/push via Clash proxy (no codex review)
 - [[fish-harness-newvps-kex-workaround]] — KEX curve25519-sha256 for ssh into newvps (deploy step)
 - [[fish-harness-newvps-deploy-gotchas]] — M1c DO-1 6 大坑 (deploy step)
 - [[codex-manager-project]] — Cline 在 VS Code 里运行 (本次审验工具)
+
+---
+
+## §9 v1.3 修订元数据 (post-review)
+
+本节为 Cline 二审 (2026-09-16) 后修订来源记录。修订依据: `notes/cline-review-v1.2.0n-m0.1-predeploy-report.md` §7 补充节 findings 7-9 + 修订清单。
+
+| 修订点 | 修订前 | 修订后 | 来源 |
+|--------|--------|--------|------|
+| §1 主表行数 pwa_server.ts | 357 total | 385 total (实测 `wc -l`) | Cline finding 5 |
+| §1 主表行数 pwa_server.test.ts | 195 lines | 205 lines (实测 `wc -l`) | Cline finding 5 |
+| §1 主表行数 6host-compose | 384 total | 395 total (实测 `wc -l`) | Cline finding 5 |
+| §1 主表 file:line | L42-167 / L174-178 / L227-231 / L275-279 / L312-316 / L329 | build:L51/L167 + compose:L179/L180/L238/L239/L287/L288/L150/L332 + WORKFLOW_PACKS_DIR at L187/L349 | Cline finding 5 |
+| §1 Out of scope path | wrapper/orchestrator/server.ts | wrapper/server.ts (实际 canonical handler) | Cline finding 3 |
+| §2 A grep 命令 | source 行号 | build/ 行号 (实测 grep) | Cline finding 5 |
+| §2 B 行号 | L130-148 source | build:L145-161 (实测 grep) | Cline finding 5 |
+| §2 C path | server.ts:340-348 (路径前缀错) | wrapper/server.ts:324-425 (canonical handler) | Cline finding 3 |
+| §2 D 决定性缓解 | 仅 pragma WAL + busy_timeout | + F41 host-dedup worker_pool.ts:277-297 | Cline finding 6 |
+| §2 E 行号 | L174-178 / L227-231 / L275-279 | L179-L180 / L238-L239 / L287-L288 (实测 grep) | Cline finding 5 |
+| §2 K 行号 | L329 | L187 (orchestrator) + L349 (frontend) | Cline finding 5 |
+| §3 矩阵 #7 | tag `1.0.0` (fatal) | tag `v1.0.0` + 口径改 "本 commit 范围" | Cline finding 4 |
+| §4 git 命令 | 无 `--no-pager` | 统一加 `--no-pager` (实测 pager 挂起) | Cline finding |
+| §5 Cline prompt 行数 | 195 / 357 / 384 | 205 / 385 / 395 | Cline finding 5 |
+| §7 (e) 锚点 | §1.5 主表 (锚点不存在) | §1 主表 (本文档无 §1.5 节) | Cline finding 7 |
+| §8 wikilink 注释 | 无 | 加 "外部 vault" 注记 | Cline finding 8 |
+
+**未修订项 (Cline 二审未要求)**:
+- F41 host-dedup 注释 (D 项决定性缓解) — 已加, 见 §2 D
+- compose:365-366 过时注释 — Cline finding 2 标 pre-existing, 不在 scope 文档修订范围 (下次触碰 compose 时改)

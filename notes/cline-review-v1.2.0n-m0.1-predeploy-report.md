@@ -82,6 +82,18 @@ pre-existing 相邻注释,1 条为 commit message 卫生项,均不阻塞)。
 - Deploy 授权路径照 scope §6:`docker compose -f deploy/6host-compose.newvps.yml up -d --force-recreate wrapper-frontend wrapper-orchestrator wrapper-commander wrapper-commander-2`(注意 wrapper-orchestrator/commander 心跳目标已切到 wrapper-frontend:4002,frontend 必须同批 up,否则心跳 404;好在 `.catch` 只记日志、worker 侧下个 tick 重注册,风险可控)。
 - Forward scope 不变:v1.2.0n M1 depends_on 并行 + `${step.*.stdout}`;外加本报告 Finding 2/3/4/5 的文档修正(下次 scope 起草时)。
 
+## §7 补充 — scope 文档本体复审(第二轮,2026-09-16)
+
+对 [[cline-audit-scope-v1.2.0n-m0.1-predeploy]] 文档自身的逐节核。总评:**语义层 0 错**(全部技术主张实测为真)、**自检层 1 虚标**、**引用层 8 处坏**、**数据层 ~15 处漂移**——作为指令文档可用,照抄执行会踩 3 个坑(pager / bad revision / 错路径),但不会误判 PASS。
+
+新增 finding(补充 §4 的 F3-F6):
+
+7. **minor** — scope §7(e) — 引用 "§1.5 主表唯一权威源",但本文档**无 §1.5 节**(标题结构为 §1-§8,§1 无子节)。落空锚点,引用式纪律的自证失效。
+8. **minor** — scope §8 — 5 个 wikilink(`fish-harness-v1-2-0l-cycle-closure` / `fish-harness-auto-commit-push` / `fish-harness-newvps-kex-workaround` / `fish-harness-newvps-deploy-gotchas` / `codex-manager-project`)在 repo 内**均不可解析**:文件名与 notes/ frontmatter `name:` 全无匹配。若指向外部 memory vault,应显式标注外部位点,否则后续审验者无从追溯。
+9. **info** — 引用精度分层统计 — 实测**恰好正确**的引用:heartbeat_sender.ts:81-82(E 项)、compose L150(D 项 orch 卷)、build/orchestrator/pwa_server.js L301(G 项)、build:32(H 项)、server.ts:340-348 行号(对 wrapper/server.ts 而言,C 项——仅路径前缀错);**漂移**的引用:§1 表 4 组行号 + 3 个总行数、§2 A/B/C/F/G/H 共 8 组、§2-K L329→L187/L349;坏引用:server.ts 路径、tag `1.0.0`、§1.5 锚点、5 wikilink。模式:build 产物行号对、源码/测试/compose 行号系统性漂(疑为起草时按旧快照写、commit 后未回填)。
+
+修订建议(scope v1.3 时一并):§1 行数列改 `git show --stat` 实测值;所有 file:line 在 commit 后用 `grep -n` 回填;§3-#7 改 `v1.0.0` 且口径改"本 commit 对 runtime 零改动";§4 git 命令统一加 `--no-pager`;§7(d) 复核 commit message 后再标 ✅;§7(e) 锚点改"§1 主表";§8 标注外部 vault 或改相对链接;收录 F41 host-dedup(worker_pool.ts:277-297)为 D 项决定性缓解。
+
 ---
 **Audit trail:** 全部 §4 命令于 2026-09-16 在 /Users/kjonekong/projects/fish-harness 实跑;tsc/vitest 用 wrapper 本地 bin;git 操作需 `--no-pager`(scope 原命令在 pager 下会挂起,实操注意)。
 
