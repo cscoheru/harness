@@ -41,7 +41,15 @@ export default defineConfig({
   test: {
     // match unit + integration test files under wrapper/test/
     // Exclude e2e/ — Playwright runs separately via npm run test:e2e:smoke
-    include: ['test/unit/**/*.test.ts', 'test/integration/**/*.test.ts'],
+    include: [
+      'test/unit/**/*.test.ts',
+      'test/integration/**/*.test.ts',
+      // M0 (v1.2.0n): exclude compiled snapshots in build/test/ that vitest
+      // accidentally picks up on case-insensitive filesystems (macOS).
+      // Without this, every `npm run build` produces 33 stale .test.js files
+      // that fail with "Cannot find module" / signature drift vs source.
+      '!build/**',
+    ],
     // passWithNoTests: allow empty test files
     passWithNoTests: true,
     // allowOnly: allow test.todo() to count as passing

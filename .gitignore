@@ -24,6 +24,7 @@ __pycache__/
 *.egg-info/
 /build/
 /dist/
+/node_modules/
 # v1.2.0e.3 NEW (E1): tsc --incremental cache file (per-edge, regenerated on first build)
 /wrapper/.tsbuildinfo
 
