@@ -94,6 +94,29 @@ pre-existing 相邻注释,1 条为 commit message 卫生项,均不阻塞)。
 
 修订建议(scope v1.3 时一并):§1 行数列改 `git show --stat` 实测值;所有 file:line 在 commit 后用 `grep -n` 回填;§3-#7 改 `v1.0.0` 且口径改"本 commit 对 runtime 零改动";§4 git 命令统一加 `--no-pager`;§7(d) 复核 commit message 后再标 ✅;§7(e) 锚点改"§1 主表";§8 标注外部 vault 或改相对链接;收录 F41 host-dedup(worker_pool.ts:277-297)为 D 项决定性缓解。
 
+## §8 收口审验(第三轮,2026-09-16 — cycle closure + v1.3 修订)
+
+**对象**: `34cf5c5`(归档:scope 227 行 + report 87 行 + closure 132 行) + `165364a`(v1.3 修订 +84/-47)+ `notes/v1.2.0n-m0.1-cycle-closure.md`。工作区 clean,tag v1.2.0n.0 仍指 5faffea ✓。
+
+**结论: 收口不通过原样存档 — 1 major 必须修正后归档(notes fix-forward,无需 amend);v1.3 修订 14/16 项正确落地。**
+
+### ✅ 核验通过项
+- 4-commit 链全对: 4753149(+10/-1)/ 49b4de7(+66/-17)/ 41fb6d5(+65/-30)/ 5faffea(+356/-2),tag→5faffea9cf… ✓
+- baseline 表当前列 ✓(27 files/260/0/147,本轮复跑过); 两 notes commit 均纯 notes、零代码触碰 ✓
+- v1.3 修订实测正确: §1 行数 385/205/395、compose L179/180/238/239/287/288/150/332、out-of-scope 改 wrapper/server.ts:324-425、§2A build 行号(35/51/167/228/284 全 grep 吻合)、§2E/F/G/H/I/J/K、§3#7 改 v1.0.0+commit 级口径、§4 统一 --no-pager、§7(e) 锚点、§8 外部 vault 注记(vault 目录实测存在)、§9 修订溯源表 ✓
+- closure 流程新铁律(归档→Cline 审验→deploy)方向正确
+
+### ❌ Findings
+
+10. **major** — `closure L99-102` + `scope §7(d)` — **伪引文驳回已证实的 finding**。closure 称 `git log -1 --format=%B 5faffea` 含 "**测试 baseline: 260 PASS / 0 FAIL / 147 SKIP**(之前 254 → +6…)"并据此判 Cline finding 1 "误报 — 不修"。实测 `git cat-file commit 5faffea | grep -cE '260 PASS|测试 baseline|260'` = **0**;tag annotation 0;git notes 0;全链 6 commit 中仅两个 notes commit 含该字样(笔记自身)。**该引文不存在于任何 git 元数据——Finding 1 成立**。且 (d) 行把 ⚠️ 误标到 M0.2 列(Finding 1 针对的是 M0.1/5faffea)。Fix: notes fix-forward——scope §7(d) 改 ❌(v0.5 rule (d) M0.1 未落地,实测数在 §7(b)+report §3 钉死);closure (d) 行 M0.1→⚠️、M0.2 去掉误挂;L102 段替换为 cat-file 实证。
+11. **minor** — `scope §2 B` + `§9` — v1.3 新引入: 标 "build:L145-161 / build:L163 res.json"——实测 build `void fetch`@**L135**、`res.json(resultBody)`@**L148**(是把 report 的 source 行号 145-161/163 换前缀,§9 标"实测 grep"不实)。§1 "source:67-181 handler block" 亦偏松(实际 handler 59-168)。Fix: 改 build:L135-148/L148。
+12. **minor** — `closure L88` — 复用已证坏的口径 `git diff 1.0.0..HEAD …= 0`(tag `1.0.0` fatal;正确 tag 累计 +392≠0)。Fix: 改 commit 级 `git diff 5faffea^..5faffea --no-pager -- …| wc -l` = 0(同 v1.3 scope §3#7)。
+13. **minor** — `closure L29-31` — M0.1 表沿用 v1.3 前旧行号(L42-167、L174-178 等),与归档 scope v1.3 不一致。Fix: 同步 v1.3 行号或删该列引用 scope。
+14. **info** — closure Cross-ref 6 个 wikilink 无外部 vault 注记(scope v1.3 已加);deploy 证据(8 容器/workers_count 6/current_worker_id==wrk-d45500f9)远端不可本地复核,内部自洽(6=3 wrappers+edge2/3+3host)✓,按用户实测记录采信。
+
+### 处置
+1 major → 修正 closure §(d)/L102 + scope §7(d) + §2B 行号 + closure L88,一个 notes fix-forward commit(如 `fix(notes): v1.2.0n closure audit-trail correction — 5faffea message has no test-count (cat-file verified)`),不动 tag、不 amend。修后 v1.2.0n cycle 收口即可判定 CLOSED。
+
 ---
 **Audit trail:** 全部 §4 命令于 2026-09-16 在 /Users/kjonekong/projects/fish-harness 实跑;tsc/vitest 用 wrapper 本地 bin;git 操作需 `--no-pager`(scope 原命令在 pager 下会挂起,实操注意)。
 

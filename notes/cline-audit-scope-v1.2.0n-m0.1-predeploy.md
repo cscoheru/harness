@@ -45,10 +45,12 @@ metadata:
 - Express matches in registration order; wildcard proxy would otherwise eat the heartbeat path → local pool never populates → double-write never fires
 - Verification: `grep -nE 'app\.(post|all|use)\(' build/orchestrator/pwa_server.js` 期望顺序 use(json)@35 → post(heartbeat)@51 → all(proxy)@167 → post(/api/pwa/dispatch)@228 → static@284
 
-**B. Option C double-write semantics** (build/orchestrator/pwa_server.js L145-L161)
-- Fire-and-forget `void fetch(...).catch(...)` swallows ECONNREFUSED → local 200 response still goes out (build:L163 `res.json(resultBody)`)
+**B. Option C double-write semantics** (build/orchestrator/pwa_server.js L135-L148)
+- Fire-and-forget `void fetch(\`${ORCH_PROXY_URL}/api/v1/worker/heartbeat\`).catch(...)` at build:L135; `res.json(resultBody)` at build:L148
+- ECONNREFUSED 被 `.catch` 吞掉 → local 200 response still goes out (build:L148)
 - Best-effort: local pool is source for PWA UI badge; orchestrator pool is source for dispatch
 - Verification: T5 spy confirms fetch to `wrapper-orchestrator:4000` is called; pwa_server.test.ts:180-196
+- Source 对应行: `wrapper/orchestrator/pwa_server.ts:150-157` (handler 块 source 实测 grep)
 
 **C. Schema validation parity** (build/orchestrator/pwa_server.js L67-L132 vs canonical `wrapper/server.ts:324-425`)
 - Canonical handler in **`wrapper/server.ts`** (NOT `wrapper/orchestrator/server.ts` — that path does not exist); parity逐条对齐 wrapper/server.ts:340-411 F6 injection guard
@@ -219,7 +221,7 @@ DO NOT modify any files. Read-only review.
 | (a) | 先行起草 | ✅ | 本文件在 commit 5faffea 之前起草（用户要求） |
 | (b) | commit 后立即复审 | ✅ | M0.1 commit 后已跑 tsc + vitest, pwa_server.test.ts 6/6 PASS, full baseline 260 PASS / 0 FAIL / 147 SKIP |
 | (c) | 自引入预演入列 | ✅ | 本文件 grep 字面预计 0（不入 tracked） |
-| (d) | commit message 附实测数 | ✅ | 5faffea commit message 含 "260 PASS / 0 FAIL / 147 SKIP"（v0.5 hard rule (d) 落地） |
+| (d) | commit message 附实测数 | ❌ | v0.5 hard rule (d) **未落地** — 5faffea commit message 实测 `git cat-file commit 5faffea \| grep -cE '260 PASS\|测试 baseline' = 0` (v1.4 实测 cat-file); tag annotation 也 0; git notes 也 0。**Finding 1 (Cline 一审) 成立**, Cline 三审 F10 揭 closure L99-102 + 此处标 ✅ 是凭空捏造的"实测"反驳。实测数 (`260 PASS / 0 FAIL / 147 SKIP`) 在 archive commit `34cf5c5` (cycle closure commit) message 中, **不** 在 5faffea (M0.1 feature commit) message 中 — 这是 v0.5 hard rule (d) 真正的落地位置: feature commit message 含"为什么 + what", closure/archive commit message 含"实测数"。修法 (v0.6 候选): feature commit message 也可加实测数, 但不强制; 强制项为 archive commit message 必须含本 cycle 全量实测 |
 | (e) | 引用式纪律 | ✅ | §1 主表是唯一权威源 + §4 命令是单点验证（修订: §1.5 锚点不存在于本文档结构，已改为 §1 主表） |
 
 ---
@@ -259,6 +261,25 @@ DO NOT modify any files. Read-only review.
 | §7 (e) 锚点 | §1.5 主表 (锚点不存在) | §1 主表 (本文档无 §1.5 节) | Cline finding 7 |
 | §8 wikilink 注释 | 无 | 加 "外部 vault" 注记 | Cline finding 8 |
 
-**未修订项 (Cline 二审未要求)**:
-- F41 host-dedup 注释 (D 项决定性缓解) — 已加, 见 §2 D
-- compose:365-366 过时注释 — Cline finding 2 标 pre-existing, 不在 scope 文档修订范围 (下次触碰 compose 时改)
+| §2 B 行号 | build:L145-161 / build:L163 | build:L135 (void fetch) / build:L148 (res.json) — 实测 grep | Cline finding 11 (三审) |
+| §7 (d) 实测数标 ✅ | ✅ (5faffea message 含 "260 PASS") | ❌ (cat-file grep -c = 0; Finding 1 成立; 实测数在 archive commit 34cf5c5 message) | Cline finding 10 (三审, **major**) |
+
+---
+
+## §10 v1.4 修订元数据 (post-Cline-三审, 2026-09-16)
+
+本节为 Cline 三审 (2026-09-16, 收口审验) 后修订来源记录。修订依据: `notes/cline-review-v1.2.0n-m0.1-predeploy-report.md` §8 节 findings 10-11 + 处置建议。
+
+| 修订点 | 修订前 | 修订后 | 来源 |
+|--------|--------|--------|------|
+| §2 B 行号 (build void fetch) | build:L145-161 | build:L135 | Cline finding 11 + 实测 `grep -n 'void fetch' build/orchestrator/pwa_server.js` |
+| §2 B 行号 (build res.json) | build:L163 | build:L148 | Cline finding 11 + 实测 `grep -n 'res.json(resultBody)' build/orchestrator/pwa_server.js` |
+| §7 (d) 自检 ✅→❌ + cat-file 实证 | ✅ (5faffea message 含实测数) | ❌ (cat-file grep -c = 0; 实测数在 archive commit 34cf5c5 message) | Cline finding 10 (**major**) + 实测 `git cat-file commit 5faffea \| grep -cE '260 PASS\|测试 baseline' = 0` |
+
+**机制补丁 (v0.6 候选)**:
+- hygiene (d) commit message 实测数 — 当前 rule 仅要求"附实测数", 但未规定**哪个 commit 必须含**。Cline finding 10 显示 archive commit (34cf5c5) message 含实测数 ✅, 但 feature commit (5faffea) message 不含 — 后者若标 ✅ 是"凭空捏造的'实测'反驳"。建议 v0.6 明确: archive/closure commit message **必须** 含本 cycle 全量实测数, feature commit message 含"为什么 + what", 实测数可选。
+- 修订 hygiene 自身 (commit message 中"实测"必须 cat-file 实证, 不能凭记忆或推论) — 防止 recursive self-audit failure。
+
+**未修订项 (Cline 三审未要求)**:
+- 报告 §8 修订内容 (M 状态, Cline 已自洽) — 报告 §8 findings 12-14 (closure L29-31 行号漂、L88 bad revision、6 wikilink 无 vault 注记) 在 closure v1.4 commit 中一并修。
+- v1.3 修订 14 处中 13 处正确落地 — 1 处 (§2 B 行号) 在 v1.4 修订
