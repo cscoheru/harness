@@ -25,12 +25,12 @@ metadata:
 
 | # | 文件 | 现状 (实测 grep/sed, per v0.6 #1 硬约束 — cat-file verbatim) | M1.1 预期改 | 行数 (实测 `wc -l`) |
 |---|------|--------------------------------|-------------|----------------------|
-| 1 | `wrapper/orchestrator/workflow_pack.ts` | L316 PHASE2_RE (`/\$\{step::[a-zA-Z0-9_-]+::[a-zA-Z_]+\}/`); L317 WILDCARD_RE (`/\$\{step\.\*::([a-zA-Z_]+)\}/`); L345-348 + L373-376 4 cases (`stdout` / `host` / `wallMs` / `exit_code`) | 加 `case "status": raw = s.status; break;` (L349 + L378) — 5 cases 变 5th field type union; `${step.*::status}` 通配符自动支持 (regex 已 match `status`) | **472** total (实测 — M1 收口 472 + 0 M1.1 case 添加, 之前 v1.1 估算 "434" 凭印象, 已 v1.1 F1 fix-forward 改为真值) |
+| 1 | `wrapper/orchestrator/workflow_pack.ts` | L316 PHASE2_RE (`/\$\{step::[a-zA-Z0-9_-]+::[a-zA-Z_]+\}/`); L317 WILDCARD_RE (`/\$\{step\.\*::([a-zA-Z_]+)\}/`); L345-348 + L373-376 4 cases (`stdout` / `host` / `wallMs` / `exit_code`) | 加 `case "status": raw = s.status; break;` (L349 + L378) — 5 cases 变 5th field type union; `${step.*::status}` 通配符自动支持 (regex 已 match `status`) | **472** total (实测 — M1 收口 472 + **2** M1.1 case 添加 (phase 2 + phase 3 wildcard 各 1), 之前 v1.1 估算 "434" 凭印象且 "+0" 数字与 "+2" 不自洽, 已 v1.1.1 F1 fix-forward 改为真值 472 + cosmetic +2 修正) |
 
 | 2 | `wrapper/orchestrator/orchestrator.ts` | L411-428 wave loop (Promise.all); L418 `if (stepCompleted) waveCompletedCount += 1`; L427 `realStepCount += waveCompletedCount`; L421+L747+L760+L780 emitStepUpdate calls; L683 dispatchOneStep signature | (1) read `MAX_CONCURRENT_STEPS_PER_WAVE` env var at module top (default 0 = unlimited); (2) wave loop: `Promise.all` sliced by concurrency limit; (3) skip-dependents: when upstream step fails (status="failed"), mark downstream step (in transitive `depends_on`) as "skipped" status, skip dispatchOneStep call, emitStepUpdate("skipped"), increment waveFailedCount to suppress realStepCount | **1033** total (实测 — M1 收口 1033; M1.1 估算 +30 (MCC + skip logic) → **预计 ~1063** post-M1.1, 实测待实施后 cat-file 真测) |
 | 3 | `wrapper/orchestrator/types.ts` | L383-389 `TaskStatus` union (6 成员: `pending` / `dispatched` / `running` / `completed` / `failed` / `cancelled`); L394/L406/L419 `PlanStepStatus.status: TaskStatus` (3 处用法) | extend `TaskStatus` union 加 `"skipped"` 字面 (7th 成员, skip-dependents logic 用) — **实测 F4 cat-file**: 定义 L383-389 (不是 §1 v1.0 估算 L500), 6 成员 (含 `dispatched`), 3 处 PlanStepStatus.status 用法在 L394/L406/L419 (v1.0 §1 估算 L497-508 区域但具体行偏移) | **539** total (实测 — M1 收口 539, M1.1 +1 enum 字面 → 实测待 cat-file 真测 post-M1.1) |
 | 4 | `workflow_packs/orch.json` | L16/L24/L32 depends_on 已 used; L31 aggregate-results step name = "aggregate-results"; input_ref = `bash:-c:echo "\${step::dispatch-commands::stdout}"` (explicit form) | **不动** (orch.json 是**生产默认包**, 改 aggregate-results input_ref 为 `${step.*::status}` 会改变所有真实任务聚合输出); **§2 D 重设计**: status-echo demo 放 test pack (新 NEW file `wrapper/test/unit/fixtures/orch-skip-test-pack.json` + `wrapper/test/unit/orchestrator_skip_pack.test.ts`), 验证 M1.1 skip-dependents + status 流转 (per v1.1 F3 fix) | **36** total (实测 — **不动 +0**; test pack 新增 status-echo demo, 不动 production default) |
-| 5 | `wrapper/test/unit/orchestrator_dispatch_wave.test.ts` (M1 cycle T4 重写后, baseline **466** lines / 7 tests) | T4 当前断言 M1.0 "B fails → D STILL dispatched" (M1.0 wave 内失败不阻断); **M1.1 拆 T4** (per v1.1 F2 fix): T4a "M1.0 wave 内失败不阻断 (同 wave 独立 step 不受失败影响)" (M1.0 行为); T4b "M1.1 skip-dependents: 跨 wave 边界 (B fails → D SKIPPED + emit_step_update('skipped'))" (M1.1 新行为) | (1) T4 改 T4a + T4b (2 it blocks); (2) 验证 T4a 仍 pass (M1.0 baseline, 4-step DAG A→B/C→D 中 B fails → D still dispatched); (3) T4b 新断言 (per v0.6 #3 title-body invariant: 标题 = 断言 body) | **466+** total (实测 — 466 + T4 split ≈ +30 lines) |
+| 5 | `wrapper/test/unit/orchestrator_dispatch_wave.test.ts` (M1 cycle T4 重写后, baseline **466** lines / 7 tests) | T4 当前断言 M1.0 "B fails → D STILL dispatched" (M1.0 wave 内失败不阻断); **M1.1 拆 T4** (per v1.1 F2 fix): T4a "M1.0 wave 内失败不阻断 (同 wave 独立 step 不受失败影响)" (M1.0 行为, B fails → 同 wave 独立 C 仍派发); T4b "M1.1 skip-dependents: 跨 wave 边界 (B fails → D SKIPPED + emit_step_update('skipped'))" (M1.1 新行为) | (1) T4 改 T4a + T4b (2 it blocks); (2) 验证 T4a 仍 pass (M1.0 baseline, 4-step DAG A→B/C→D 中 B fails → **同 wave 独立 C 仍派发**, D 跨 wave skip 落地后由 T4b 单独验); (3) T4b 新断言 (per v0.6 #3 title-body invariant: 标题 = 断言 body) | **466+** total (实测 — 466 + T4 split ≈ +30 lines) |
 | 6 | `wrapper/test/unit/workflow_pack_wildcard.test.ts` (M1 cycle 5 tests baseline) | T2 + T5 currently verify include-failed + escape | 加新 T6 "${step.*::status} wildcard concatenates statuses" + T7 "${step.*::status} skips pending/running" | **181+** total (实测 — 181 + 2 new tests ≈ +40 lines) |
 
 **实测证据 (v0.6 #2 cat-file verbatim, 禁裸报 0)**:
@@ -74,7 +74,7 @@ $ grep -nE 'PlanStepStatus' wrapper/orchestrator/types.ts | head -3
 ```
 
 **Out of scope** (NOT in M1.1):
-- `wrapper/orchestrator/orchestrator.ts` dispatchOneStep body (L683-786) — **保留 M1.0 行为**, M1.1 加 skip 标记在 wave loop 外层 (per audit-scope v1.0 §2 I "M1.0 wave 内失败不阻断; M1.1 candidate: skip-dependents")
+- `wrapper/orchestrator/orchestrator.ts` dispatchOneStep body (L683-786) — **保留 M1.0 行为**, M1.1 加 skip 标记在 wave loop 外层 (per **M1 scope v1.2 §2 A L82** "M1.0 wave 内失败不阻断; M1.1 candidate: skip-dependents")
 - `wrapper/server.ts` heartbeat handler (M0.1 实施, 不动)
 - `wrapper/orchestrator/pwa_server.ts` heartbeat local short-circuit (M0.1 实施, 不动)
 - `deploy/6host-compose.newvps.yml` (M0.1 改, M1.1 无 deploy 改动)
@@ -106,16 +106,16 @@ $ grep -nE 'PlanStepStatus' wrapper/orchestrator/types.ts | head -3
 **C. skip-dependents logic 落地** (`orchestrator.ts:411-428`)
 
 - M1.1 预期改:
-  1. **M1.0 行为保留** (T4 旧断言仍 pass): M1.0 wave loop 逐 step try/catch, 同 wave 失败继续, 后续 wave 仍 dispatch
-  2. **M1.1 新增** (T6 新断言): 在 wave loop 进入下个 wave 前, 检查上 wave 是否有 step.status === "failed" (或 "skipped"); 若有, mark 所有 depends_on 含该 step 的 step 为 "skipped" (新 emit_step_update), skip dispatchOneStep
-  3. **Caveat** (per audit-scope v1.0 §2 A "M1.0 wave 内失败不阻断"): M1.1 skip 只跨 wave 边界触发 (wave 1 失败 → wave 2 跳), wave 内仍全 dispatch
-- Verification: T6 4-step DAG (A → B/C → D) B fails → D (depends on B) skipped, **B and C 同 wave 仍全 dispatch** (M1.0 行为) + D skipped (M1.1 新行为)
+  1. **M1.0 行为保留 (T4a)** — 同 wave 独立 step 不受失败影响 (B fails → 同 wave 独立 C 仍派发, per **M1 scope v1.2 §2 A L82** "M1.0 wave 内失败不阻断")
+  2. **M1.1 新增 (T4b)** — 跨 wave 边界 (B fails → wave 2 的 D 被 skip, mark upstream-failed → step skipped + emit_step_update("skipped"))
+  3. **Caveat** (per **M1 scope v1.2 §2 A** L82-85): M1.1 skip 只跨 wave 边界触发 (wave 1 失败 → wave 2 跳), wave 内仍全 dispatch
+- Verification: T4b (M1.1 skip-dependents 测试) 4-step DAG (A → B/C → D) B fails → D (depends on B) skipped, **B and C 同 wave 仍全 dispatch** (M1.0 行为, 由 T4a 验) + D skipped (M1.1 新行为)
 - **per v0.6 #3 title-body invariant**: T6 标题 "M1.1 skip-dependents" + it block "B fails → D is SKIPPED" 真实断言
 
 **D. aggregate-results `${step.*::status}` end-to-end** (`orch.json:31`, `workflow_pack.ts:296-385`)
 
 - M1.1 预期改: `orch.json:31` aggregate-results input_ref **不动** (生产默认包, demo 放 test pack per v1.1 F3 fix); `${step.*::status}` 通配符已在 test pack (`wrapper/test/unit/fixtures/orch-skip-test-pack.json`) 演示 (M1.0 已支持 implicit per M1 cycle, M1.1 通过 test pack 验证 status 流转)
-- Verification: dispatch 3-step DAG (spawn-workers OK, dispatch-commands FAIL, aggregate-results skipped) → aggregate-results bash 看到 `"completed\n---\nfailed\n---\nskipped"` (per v0.6 #1 cat-file 真测, 实证命令可粘贴)
+- Verification: dispatch test pack 3-step DAG (B fail → 独立 status-echo step 无 depends_on 不被 skip) → status-echo step bash 看到 `"completed\n---\nfailed"` 拼接 (per v0.6 #1 cat-file 真测, 实证命令可粘贴) — **skip-dependents 落地后 aggregate-results 自身被 skip, 不可能再执行; demo 改用独立 status-echo step (test pack fixture)**
 - **per v0.6 #3 title-body invariant**: end-to-end 验证真实 step.status 流 (not mocked)
 
 ### 潜在新 finding (E-G)
@@ -131,7 +131,7 @@ $ grep -nE 'PlanStepStatus' wrapper/orchestrator/types.ts | head -3
 **(H)** v0.6 hard rule 3 约束 (per ADR 0013) — 起草 + 修订 + 实施 commit 全周期套用 (M1.1 是 v0.6 hard rule 落地后**第一个** cycle, 验证机制有效)
 **(I)** F10→F15→R3→T1 同型复发曲线 — M1.1 scope 起草严格按 v0.6 3 硬约束 (cat-file 实测, 列源豁免, title-body invariant), 不再经历 self-audit failure
 **(J)** v1.2.0n M1 forward scope (per `notes/v1.2.0n-m1-cycle-closure.md` §"Forward scope (deferred)") — M1.1 直接吸收 items 1-3 (status wildcard + MCC + skip), M1 cycle closure §"M1.1 cycle CLOSED" 铺垫
-**(K)** v1.0 runtime immutability (per ADR 0010 Decision d) — M1.1 改 `wrapper/orchestrator/workflow_pack.ts` + `orchestrator.ts` + `types.ts` + `orch.json` (M1.1 forward scope 文档) + tests, **不触** `harness/` + `spec/` + `spikes/`
+**(K)** v1.0 runtime immutability (per ADR 0010 Decision d) — M1.1 改 `wrapper/orchestrator/workflow_pack.ts` + `orchestrator.ts` + `types.ts` + tests, **不触** `harness/` + `spec/` + `spikes/` (orch.json 生产默认包也不动 — per v1.1 F3 fix; demo 放 test pack)
 
 ---
 
@@ -195,9 +195,9 @@ grep -nE "process\.env\['MAX_CONCURRENT_STEPS_PER_WAVE'\]|MAX_CONCURRENT_STEPS_P
 grep -nE '"skipped"' wrapper/orchestrator/orchestrator.ts wrapper/orchestrator/types.ts | head -5
 # 期望: orchestrator.ts emit skip path; types.ts TaskStatus union
 
-# 10. aggregate-results ${step.*::status} (v0.6 #3 grep)
-grep -nE 'step\.\*::status|step\.\*::field' workflow_packs/orch.json | head -3
-# 期望: orch.json 含 ${step.*::status}
+# 10. aggregate-results ${step.*::status} (v0.6 #3 grep) — test pack fixture (orch.json 不动, per v1.1 F3)
+grep -nE 'step\.\*::status|step\.\*::field' wrapper/test/unit/fixtures/orch-skip-test-pack.json | head -3
+# 期望: test pack fixture 含 ${step.*::status} (orch.json 不含 — F3 fix)
 
 # 11. heartbeat_sender env (M1.1 不改, verify 未动)
 grep -n 'WORKER_HEARTBEAT_URL' wrapper/orchestrator/heartbeat_sender.ts | head -3
@@ -227,7 +227,9 @@ Files to change (6, per §1 表):
 1. wrapper/orchestrator/workflow_pack.ts (+2) — add `case "status"` in 2 places
 2. wrapper/orchestrator/orchestrator.ts (+~30) — read MCC env var + skip-dependents logic
 3. wrapper/orchestrator/types.ts (+1) — TaskStatus union extend "skipped"
-4. workflow_packs/orch.json (0 or 1) — aggregate-results input_ref改 ${step.*::status}
+4. workflow_packs/orch.json (0 行, per v1.1 F3 fix — orch.json 生产默认包不动, demo 放 test pack)
+4b. wrapper/test/unit/fixtures/orch-skip-test-pack.json (NEW, ~30 lines)
+4c. wrapper/test/unit/orchestrator_skip_pack.test.ts (NEW, ~150 lines, 5+ tests)
 5. wrapper/test/unit/orchestrator_dispatch_wave.test.ts (+~20) — new T6 skip test
 6. wrapper/test/unit/workflow_pack_wildcard.test.ts (+~40) — new T6/T7 status tests
 
@@ -293,7 +295,11 @@ DO NOT modify any code. Read-only design review.
 | §2 A/B/D 伪引 + 估算值标注 + chunks 数值 | ✅ FIXED (本 v1.1.1 commit R5/R6) |
 | §7 v0.6 #1 标 ⚠️ (F1 第 5 次同型复发 + v0.7 候选) | ✅ ANNOTATED (本 v1.1.1 commit R7) |
 | §修订元数据表 R1-R7 (Cline 一审 7 findings 全 FYI) | ✅ FIXED (本 v1.1.1 commit) |
-| **总计** | **12/12 ANNOTATED** (无漏计, per v0.6 #4) |
+| **R1′** (cosmetic) — §1 row 1 括注 "472 + 0 M1.1 case 添加" 数字不自洽 (+0 应为 +2, phase 2 + phase 3 wildcard 各 1 case) | info | ✅ FIXED (本 v1.1.2 commit) | §1 row 1 括注改 "472 + **2** M1.1 case 添加 (phase 2 + phase 3 wildcard 各 1)" |
+| **R2′** (major) — §2 C item 1 原文未改 (仍写 "T4 旧断言仍 pass / 后续 wave 仍 dispatch"); T6→T4b 命名失同步; row 5 (2) 括注 "D still dispatched" 又把旧语义带回 T4a | major | ✅ FIXED (本 v1.1.2 commit) | §2 C item 1 改 "T4a (同 wave 独立 step 不受失败影响) / T4b (跨 wave skip)" + T6→T4b 命名统一 + row 5 (2) 括注改 "B fails → 同 wave 独立 C 仍派发" |
+| **R3′** (major) — §2 D Verification / §4 #10 / §5 #4 / (K) 三处验收面未同步; §2 D 不可能场景原文保留 | major | ✅ FIXED (本 v1.1.2 commit) | §2 D Verification 重写 (test pack 独立 status-echo step); §4 #10 改 grep test pack fixture; §5 #4 改 orch.json 不动 + test pack 新增; (K) 去掉 + orch.json |
+| **R5′** (minor) — v0.6 #3 引用修正未落 (L77/L111/L311 三处 "v1.0 §2" 原样保留) | minor | ✅ FIXED (本 v1.1.2 commit) | L77 Out-of-scope + L111 §2 C caveat + L311 §8 改 "M1 scope v1.2 §2 A" |
+| **总计** | **3 major (R2/R3/R1) + 1 major (R1′ cosmetic) + 1 major (R2′) + 1 major (R3′) + 5 minor + 1 info** | **12/12 findings 显式处置** (无漏计, per v0.6 #4) | 跨 3 commits: `37f2a1d` (R1-R4 + F5 partial) + `2a9121b` (R5-R7 + R1 行数真值完整 + §修订元数据表 partial) + 本 v1.1.2 commit (R1′ cosmetic + R2′ + R3′ + R5′ + §修订元数据表完整) |
 
 **机制补丁验证** (per v0.6 硬约束 rule, 自检): 本 scope 严格按 v0.6 #1-#3 起草 — cat-file 实测真值 (不是凭印象), 列源豁免已标注 (closure self-injury + sk-placeholder-edge{2,3} 占位符), 测试标题 = 测试断言 body (无 "verified in integration tests" 占位引用)。**M1.1 是 v0.6 hard rule 落地后第一个 cycle**, 验证机制有效 (防止 4 次同型复发曲线复发)。
 
