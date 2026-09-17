@@ -314,7 +314,7 @@ DO NOT modify any code. Read-only design review.
 | Tag | v1.2.0n.2 | next feature flip after v1.2.0n.1 (M1 tag) |
 | Pre-implementation audit | 本文件 (2026-09-17 起草) | per 新流程纪律 "归档 → Cline 审 → deploy" + v0.6 硬约束 (per ADR 0013) |
 | v0.6 hard rule 落地 | §7 自检 + 全文 cat-file 实测 + 列源豁免 + title-body invariant | per ADR 0013 (commit `af7d1cd` 2026-09-17) |
-| v1.3 fix-forward 沉淀 | skip 跨 wave 边界触发 (caveat per audit-scope v1.0 §2 A "M1.0 wave 内失败不阻断; M1.1 candidate: skip-dependents") | per `notes/v1.2.0n-m1-cycle-closure.md` Cline 二审 R1 fix |
+| v1.3 fix-forward 沉淀 | skip 跨 wave 边界触发 (caveat per **M1 scope v1.2 §2 A L82** "M1.0 wave 内失败不阻断; M1.1 candidate: skip-dependents") | per `notes/v1.2.0n-m1-cycle-closure.md` Cline 二审 R1 fix |
 | 跟 M1 cycle 关系 | M1.1 吸收 M1 cycle forward scope items 1-3 (status + MCC + skip); M1 cycle closure §"M1.1 cycle CLOSED" 铺垫 | per [[fish-harness-v1-2-0n-m1-cycle-closure]] |
 
 ---

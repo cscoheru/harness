@@ -385,7 +385,7 @@ describe("T4: M1.0 wave error NOT blocking downstream (M1.1: skip-dependents)", 
   // T4a (M1.0 baseline) — 3-step chain DAG A → B → D, B succeeds.
   // M1.0 baseline: no skip logic, all 3 steps dispatched regardless.
   // (T4b below tests M1.1 skip-dependents with B failure → D skipped.)
-  it("T4a: M1.0 baseline — 4-step fan-out A→B/C→D, B fails → C dispatched + D dispatched (no skip)", async () => {
+  it("T4a: M1.1 wave 内不阻断 + 跨 wave skip — B fails → C dispatched, D skipped (no skip propagation within wave)", async () => {
     // Per audit-scope v1.1 §2 A caveat: M1.0 wave 内失败不阻断, 同 wave
     // 独立 step 不受影响. 4-step fan-out DAG: A (wave 1) + B/C (wave 2) +
     // D (wave 3). B fails → C (同 wave 2 不同 step) 仍派发, D (wave 3 依赖 B) 因
