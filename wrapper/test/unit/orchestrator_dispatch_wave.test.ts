@@ -382,9 +382,12 @@ describe("T3: cyclic depends_on → throws CyclicDependsOnError", () => {
 // behavior. v1.2.0n M1.1 will add skip-dependents and flip T4's
 // assertion (D not dispatched).
 describe("T4: M1.0 wave error NOT blocking downstream (M1.1: skip-dependents)", () => {
-  // T4a (M1.0 baseline) — 3-step chain DAG A → B → D, B succeeds.
-  // M1.0 baseline: no skip logic, all 3 steps dispatched regardless.
-  // (T4b below tests M1.1 skip-dependents with B failure → D skipped.)
+  // T4a (M1.1 wave 内不阻断 + 跨 wave skip — M1.1 baseline, 不是 M1.0):
+  // 4-step fan-out DAG A→B/C→D, B fails → C dispatched (同 wave 不阻断),
+  // D skipped (跨 wave, M1.1 skip-dependents). (T4b below tests explicit
+  // M1.1 skip-dependents 跨 wave behavior; this T4a covers both facets
+  // in one test since M1.0 baseline is no longer reachable after M1.1
+  // skip logic落地 — fix-forward #4 收口 F-终1′ per Cline 终审 87 行报告 §4).
   it("T4a: M1.1 wave 内不阻断 + 跨 wave skip — B fails → C dispatched, D skipped (no skip propagation within wave)", async () => {
     // Per audit-scope v1.1 §2 A caveat: M1.0 wave 内失败不阻断, 同 wave
     // 独立 step 不受影响. 4-step fan-out DAG: A (wave 1) + B/C (wave 2) +
