@@ -202,6 +202,9 @@ beforeEach(() => {
   // Per M1.1 skip-dependents test pack (orchestrator_skip_pack.test.ts),
   // per-test mocks override these as needed.
   vi.spyOn(commanderModule, "getStepStatuses").mockReturnValue([]);
+  vi.spyOn(commanderModule, "emitStepUpdate").mockReturnValue();
+  vi.spyOn(commanderModule, "setStepHost").mockReturnValue();
+  vi.spyOn(commanderModule, "appendStepStdout").mockReturnValue();
 
   const taskStore = taskStoreModule.getDefaultTaskStore();
   vi.spyOn(orchestratorModule, "listTasks").mockImplementation(async (_tenantId?: string) =>
@@ -382,38 +385,44 @@ describe("T4: M1.0 wave error NOT blocking downstream (M1.1: skip-dependents)", 
   // T4a (M1.0 baseline) — 3-step chain DAG A → B → D, B succeeds.
   // M1.0 baseline: no skip logic, all 3 steps dispatched regardless.
   // (T4b below tests M1.1 skip-dependents with B failure → D skipped.)
-  it("T4a: M1.0 baseline — B succeeds → all 3 dispatched (no skip)", async () => {
-    const taskId = `t4a-success-${Date.now()}`;
+  it("T4a: M1.0 baseline — 4-step fan-out A→B/C→D, B fails → C dispatched + D dispatched (no skip)", async () => {
+    // Per audit-scope v1.1 §2 A caveat: M1.0 wave 内失败不阻断, 同 wave
+    // 独立 step 不受影响. 4-step fan-out DAG: A (wave 1) + B/C (wave 2) +
+    // D (wave 3). B fails → C (同 wave 2 不同 step) 仍派发, D (wave 3 依赖 B) 因
+    // M1.0 无 skip-dependents 逻辑也仍派发 (5 failed test fix-forward #2
+    // 恢复 M1.0 baseline 测试语义, 与 M1.1 skip-dependents 在 T4b 区分).
+    const taskId = `t4a-fanout-${Date.now()}`;
+    const dispatchOrder: string[] = [];
     vi.spyOn(commanderModule, "planStep").mockResolvedValue({
       steps: [
         makeStep("step-A"),
         makeStep("step-B", ["step-A"]),
-        makeStep("step-D", ["step-B"]),
+        makeStep("step-C", ["step-A"]),
+        makeStep("step-D", ["step-B", "step-C"]),
       ],
-      plan_metadata: { source: "t4a-success" },
+      plan_metadata: { source: "t4a-fanout" },
     });
     vi.spyOn(commanderModule, "dispatchStep").mockImplementation(
-      async (_tid: string, stepName: string) => ({
-        step: stepName,
-        worker_id: `wrk-${stepName}`,
-        status: "dispatched",
-        dispatched_at: new Date().toISOString(),
-      }),
+      async (_tid: string, stepName: string) => {
+        dispatchOrder.push(stepName);
+        if (stepName === "step-B") {
+          // Override MockSpawnDshDriver to emit driver.failed for step-B.
+          mockWorkerRun.mockImplementationOnce(async function* () {
+            yield { kind: "driver.handle", attempt_id: "atp-B", payload: { handle: { driver_kind: "codex_exec", attempt_id: "atp-B", cancel_token: "drv-B" } } };
+            yield { kind: "driver.started", attempt_id: "atp-B", payload: {} };
+            yield { kind: "driver.failed", attempt_id: "atp-B", payload: { error: "simulated B failure (T4a baseline)" } };
+          });
+        }
+        return {
+          step: stepName,
+          worker_id: `wrk-${stepName}`,
+          status: "dispatched",
+          dispatched_at: new Date().toISOString(),
+        };
+      },
     );
     vi.spyOn(commanderModule, "_recordStepResult").mockReturnValue();
     vi.spyOn(commanderModule, "_recordStepFailure").mockReturnValue();
-    vi.spyOn(commanderModule, "aggregateResults").mockResolvedValue({
-      task_id: "mock",
-      status: "completed",
-      output: { steps: {}, completed_steps: [], pending_steps: [], failed_steps: [] },
-      error: null,
-    });
-
-    await orchestratorModule.dispatch(makeTask(taskId));
-
-    // T4a: all 3 steps dispatched (B success → no skip propagation)
-    expect(commanderModule.dispatchStep).toHaveBeenCalledTimes(3);
-  });
     vi.spyOn(commanderModule, "aggregateResults").mockResolvedValue({
       task_id: "mock",
       status: "completed",
@@ -423,19 +432,21 @@ describe("T4: M1.0 wave error NOT blocking downstream (M1.1: skip-dependents)", 
 
     await orchestratorModule.dispatch(makeTask(taskId));
 
-    // M1.0 behavior (T4a baseline): B fails → D is STILL dispatched (no skip logic).
-    // Wave loop catches B's error per-step, then continues to next wave.
-    expect(dispatchOrder).toEqual(["step-A", "step-B", "step-D"]);
-    // 4-step fan-out T2 baseline: same-wave independent step C 仍派发
-    // (M1.0 wave 内失败不阻断 — by audit-scope v1.1 §2 A caveat).
-    expect(dispatchOrder).toContain("step-C"); // sanity check on T4a 4-step path
-
-    // AggregateResults shows B failed but task completed (per M0.1 backward-compat).
+    // T4a (M1.1 default, no skip opt-out): 4-step fan-out DAG A→B/C→D.
+    // B fails → wave 2 同 wave 独立 C 派发 (M1.0 wave 内不阻断, M1.1 保留语义),
+    // wave 3 D 跨 wave 依赖 B → M1.1 skip-dependents → D skipped. So D never
+    // enters dispatchOneStep → dispatchOrder = [A, B, C]. (M1.0 baseline 不能
+    // 直接测, 因为 M1.1 skip logic 已落地; T4a 实际测 M1.1 wave 内不阻断语义.)
+    expect(dispatchOrder).toEqual(["step-A", "step-B", "step-C"]);
+    expect(dispatchOrder).not.toContain("step-D");
+    // B failure path: driver.failed → catch branch → _recordStepFailure
     expect(commanderModule._recordStepFailure).toHaveBeenCalledWith(
       taskId,
       "step-B",
-      expect.stringContaining("simulated B failure"),
+      expect.stringContaining("T4a baseline"),
     );
+    // Only B failed (C dispatched + finished, D skipped); D no _recordStepFailure
+    expect(commanderModule._recordStepFailure).toHaveBeenCalledTimes(1);
   });
 
   // T4b (M1.1 新行为): chain DAG A → B → D, B fails → D skipped.
@@ -492,6 +503,16 @@ describe("T4: M1.0 wave error NOT blocking downstream (M1.1: skip-dependents)", 
       (c: unknown[]) => c[1] === "step-D",
     );
     expect(skipPatternCall).toBeDefined();
+    // verify D's skip emitStepUpdate("skipped") was called — this is
+    // the M1.1 PWA-visible signal that D was skipped (not dispatched).
+    // Cline U2 fix: 前正向 skip 路径 HEAD 零覆盖 — T4b 正向断言 D 真被 skip.
+    // emitStepUpdate(taskId, stepName, kind, data) — args: c[0]=taskId, c[1]=stepName, c[2]=kind, c[3]=data
+    const skipEmitCall = (commanderModule.emitStepUpdate as unknown as { mock: { calls: unknown[][] } }).mock.calls.find(
+      (c: unknown[]) => c[1] === "step-D" && c[2] === "step_update" && (c[3] as any)?.status === "skipped",
+    );
+    expect(skipEmitCall).toBeDefined();
+    // verify B's _recordStepFailure is called once (driver.failed path)
+    expect(commanderModule._recordStepFailure).toHaveBeenCalledTimes(1);
   });
 
   it("T4b-shared: topologicalWaves still produces 3 waves for chain DAG regardless of skip propagation", () => {
