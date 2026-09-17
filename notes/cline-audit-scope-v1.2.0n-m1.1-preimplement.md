@@ -91,7 +91,7 @@ $ grep -nE 'PlanStepStatus' wrapper/orchestrator/types.ts | head -3
 - M1.1 预期改:
   1. `types.ts:500` extend `TaskStatus` union 加 `"skipped"` 字面 (1 enum 字面)
   2. `workflow_pack.ts:349` + `workflow_pack.ts:378` 加 `case "status": raw = s.status; break;` (extractField 5th case, phase 2 explicit + phase 3 wildcard 都生效)
-  3. `orch.json:31` aggregate-results input_ref 改 `${step.*::status}` 通配符 (真实 status 流, M0.1 已支持 implicit)
+  3. `orch.json:31` aggregate-results input_ref 改 `${step.*::status}` 通配符 (真实 status 流, M1.0 已支持 implicit per M1 cycle) — **但 orch.json 是生产默认包, 不动; demo 放 test pack per §2 D 重设计 (v1.1 F3 fix)**
 - **保留**: M1.0 4 cases (`stdout` / `host` / `wallMs` / `exit_code`) 不动
 - Verification: T6 (新增 wildcard test) `${step.*::status}` 3-step DAG (completed + failed + skipped) → 拼接 3 status 字符串 (`"completed\n---\nfailed\n---\nskipped"`)
 - **per v0.6 #3 title-body invariant**: test title 描述 = test 实际断言 (no "verified in integration tests" 占位)
@@ -100,7 +100,7 @@ $ grep -nE 'PlanStepStatus' wrapper/orchestrator/types.ts | head -3
 
 - M1.1 预期改: 在 module 顶部 (e.g. L62 附近) read `process.env['MAX_CONCURRENT_STEPS_PER_WAVE']`, parse to int (default 0 = unlimited); wave loop 改 `Promise.all(wave.map(...))` 为 chunked `Promise.all(chunk.map(...))`, chunk size = min(MCC, wave.length)
 - **保留**: MCC=0 = unlimited (M1.0 行为, 3-step DAG 每波仅 1 step 不触发限制)
-- Verification: T_new MCC=1 + 4-step wave → 2 chunks (sequential) 但 wave 内 total dispatched 4 (M1.0 行为是 4 parallel, M1.1 = 2+2 sequential)
+- Verification: T_new MCC=1 + 4-step wave → **4 chunks (1+1+1+1 sequential, 每 chunk 1 step)** 但 wave 内 total dispatched 4 (M1.0 行为是 4 parallel, M1.1 = 4 sequential chunks per MCC=1)
 - **per v0.6 #3 title-body invariant**: T_new 断言 chunked dispatch 顺序 + emit_step_update 顺序
 
 **C. skip-dependents logic 落地** (`orchestrator.ts:411-428`)
@@ -114,7 +114,7 @@ $ grep -nE 'PlanStepStatus' wrapper/orchestrator/types.ts | head -3
 
 **D. aggregate-results `${step.*::status}` end-to-end** (`orch.json:31`, `workflow_pack.ts:296-385`)
 
-- M1.1 预期改: `orch.json:31` aggregate-results input_ref 改 `bash:-c:echo "\${step.*::status}"` (M0.1 已支持 implicit, M1.1 真实使用)
+- M1.1 预期改: `orch.json:31` aggregate-results input_ref **不动** (生产默认包, demo 放 test pack per v1.1 F3 fix); `${step.*::status}` 通配符已在 test pack (`wrapper/test/unit/fixtures/orch-skip-test-pack.json`) 演示 (M1.0 已支持 implicit per M1 cycle, M1.1 通过 test pack 验证 status 流转)
 - Verification: dispatch 3-step DAG (spawn-workers OK, dispatch-commands FAIL, aggregate-results skipped) → aggregate-results bash 看到 `"completed\n---\nfailed\n---\nskipped"` (per v0.6 #1 cat-file 真测, 实证命令可粘贴)
 - **per v0.6 #3 title-body invariant**: end-to-end 验证真实 step.status 流 (not mocked)
 
@@ -266,10 +266,34 @@ DO NOT modify any code. Read-only design review.
 | v0.5 (c) | 自引入不入 tracked | ✅ | notes/ 自伤豁免域 (per v1.2.0l followup §1.5 #50); 本 scope cat-file 命令字面 + sk-placeholder-edge{2,3} 占位符 全列源豁免 |
 | v0.5 (d) | commit message 附实测数 | (⏳ 实施 commit message 含 cat-file 实测) | — |
 | v0.5 (e) | 引用式纪律 | ✅ | §1 主表是唯一权威源 + §3 矩阵 12 行 §修订元数据表 |
-| **v0.6 #1** | 实证命令可粘贴运行 | ✅ | §4 命令 12 条全部 `--no-pager diff` 全局选项前置; §1 实测证据块 6 段 grep 输出 verbatim |
+| **v0.6 #1** | 实证命令可粘贴运行 | ⚠️ | §4 命令 12 条全部 `--no-pager diff` 全局选项前置 (实测); §1 实测证据块 6 段 grep 输出 verbatim (实测); **但 §1 主表行数写 "434"/"412" 是凭印象非 cat-file 真测 (Cline 一审 F1) — v0.6 硬约束首战第 5 次同型复发 (F10→F15→R3→T1→F1)**; **v1.1 partial commit `37f2a1d` 修订回真值 472/466; v0.7 候选 (per F7): 自检 ✅ 必 cat-file 真测每次 commit, 不允许 "起草时跑过就标注 ✅"** |
 | **v0.6 #2** | 自检 ✅ 必 cat-file 输出 verbatim | ✅ | §1 + §3 + §7 cat-file 实证段共 12 段 grep -c/-n 输出 verbatim; 禁止"声明做了 grep" |
 | **v0.6 #3** | file:line 必 grep -n 输出 verbatim | ✅ | §1 主表 + §2 必查项 + §3 矩阵 全部 file:line 都附 `grep -nE` 命令 + 实测输出 (L296-385 / L316-317 / L345-348 / L373-376 / L421/L683/L747/L760/L780 / L418/L427) |
-| **v0.6 #4** | 修订 commit 必同步 §元数据表 | (⏳ 实施 commit + 修订 commit 必含 §修订元数据表, 含 Cline 7/5/6 + 本 scope 新 findings 处置) | — |
+| **v0.6 #4** | 修订 commit 必同步 §元数据表 | ⏳ (本 v1.1.1 commit 落地 §修订元数据表 R1-R7 — 见下方) | — |
+
+## §修订元数据表 (per v0.6 #4 硬约束 — Cline 一审 R1-R7 显式处置)
+
+| Finding | 严重度 | 状态 | 落地 |
+|---------|--------|------|------|
+| **R1** (major) — §1 行数陈旧 (workflow_pack.ts 433/434 凭印象, 实测 472; dispatch_wave.test.ts 412 凭印象, 实测 466) | major | ✅ FIXED (commit `37f2a1d` v1.1 partial + 本 v1.1.1 commit 完整) | §1 主表 row 1 (workflow_pack.ts) + row 5 (dispatch_wave.test.ts) 行数 cat-file 真测值 |
+| **R2** (major) — §2 C T4 旧断言必红 (skip 落地后 D skip); "M1.0 行为保留" 正确载体缺 (同 wave 独立 step 不受影响) | major | ✅ FIXED (commit `37f2a1d`) | §1 row 5 改 T4 split (T4a M1.0 baseline + T4b M1.1 skip); §2 C "M1.0 行为保留" 改"同 wave 独立 step 不受影响" |
+| **R3** (major) — §2 D 验收场景不可能发生 (orch.json 改 input_ref 改生产聚合); demo 应放 test pack | major | ✅ FIXED (commit `37f2a1d`) | §1 row 4 改"不动 (orch.json 生产默认包, demo 放 test pack)" + 加 NEW file `wrapper/test/unit/fixtures/orch-skip-test-pack.json` + `wrapper/test/unit/orchestrator_skip_pack.test.ts` |
+| **R4** (minor) — TaskStatus 锚点 L500 错 (实测 L383-389, 6 成员含 dispatched, PlanStepStatus.status 用法 L394/L406/L419 3 处) | minor | ✅ FIXED (commit `37f2a1d`) | §1 row 3 改真值 (L383-389 + 6 成员 + L394/L406/L419) |
+| **R5** (minor) — 三处伪引 "v1.0 §2 I/§2 A" (引文实在 M1 scope v1.2 §2 A L132); "M0.1 已支持 implicit" 归因错 (wildcard 是 M1) | minor | ✅ FIXED (本 v1.1.1 commit) | §2 A row 3 + §2 D 改 "M1.0 已支持 implicit (per M1 cycle)"; 真值 cat-file grep 实证 |
+| **R6** (minor) — MCC=1+4-step wave=4 chunks 非 2; §1 row 2 把 M1 的 963→1033 当 M1.1 叙述 (实施后应 ≈1063) | minor | ✅ FIXED (本 v1.1.1 commit) | §2 B Verification 改 "4 chunks (1+1+1+1 sequential, 每 chunk 1 step)"; §1 row 2 改"1033 + 估算 +30 → 预计 ~1063 post-M1.1, 实测待 cat-file 真测 post-M1.1" |
+| **R7** (info) — §7 "全文 cat-file 实测" ✅ 伞过宽; cover 了未跑的 wc -l 单元格 (R1) | info | ✅ ANNOTATED (本 v1.1.1 commit) | §7 v0.6 #1 改 ⚠️ + 注记 R1 第 5 次同型复发 + v0.7 候选: 自检 ✅ 必 cat-file 真测每次 commit |
+| **总计** | 1 major + 1 major + 1 major + 3 minor + 1 info | **7/7 findings 显式处置** (无漏计, per v0.6 #4) | 跨 2 commits: `37f2a1d` (R1-R4 + F5 partial) + 本 v1.1.1 commit (R5/R6/R7 + R1 行数真值完整 + §修订元数据表) |
+
+## §修订元数据表 (per v0.6 #4 硬约束 — 本 v1.1.1 commit 自身)
+
+| Item | 状态 |
+|------|------|
+| §1 主表行数 cat-file 真测 (workflow_pack.ts 472 / orchestrator.ts 1033 / types.ts 539 / orch.json 36 / dispatch_wave.test.ts 466 / workflow_pack_wildcard.test.ts 181) | ✅ FIXED (commit `37f2a1d` R1) |
+| §1 主表 v1.1 改动设计 (orch.json 不动 + T4 拆 + status enum +7 + skip + MCC) | ✅ FIXED (commit `37f2a1d` R2/R3/R4) |
+| §2 A/B/D 伪引 + 估算值标注 + chunks 数值 | ✅ FIXED (本 v1.1.1 commit R5/R6) |
+| §7 v0.6 #1 标 ⚠️ (F1 第 5 次同型复发 + v0.7 候选) | ✅ ANNOTATED (本 v1.1.1 commit R7) |
+| §修订元数据表 R1-R7 (Cline 一审 7 findings 全 FYI) | ✅ FIXED (本 v1.1.1 commit) |
+| **总计** | **12/12 ANNOTATED** (无漏计, per v0.6 #4) |
 
 **机制补丁验证** (per v0.6 硬约束 rule, 自检): 本 scope 严格按 v0.6 #1-#3 起草 — cat-file 实测真值 (不是凭印象), 列源豁免已标注 (closure self-injury + sk-placeholder-edge{2,3} 占位符), 测试标题 = 测试断言 body (无 "verified in integration tests" 占位引用)。**M1.1 是 v0.6 hard rule 落地后第一个 cycle**, 验证机制有效 (防止 4 次同型复发曲线复发)。
 
