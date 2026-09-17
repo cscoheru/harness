@@ -67,6 +67,7 @@ vi.mock("../../orchestrator/execution_driver.js", async (importOriginal) => {
 });
 
 import { expandStepTemplate } from "../../orchestrator/workflow_pack.js";
+import { topologicalWaves } from "../../orchestrator/orchestrator.js";
 import * as commanderModule from "../../orchestrator/commander.js";
 import type { Task, PlanStepStatus } from "../../orchestrator/types.js";
 
@@ -124,7 +125,7 @@ describe("T2: topological waves for test pack fixture", () => {
     const fixturePath = join(__dirname, "fixtures", "orch-skip-test-pack.json");
     const fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
     // We test via orchestrator.topologicalWaves indirectly by importing it
-    const waves = orchestratorModule.topologicalWaves(fixture.default_plan.steps);
+    const waves = topologicalWaves(fixture.default_plan.steps);
     expect(waves.length).toBe(2); // spawn-workers + status-echo in wave 1, step-with-dep in wave 2
     // Wave 1: spawn-workers + status-echo (parallel)
     expect(waves[0].map((s: any) => s.name).sort()).toEqual(["spawn-workers", "status-echo"]);

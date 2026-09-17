@@ -180,7 +180,18 @@ function makeStep(name: string, dependsOn: string[] = []) {
 }
 
 beforeEach(() => {
+  // vi.restoreAllMocks() resets vi.fn() mockImplementation back to default
+  // () => undefined — which breaks MockSpawnDshDriver.run() that delegates
+  // to mockWorkerRun (returns undefined → no Symbol.asyncIterator →
+  // TypeError "Cannot read properties of undefined"). Restore default
+  // mockWorkerRun impl AFTER restoreAllMocks so each test has a fresh
+  // 3-event stream (T4b's mockImplementationOnce overrides per-step).
   vi.restoreAllMocks();
+  mockWorkerRun.mockImplementation(async function* () {
+    yield { kind: "driver.handle", attempt_id: "atp-default", payload: { handle: { driver_kind: "codex_exec", attempt_id: "atp-default", cancel_token: "drv-default" } } };
+    yield { kind: "driver.started", attempt_id: "atp-default", payload: {} };
+    yield { kind: "driver.finished", attempt_id: "atp-default", payload: { exit_code: 0, stdout: "ok", wall_ms: 10 } };
+  });
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -368,44 +379,41 @@ describe("T3: cyclic depends_on → throws CyclicDependsOnError", () => {
 // behavior. v1.2.0n M1.1 will add skip-dependents and flip T4's
 // assertion (D not dispatched).
 describe("T4: M1.0 wave error NOT blocking downstream (M1.1: skip-dependents)", () => {
-  it("B fails → D (depends on B) is STILL dispatched (M1.0 behavior)", async () => {
-    const taskId = `t4-not-blocking-${Date.now()}`;
+  // T4a (M1.0 baseline) — 3-step chain DAG A → B → D, B succeeds.
+  // M1.0 baseline: no skip logic, all 3 steps dispatched regardless.
+  // (T4b below tests M1.1 skip-dependents with B failure → D skipped.)
+  it("T4a: M1.0 baseline — B succeeds → all 3 dispatched (no skip)", async () => {
+    const taskId = `t4a-success-${Date.now()}`;
     vi.spyOn(commanderModule, "planStep").mockResolvedValue({
       steps: [
         makeStep("step-A"),
         makeStep("step-B", ["step-A"]),
         makeStep("step-D", ["step-B"]),
       ],
-      plan_metadata: { source: "not-blocking-test" },
+      plan_metadata: { source: "t4a-success" },
     });
-
-    // Track dispatchStep call order + mockWorkerRun per-step events.
-    // step-A succeeds (default MockSpawnDshDriver).
-    // step-B fails (override → driver.failed event).
-    // step-D succeeds (default MockSpawnDshDriver — verifies it's STILL
-    // dispatched despite B failing).
-    const dispatchOrder: string[] = [];
     vi.spyOn(commanderModule, "dispatchStep").mockImplementation(
-      async (tid: string, stepName: string) => {
-        dispatchOrder.push(stepName);
-        if (stepName === "step-B") {
-          // Override MockSpawnDshDriver to emit driver.failed for step-B.
-          mockWorkerRun.mockImplementationOnce(async function* () {
-            yield { kind: "driver.handle", attempt_id: "atp-B", payload: { handle: { driver_kind: "codex_exec", attempt_id: "atp-B", cancel_token: "drv-B" } } };
-            yield { kind: "driver.started", attempt_id: "atp-B", payload: {} };
-            yield { kind: "driver.failed", attempt_id: "atp-B", payload: { error: "simulated B failure" } };
-          });
-        }
-        return {
-          step: stepName,
-          worker_id: `wrk-${stepName}`,
-          status: "dispatched",
-          dispatched_at: new Date().toISOString(),
-        };
-      },
+      async (_tid: string, stepName: string) => ({
+        step: stepName,
+        worker_id: `wrk-${stepName}`,
+        status: "dispatched",
+        dispatched_at: new Date().toISOString(),
+      }),
     );
     vi.spyOn(commanderModule, "_recordStepResult").mockReturnValue();
     vi.spyOn(commanderModule, "_recordStepFailure").mockReturnValue();
+    vi.spyOn(commanderModule, "aggregateResults").mockResolvedValue({
+      task_id: "mock",
+      status: "completed",
+      output: { steps: {}, completed_steps: [], pending_steps: [], failed_steps: [] },
+      error: null,
+    });
+
+    await orchestratorModule.dispatch(makeTask(taskId));
+
+    // T4a: all 3 steps dispatched (B success → no skip propagation)
+    expect(commanderModule.dispatchStep).toHaveBeenCalledTimes(3);
+  });
     vi.spyOn(commanderModule, "aggregateResults").mockResolvedValue({
       task_id: "mock",
       status: "completed",
