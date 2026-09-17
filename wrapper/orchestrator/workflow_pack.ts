@@ -346,6 +346,11 @@ export function expandStepTemplate(inputRef: string, task: Task): string {
       case "host": raw = step.host; break;
       case "wallMs": raw = step.wallMs != null ? String(step.wallMs) : null; break;
       case "exit_code": raw = step.exit_code != null ? String(step.exit_code) : null; break;
+      // v1.2.0n M1.1: add "status" field — exposes PlanStepStatus enum value
+      // (pending/dispatched/running/completed/failed/cancelled/skipped per
+      // types.ts:383-389). Enables `${step.*::status}` wildcard to surface
+      // per-step failure to bash aggregate via shell-escaped status string.
+      case "status": raw = step.status; break;
       default: return `\${step::${name}::${field}}`; // unknown field → preserve literal
     }
     if (raw === null || raw === undefined) return `\${step::${name}::${field}}`;
@@ -367,15 +372,30 @@ export function expandStepTemplate(inputRef: string, task: Task): string {
       for (const step of steps) {
         const s = stepByName.get(step.name);
         if (!s) continue; // unknown step → skip silently (no literal to preserve)
-        if (s.status !== "completed" && s.status !== "failed") continue;
+        // v1.2.0n M1.1: per-field filter INSIDE switch case (status is
+        // always observable; stdout/host/wallMs/exit_code have meaningful
+        // terminal-state values only). No outer filter — running/pending
+        // /dispatched/cancelled/skipped steps still contribute status to
+        // bash aggregate (so user sees full lifecycle, not just terminal).
         let raw: string | null;
         switch (field) {
-          case "stdout": raw = s.stdout; break;
+          case "stdout":
+            // stdout only meaningful for terminal statuses (completed/failed);
+            // running/pending/cancelled/dispatched/skipped have no stdout to read.
+            if (s.status !== "completed" && s.status !== "failed") continue;
+            raw = s.stdout;
+            break;
           case "host": raw = s.host; break;
           case "wallMs": raw = s.wallMs != null ? String(s.wallMs) : null; break;
           case "exit_code":
             raw = s.exit_code != null ? String(s.exit_code) : null;
             break;
+          // v1.2.0n M1.1: "status" is ALWAYS included (status is observable
+          // regardless of completion). Status wildcard semantic differs from
+          // stdout — bash aggregate sees real PlanStepStatus enum value
+          // (per audit-scope v1.1 §2 I, status wildcard may include all 7
+          // states including running/pending/dispatched/skipped).
+          case "status": raw = s.status; break;
           default: raw = null;
         }
         if (raw === null || raw === undefined) continue;

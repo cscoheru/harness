@@ -1,0 +1,37 @@
+{
+  "name": "m1-1-skip-pack",
+  "version": "1.2.0+0.n.1",
+  "description": "v1.2.0n M1.1 status-echo test pack fixture. 3-step DAG: spawn-workers (completes) + step-with-dep (fails to trigger skip) + status-echo (no depends_on, observes upstream statuses via ${step.*::status} wildcard). Per audit-scope v1.1 F3 fix — orch.json production default untouched; this fixture exercises ${step.*::status} wildcard end-to-end.",
+  "required_capabilities": ["subprocess_worker"],
+  "optional_capabilities": [],
+  "input_schema_ref": "workflow_packs/schemas/orch.input.json",
+  "output_kind": "structured",
+  "default_plan": {
+    "steps": [
+      {
+        "name": "spawn-workers",
+        "capability": "subprocess_worker",
+        "input_ref": "default",
+        "output_kind": "text",
+        "depends_on": [],
+        "timeout_seconds": 30
+      },
+      {
+        "name": "step-with-dep",
+        "capability": "subprocess_worker",
+        "input_ref": "default",
+        "output_kind": "text",
+        "depends_on": ["spawn-workers"],
+        "timeout_seconds": 30
+      },
+      {
+        "name": "status-echo",
+        "capability": "subprocess_worker",
+        "input_ref": "bash:-c:echo \"${step.*::status}\"",
+        "output_kind": "text",
+        "depends_on": [],
+        "timeout_seconds": 60
+      }
+    ]
+  }
+}

@@ -386,7 +386,15 @@ export type TaskStatus =
   | "running"
   | "completed"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  // v1.2.0n M1.1: add "skipped" status for skip-dependents logic. When a
+  // step fails (status="failed") and downstream steps depend on it, the
+  // orchestrator marks them "skipped" (instead of dispatching) and skips
+  // the wave. emit_step_update({status: "skipped", ...}) propagates the
+  // signal to the PWA DAG viewer. status="skipped" is excluded from
+  // waveCompletedCount (realStepCount) so the task continues with N-1
+  // contributions rather than failing entirely.
+  | "skipped";
 
 /** Wrapper-level task payload */
 export interface Task {

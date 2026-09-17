@@ -178,4 +178,60 @@ describe("T5: delimiter is REAL newline (per Cline implementation note)", () => 
     // Negative: no literal backslash-n (the bug to avoid)
     expect(result).not.toMatch(/\\n/); // no literal \n (backslash + n)
   });
+
+  // ─── T6 (v1.2.0n M1.1): ${step.*::status} wildcard concatenates statuses ───
+  // Per audit-scope v1.1 §2 B/I (codify include-failed, 引 v1.2.0l.5 upstream_injection
+  // 先例) + workflow_pack.ts extractField 5th case "status" (L349 + L378). Status
+  // wildcard semantics differ from stdout — status IS always observable (regardless
+  // of completion status); bash aggregate sees real PlanStepStatus enum value.
+  it("T6: ${step.*::status} wildcard concatenates PlanStepStatus enum values", () => {
+    vi.spyOn(commanderModule, "getStepStatuses").mockReturnValue([
+      {
+        name: "step-A",
+        capability: "subprocess_worker",
+        status: "completed",
+        worker_id: "wrk-A",
+        host: null,
+        started_at: null,
+        finished_at: null,
+        stdout: "",
+        error: null,
+      },
+      {
+        name: "step-B",
+        capability: "subprocess_worker",
+        status: "running",
+        worker_id: "wrk-B",
+        host: null,
+        started_at: null,
+        finished_at: null,
+        stdout: "",
+        error: null,
+      },
+      {
+        name: "step-C",
+        capability: "subprocess_worker",
+        status: "failed",
+        worker_id: "wrk-C",
+        host: null,
+        started_at: null,
+        finished_at: null,
+        stdout: "",
+        error: "boom",
+      },
+    ]);
+    const result = expandStepTemplate(
+      `bash:-c:echo "\${step.*::status}"`,
+      { task_id: "t6-wildcard", status: "pending", workflow_pack: "x", workflow_version: "1.0",
+        input_blob_id: null, created_at: "", updated_at: "", result_blob_id: null,
+        metadata: { prompt: "test" } as unknown as Record<string, unknown> },
+    );
+
+    // T6: 3 statuses concatenated with \n---\n delimiter
+    expect(result).toContain("completed");
+    expect(result).toContain("running");
+    expect(result).toContain("failed");
+    // Real newlines separator
+    expect(result.match(/\n---\n/g)?.length).toBe(2); // 3 segments → 2 delimiters
+  });
 });

@@ -407,23 +407,100 @@ export async function dispatch(
   // wave-based parallel dispatch (Kahn's algorithm). Same-wave steps
   // run via Promise.all; waves run sequentially; cycle in depends_on
   // throws CyclicDependsOnError at plan time (per §2 D).
+  //
+  // v1.2.0n M1.1 NEW: (a) read `MAX_CONCURRENT_STEPS_PER_WAVE` env var
+  // (default 0 = unlimited, M1.0 behavior); chunked Promise.all by MCC.
+  // (b) skip-dependents logic — when upstream step fails (status="failed"),
+  // mark downstream steps (transitive depends_on) as "skipped" + skip
+  // dispatchOneStep + emit_step_update({status: "skipped"}). skip only
+  // crosses wave boundary (wave 1 failure → wave 2 skip); wave-internal
+  // Promise.all still dispatches all same-wave steps (M1.0 behavior
+  // preserved per T4a). Caveat per audit-scope v1.1 §2 A caveat: M1.1
+  // skip only triggers on wave-boundary failure, not wave-internal.
+  const MCC = (() => {
+    const raw = process.env["MAX_CONCURRENT_STEPS_PER_WAVE"];
+    if (!raw || raw === "0" || raw.trim() === "") return 0;
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  })();
+  // stepByNameFromPlan: maps step.name → PlanStep for skip-dependents
+  // lookup (which downstream steps depend on each step)
+  const stepNameToPlanStep = new Map<string, PlanStep>();
+  if (planPlan) {
+    for (const s of planPlan.steps) stepNameToPlanStep.set(s.name, s);
+  }
+  // failedUpstream: set of step names that failed or were skipped in
+  // previous waves. New wave's steps that depend on any of these names
+  // get marked "skipped" before dispatch.
+  const failedUpstream = new Set<string>();
+
   let realStepCount = 0;
   if (planPlan && planPlan.steps.length > 0) {
     const waves = topologicalWaves(planPlan.steps);
-    for (const wave of waves) {
-      let waveCompletedCount = 0;
-      await Promise.all(wave.map(async (step) => {
-        try {
-          const stepCompleted = await dispatchOneStep(taskId, task, prompt, step, cancelCtrl);
-          if (stepCompleted) waveCompletedCount += 1;
-        } catch (err) {
-          console.warn(`[orchestrator] dispatchStep ${step.name} failed: ${err}`);
-          emitStepUpdate(taskId, step.name, "step_update", {
-            status: "failed",
-            error: String(err),
-          });
+    for (let wIdx = 0; wIdx < waves.length; wIdx++) {
+      const wave = waves[wIdx];
+      // skip-dependents: before dispatching this wave, mark any step
+      // depending on a previously-failed/skipped step as "skipped".
+      if (failedUpstream.size > 0 && wIdx > 0) {
+        const toSkipInThisWave: PlanStep[] = [];
+        const toDispatchInThisWave: PlanStep[] = [];
+        for (const step of wave) {
+          if (step.depends_on.some((d) => failedUpstream.has(d))) {
+            toSkipInThisWave.push(step);
+          } else {
+            toDispatchInThisWave.push(step);
+          }
         }
-      }));
+        for (const skipped of toSkipInThisWave) {
+          failedUpstream.add(skipped.name);
+          commander._recordStepResult(taskId, skipped.name, {
+            stdout: "",
+            exit_code: 0,
+            wall_ms: 0,
+          });
+          emitStepUpdate(taskId, skipped.name, "step_update", {
+            status: "skipped",
+            host: null,
+            wall_ms: 0,
+          });
+          console.log(`[orchestrator] skip-dependents: ${skipped.name} skipped (upstream failed/skipped)`);
+        }
+        if (toDispatchInThisWave.length === 0) {
+          // Entire wave is downstream of failed/skipped; nothing to dispatch
+          continue;
+        }
+        // Replace `wave` slice with dispatchable subset
+        var dispatchableWave = toDispatchInThisWave;
+      } else {
+        var dispatchableWave = wave;
+      }
+
+      // MCC chunked dispatch (MCC=0 → single chunk; MCC=N → ceil(len/N) chunks)
+      const len = dispatchableWave.length;
+      const chunkSize = MCC > 0 ? Math.min(MCC, len) : len;
+      let waveCompletedCount = 0;
+      for (let c = 0; c < len; c += chunkSize) {
+        const chunk = dispatchableWave.slice(c, c + chunkSize);
+        await Promise.all(chunk.map(async (step) => {
+          try {
+            const stepCompleted = await dispatchOneStep(taskId, task, prompt, step, cancelCtrl);
+            if (stepCompleted) {
+              waveCompletedCount += 1;
+            } else {
+              // dispatchOneStep returned false (driver.interrupted / no terminal event).
+              // Treat as failed for skip-propagation purposes.
+              failedUpstream.add(step.name);
+            }
+          } catch (err) {
+            console.warn(`[orchestrator] dispatchStep ${step.name} failed: ${err}`);
+            emitStepUpdate(taskId, step.name, "step_update", {
+              status: "failed",
+              error: String(err),
+            });
+            failedUpstream.add(step.name);
+          }
+        }));
+      }
       realStepCount += waveCompletedCount;
     }
   }
@@ -806,7 +883,14 @@ function extractPrompt(task: Task): string {
  */
 export async function getTaskStatus(taskId: string): Promise<{
   task_id: string;
-  status: "pending" | "dispatched" | "running" | "completed" | "failed" | "cancelled";
+  // v1.2.0n M1.1: extend status union to include "skipped" (per types.ts:383-389
+  // 7th TaskStatus member added for skip-dependents logic). When downstream
+  // steps are marked "skipped" via dispatchOneStep emit, getTaskStatus
+  // returns "skipped" to the PWA DAG viewer (so user sees partial skip, not
+  // task-level failed). entry.status from SqliteTaskStore is typed as the
+  // original 6-member union; the as TaskStatus assertion in the return path
+  // is safe — at runtime M1.1 writes all 7 TaskStatus values.
+  status: "pending" | "dispatched" | "running" | "completed" | "failed" | "cancelled" | "skipped";
   result?: string;
   error?: string;
   steps?: PlanStepStatus[];
@@ -845,7 +929,13 @@ export async function getTaskStatus(taskId: string): Promise<{
     }
     return {
       task_id: entry.taskId,
-      status: entry.status,
+      // v1.2.0n M1.1: cast status:TaskStatus union includes "skipped" (per
+      // types.ts:383-389 7th member); entry.status from SqliteTaskStore is
+      // typed as the original 6-member union, but at runtime the new
+      // skip-dependents logic writes "skipped" via dispatchOneStep emit
+      // paths. The as TaskStatus assertion is safe — entry.status is
+      // bounded by what M1.1 writes (all 7 TaskStatus values).
+      status: entry.status as TaskStatus,
       result: resultStr,
       error: entry.error ?? undefined,
       steps: stepStatuses,
